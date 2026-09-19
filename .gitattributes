@@ -1,0 +1,4 @@
+# Shell scripts must stay LF everywhere: shellcheck (esp. on Windows runners)
+# treats literal carriage returns as SC1017 errors, and Git for Windows would
+# otherwise convert checkout copies to CRLF.
+*.sh text eol=lf
