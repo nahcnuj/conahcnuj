@@ -5,23 +5,42 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint-bash:
     name: Lint shell scripts
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7.0.1
 
       - name: Install shellcheck
-        shell: pwsh
-        run: choco install shellcheck --yes --no-progress
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            echo "shellcheck already installed"
+          elif command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          elif command -v choco >/dev/null 2>&1; then
+            choco install shellcheck --yes --no-progress
+          else
+            echo "no package manager available to install shellcheck" >&2
+            exit 1
+          fi
+          shellcheck --version | head -n 1
 
       - name: Syntax check
-        shell: bash
         run: bash -n gh-app/*.sh
 
       - name: ShellCheck
-        shell: bash
         run: shellcheck gh-app/*.sh
 
   lint-ps:
@@ -83,7 +102,11 @@ jobs:
 
   mock-test:
     name: Mock tests (no secrets / no network)
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         shell: bash

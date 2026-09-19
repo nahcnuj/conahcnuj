@@ -21,17 +21,22 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/get-token.sh` | JWT署名 → インストールトークン取得（`token.cache` キャッシュ付き） | `app.env` → 無ければ `app.env.example` を fallback |
 | `gh-app/git-credential-helper.sh` | git credential helper（stdin を読み捨て stdout に username/password 出力） | |
 | `gh-app/setup-git.sh` | リポジトリへ bot 向け git config を適用 | 設定は `app.env` から取得 |
+| `gh-app/api-commit.sh` | GraphQL（`createCommitOnBranch`）で Verified コミットをブランチに作成 | `curl`/`openssl`/`sed` が必要。Ubuntu / Windows（Git Bash）で動作 |
+| `gh-app/mock-test.sh` | offline モックテスト（キャッシュ / credential helper） | 秘密鍵・ネットワーク不要。CI の `mock-test` と同じ検証 |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする |
 | `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_COUNT/KEY/VALUE_*` 注入 | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置 | 実 `app.env` があればそれを、無ければ example から作成 |
-| `.github/workflows/ci.yml` | Windows ランナーの CI | `actions/checkout@v7.0.1`。e2e は secrets ありの場合のみ |
+| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout@v7.0.1`。`lint-bash` / `mock-test` は Ubuntu + Windows、`lint-ps` / `install-test` は Windows のみ |
 
 ## ローカル検証手順
 
 ```bash
-# 構文チェック
+# 構文チェック（Ubuntu で確認）
 bash -n gh-app/*.sh
 shellcheck gh-app/*.sh
+
+# offline モックテスト（秘密鍵・ネットワーク不要）
+bash gh-app/mock-test.sh
 
 # トークン取得の確認（実キーが app.env にある前提）
 bash gh-app/get-token.sh
@@ -39,6 +44,9 @@ bash gh-app/get-token.sh
 # 設定反映の確認
 bash gh-app/setup-git.sh
 git ls-remote https://github.com/<owner>/<repo>.git HEAD
+
+# Verified コミット作成の確認（実キーとアクセス権がある前提）
+bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "message" --file file=@file
 ```
 
 ## 変更時の注意
@@ -47,8 +55,8 @@ git ls-remote https://github.com/<owner>/<repo>.git HEAD
   ```powershell
   powershell -ExecutionPolicy Bypass -File install.ps1
   ```
-  その後 opencode を再起動。CI（`install-test` / `e2e`）にも同じ検証がある。
-- secrets を追加・変更する場合は `.github/workflows/ci.yml` の `e2e` ジョブも確認する。
+  その後 opencode を再起動。CI（`install-test` / `lint-ps`）にも同じ検証がある。
+- secrets を使う実機検証（`get-token.sh` / `api-commit.sh`）は CI で行わず、ローカルで確認する。
 
 ## コミット運用
 
