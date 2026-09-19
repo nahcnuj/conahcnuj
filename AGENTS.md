@@ -33,7 +33,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 ```bash
 # 構文チェック（Ubuntu で確認）
 bash -n gh-app/*.sh
-shellcheck gh-app/*.sh
+shellcheck -x gh-app/*.sh   # -x で app.env.example を追従（チェックは無効化しない）
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/mock-test.sh

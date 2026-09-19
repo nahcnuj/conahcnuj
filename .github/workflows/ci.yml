@@ -41,7 +41,7 @@ jobs:
         run: bash -n gh-app/*.sh
 
       - name: ShellCheck
-        run: shellcheck gh-app/*.sh
+        run: shellcheck -x gh-app/*.sh
 
   lint-ps:
     name: Check install.ps1 syntax

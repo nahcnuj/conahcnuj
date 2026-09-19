@@ -126,7 +126,7 @@ GitHub Actions（`.github/workflows/ci.yml`）:
 
 | ジョブ               | 内容                                          | ランナー    |
 | -------------------- | --------------------------------------------- | ----------- |
-| `lint-bash`          | `bash -n` + shellcheck                        | Ubuntu / Windows |
+| `lint-bash`          | `bash -n` + `shellcheck -x`（追従・チェック無効化なし） | Ubuntu / Windows |
 | `lint-ps`            | `install.ps1` の構文チェック                  | Windows     |
 | `install-test`       | `install.ps1` を一時ディレクトリへ展開検証    | Windows     |
 | `mock-test`          | モックテスト（秘密鍵・ネットワーク不要）      | Ubuntu / Windows |

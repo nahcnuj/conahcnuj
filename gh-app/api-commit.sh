@@ -22,7 +22,7 @@ if [[ ! -f "${ENV_FILE}" && -f "${DIR}/app.env.example" ]]; then
 fi
 
 set -a
-# shellcheck disable=SC1090,SC1091 # app.env/app.env.example is sourced dynamically
+# shellcheck source=gh-app/app.env.example
 . "${ENV_FILE}"
 set +a
 
