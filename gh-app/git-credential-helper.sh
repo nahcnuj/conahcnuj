@@ -6,7 +6,7 @@ set -euo pipefail
 # The helper must consume the request from stdin and answer on stdout.
 
 OPERATION="${1:-get}"
-if [[ "$OPERATION" != "get" ]]; then
+if [[ "${OPERATION}" != "get" ]]; then
   # Consume stdin then exit; we have nothing to store/erase.
   cat > /dev/null || true
   exit 0
@@ -16,8 +16,8 @@ fi
 cat > /dev/null || true
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOKEN="$(bash "$DIR/get-token.sh")"
+TOKEN="$(bash "${DIR}/get-token.sh")"
 
 USERNAME="x-access-token"
 
-printf 'username=%s\npassword=%s\n' "$USERNAME" "$TOKEN"
+printf 'username=%s\npassword=%s\n' "${USERNAME}" "${TOKEN}"
