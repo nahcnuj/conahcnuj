@@ -26,7 +26,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする |
 | `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_COUNT/KEY/VALUE_*` 注入 | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置 | 実 `app.env` があればそれを、無ければ example から作成 |
-| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout@v7.0.1`。`lint-bash` / `mock-test` は Ubuntu + Windows、`lint-ps` / `install-test` は Windows のみ |
+| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` は Ubuntu + Windows、`lint-ps` / `install-test` は Windows のみ |
 
 ## ローカル検証手順
 

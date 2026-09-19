@@ -20,7 +20,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Install shellcheck
         run: |
@@ -47,7 +47,7 @@ jobs:
     name: Check install.ps1 syntax
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Parse PowerShell
         shell: pwsh
@@ -68,7 +68,7 @@ jobs:
     name: install.ps1 deployment test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Run install into temp dir
         shell: pwsh
@@ -111,7 +111,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Cache-hit path returns token without key/network
         run: |
