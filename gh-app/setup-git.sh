@@ -13,6 +13,7 @@ if [[ ! -f "${ENV_FILE}" && -f "${HERE}/app.env.example" ]]; then
 fi
 
 set -a
+# shellcheck disable=SC1090,SC1091 # app.env/app.env.example is sourced dynamically
 . "${ENV_FILE}"
 set +a
 
