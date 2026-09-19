@@ -1,0 +1,4 @@
+# Shell scripts must stay LF everywhere: shellcheck refuses to disable checks and
+# must follow sources (-x), so no CRLF is allowed in any file it parses.
+*.sh text eol=lf
+gh-app/app.env.example text eol=lf

@@ -13,6 +13,7 @@ if [[ ! -f "${ENV_FILE}" && -f "${HERE}/app.env.example" ]]; then
 fi
 
 set -a
+# shellcheck source=gh-app/app.env.example
 . "${ENV_FILE}"
 set +a
 

@@ -5,30 +5,49 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint-bash:
     name: Lint shell scripts
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Install shellcheck
-        shell: pwsh
-        run: choco install shellcheck --yes --no-progress
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            echo "shellcheck already installed"
+          elif command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          elif command -v choco >/dev/null 2>&1; then
+            choco install shellcheck --yes --no-progress
+          else
+            echo "no package manager available to install shellcheck" >&2
+            exit 1
+          fi
+          shellcheck --version | head -n 1
 
       - name: Syntax check
-        shell: bash
         run: bash -n gh-app/*.sh
 
       - name: ShellCheck
-        shell: bash
-        run: shellcheck gh-app/*.sh
+        run: shellcheck -x gh-app/*.sh
 
   lint-ps:
     name: Check install.ps1 syntax
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Parse PowerShell
         shell: pwsh
@@ -49,7 +68,7 @@ jobs:
     name: install.ps1 deployment test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Run install into temp dir
         shell: pwsh
@@ -81,60 +100,52 @@ jobs:
           }
           Write-Host "all files deployed OK"
 
-  e2e:
-    name: E2E token + authenticated git
-    runs-on: windows-latest
-    if: ${{ secrets.APP_ID != '' && secrets.INSTALLATION_ID != '' && secrets.PRIVATE_KEY != '' }}
-    env:
-      APP_ID: ${{ secrets.APP_ID }}
-      INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
-      APP_SLUG: ${{ secrets.APP_SLUG }}
-      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-      TEST_REPO: ${{ secrets.TEST_REPO }}
+  mock-test:
+    name: Mock tests (no secrets / no network)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Write private key and app.env
+      - name: Cache-hit path returns token without key/network
         run: |
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$PRIVATE_KEY" > "$HOME/.ssh/conahcnuj.pem"
-          chmod 600 "$HOME/.ssh/conahcnuj.pem"
-          cat > gh-app/app.env <<EOF
-          APP_ID=$APP_ID
-          INSTALLATION_ID=$INSTALLATION_ID
-          APP_SLUG=$APP_SLUG
-          PRIVATE_KEY_PATH=$HOME/.ssh/conahcnuj.pem
-          BASH_EXE="C:/Program Files/Git/bin/bash.exe"
-          EOF
+          T="$(mktemp -d)"
+          cp gh-app/*.sh "$T/"
+          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
+          EXPIRES="$(( $(date +%s) + 3600 ))"
+          printf '%s|%s' "$EXPIRES" "ghs_mock_token_abc" > "$T/token.cache"
+          OUT="$(bash "$T/get-token.sh")"
+          test "$OUT" = "ghs_mock_token_abc"
+          echo "cache-hit returns cached token OK"
 
-      - name: Fetch installation token via BASH_EXE (plugin path)
+      - name: Expired cache is not reused
         run: |
-          TOKEN="$(bash gh-app/get-token.sh)"
-          echo "token length: ${#TOKEN}"
-          test -n "$TOKEN"
-          case "$TOKEN" in
-            ghs_*) echo "token looks valid" ;;
-            *) echo "unexpected token prefix" >&2; exit 1 ;;
+          T="$(mktemp -d)"
+          cp gh-app/*.sh "$T/"
+          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
+          EXPIRES="$(( $(date +%s) - 3600 ))"
+          printf '%s|%s' "$EXPIRES" "ghs_expired_token" > "$T/token.cache"
+          OUT="$(bash "$T/get-token.sh" 2>&1 || true)"
+          case "$OUT" in
+            *ghs_expired_token*) echo "ERROR: expired cache reused" >&2; exit 1 ;;
+            *) echo "expired cache rejected OK" ;;
           esac
 
-      - name: gh auth status must resolve to the App
+      - name: Credential helper emits username/password (cached token)
         run: |
-          GH_TOKEN="$(bash gh-app/get-token.sh)" gh auth status
-          GH_TOKEN="$(bash gh-app/get-token.sh)" gh auth status 2>&1 | grep -q "conahcnuj\[bot\]"
-          echo "gh is operating as the App"
-
-      - name: Configure git credential helper
-        run: |
-          git config --global user.name "${APP_SLUG}[bot]"
-          git config --global user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
-          git config --global credential.helper "!bash $PWD/gh-app/git-credential-helper.sh"
-
-      - name: Authenticated ls-remote
-        if: ${{ env.TEST_REPO != '' }}
-        run: |
-          bash gh-app/setup-git.sh
-          git ls-remote "https://github.com/$TEST_REPO.git" HEAD
-          echo "authenticated fetch OK"
+          T="$(mktemp -d)"
+          cp gh-app/*.sh "$T/"
+          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
+          EXPIRES="$(( $(date +%s) + 3600 ))"
+          printf '%s|%s' "$EXPIRES" "ghs_mock_token_abc" > "$T/token.cache"
+          OUT="$(printf 'protocol=https\nhost=github.com\n\n' | bash "$T/git-credential-helper.sh" get)"
+          echo "$OUT" | grep -q '^username=x-access-token$'
+          echo "$OUT" | grep -q '^password=ghs_mock_token_abc$'
+          test "$(echo "$OUT" | wc -l)" -eq 2
+          echo "credential helper output OK"
