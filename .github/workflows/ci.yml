@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-bash:
+    name: Lint shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Syntax check
+        run: bash -n gh-app/*.sh
+
+      - name: ShellCheck
+        run: shellcheck gh-app/*.sh
+
+  lint-ps:
+    name: Check install.ps1 syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "install.ps1"),
+            [ref]$tokens,
+            [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+          Write-Host "install.ps1 parsed OK"
+
+  install-test:
+    name: install.ps1 deployment test
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run install into temp dir
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP "opencode-deploy-test"
+          & ./install.ps1 -Destination $dest
+
+      - name: Verify deployed files
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP "opencode-deploy-test"
+          $required = @(
+            "gh-app/get-token.sh",
+            "gh-app/git-credential-helper.sh",
+            "gh-app/setup-git.sh",
+            "gh-app/app.env.example",
+            "plugins/gh-app-token.ts"
+          )
+          foreach ($rel in $required) {
+            $p = Join-Path $dest $rel
+            if (-not (Test-Path -LiteralPath $p)) {
+              Write-Error "missing: $rel"
+              exit 1
+            }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $dest "gh-app/app.env"))) {
+            Write-Error "app.env was not created from example"
+            exit 1
+          }
+          Write-Host "all files deployed OK"
+
+  e2e:
+    name: E2E token + authenticated git
+    runs-on: ubuntu-latest
+    if: ${{ secrets.APP_ID != '' && secrets.INSTALLATION_ID != '' && secrets.PRIVATE_KEY != '' }}
+    env:
+      APP_ID: ${{ secrets.APP_ID }}
+      INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
+      APP_SLUG: ${{ secrets.APP_SLUG }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      TEST_REPO: ${{ secrets.TEST_REPO }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write private key and app.env
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIVATE_KEY" > "$HOME/.ssh/conahcnuj.pem"
+          chmod 600 "$HOME/.ssh/conahcnuj.pem"
+          cat > gh-app/app.env <<EOF
+          APP_ID=$APP_ID
+          INSTALLATION_ID=$INSTALLATION_ID
+          APP_SLUG=$APP_SLUG
+          PRIVATE_KEY_PATH=$HOME/.ssh/conahcnuj.pem
+          EOF
+
+      - name: Fetch installation token
+        run: |
+          TOKEN="$(bash gh-app/get-token.sh)"
+          echo "token length: ${#TOKEN}"
+          test -n "$TOKEN"
+
+      - name: Configure git credential helper
+        run: |
+          git config --global user.name "$APP_SLUG[bot]"
+          git config --global user.email "$APP_ID+$APP_SLUG[bot]@users.noreply.github.com"
+          git config --global credential.helper "!bash $PWD/gh-app/git-credential-helper.sh"
+
+      - name: Authenticated ls-remote
+        if: ${{ env.TEST_REPO != '' }}
+        run: |
+          bash gh-app/setup-git.sh
+          git ls-remote "https://github.com/$TEST_REPO.git" HEAD
+          echo "authenticated fetch OK"
