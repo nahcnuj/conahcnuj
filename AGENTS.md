@@ -1,0 +1,56 @@
+# AGENTS.md
+
+リポジトリ内でコード変更や調査を行う AI エージェント向けのルール。
+
+## このリポジトリの目的
+
+GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CLI と opencode 内の git 操作を App 名義で行えるようにする。スクリプト・プラグイン・CI・配置スクリプトを管理する。
+
+## 基本ルール
+
+- 設定値（APP_ID / INSTALLATION_ID / APP_SLUG / PRIVATE_KEY_PATH / BASH_EXE）は**ハードコードしない**。必ず `gh-app/app.env`（または `app.env.example`）から読み取る。
+- 秘密鍵（`.pem`）をリポジトリへコミットしない。`app.env` は `.gitignore` 済み。
+- 変数展開はシェルスクリプト内で常にブレース付き `${var}` を使う。`$var` は使わない。
+- Windows で `bash` の素コマンドは WSL（`C:\Windows\System32\bash.exe`）に解決されることがある。スクリプト・プラグインで bash を起動するときは必ず `BASH_EXE`（`C:/Program Files/Git/bin/bash.exe`）を使う。
+- 作業後に opencode を再起動しないとプラグイン変更は反映されない（プラグインは起動時ロード）。
+
+## ファイルガイド
+
+| パス | 役割 | 注意 |
+| ---- | ---- | ---- |
+| `gh-app/get-token.sh` | JWT署名 → インストールトークン取得（`token.cache` キャッシュ付き） | `app.env` → 無ければ `app.env.example` を fallback |
+| `gh-app/git-credential-helper.sh` | git credential helper（stdin を読み捨て stdout に username/password 出力） | |
+| `gh-app/setup-git.sh` | リポジトリへ bot 向け git config を適用 | 設定は `app.env` から取得 |
+| `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする |
+| `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_COUNT/KEY/VALUE_*` 注入 | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース |
+| `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置 | 実 `app.env` があればそれを、無ければ example から作成 |
+| `.github/workflows/ci.yml` | Windows ランナーの CI | `actions/checkout@v7.0.1`。e2e は secrets ありの場合のみ |
+
+## ローカル検証手順
+
+```bash
+# 構文チェック
+bash -n gh-app/*.sh
+shellcheck gh-app/*.sh
+
+# トークン取得の確認（実キーが app.env にある前提）
+bash gh-app/get-token.sh
+
+# 設定反映の確認
+bash gh-app/setup-git.sh
+git ls-remote https://github.com/<owner>/<repo>.git HEAD
+```
+
+## 変更時の注意
+
+- `install.ps1` や `plugins/` を変更したら、実機のグローバル設定（`~/.config/opencode/`）にも反映が必要：
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File install.ps1
+  ```
+  その後 opencode を再起動。CI（`install-test` / `e2e`）にも同じ検証がある。
+- secrets を追加・変更する場合は `.github/workflows/ci.yml` の `e2e` ジョブも確認する。
+
+## コミット運用
+
+- コミット・push はユーザーが明示的に指示したときだけ行う。
+- GitHub App の秘密鍵や `app.env`、`token.cache` をステージしない。

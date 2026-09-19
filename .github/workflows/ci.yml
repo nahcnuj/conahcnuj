@@ -8,24 +8,27 @@ on:
 jobs:
   lint-bash:
     name: Lint shell scripts
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+        shell: pwsh
+        run: choco install shellcheck --yes --no-progress
 
       - name: Syntax check
+        shell: bash
         run: bash -n gh-app/*.sh
 
       - name: ShellCheck
+        shell: bash
         run: shellcheck gh-app/*.sh
 
   lint-ps:
     name: Check install.ps1 syntax
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Parse PowerShell
         shell: pwsh
@@ -44,12 +47,9 @@ jobs:
 
   install-test:
     name: install.ps1 deployment test
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Run install into temp dir
         shell: pwsh
@@ -83,7 +83,7 @@ jobs:
 
   e2e:
     name: E2E token + authenticated git
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     if: ${{ secrets.APP_ID != '' && secrets.INSTALLATION_ID != '' && secrets.PRIVATE_KEY != '' }}
     env:
       APP_ID: ${{ secrets.APP_ID }}
@@ -91,8 +91,11 @@ jobs:
       APP_SLUG: ${{ secrets.APP_SLUG }}
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
       TEST_REPO: ${{ secrets.TEST_REPO }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Write private key and app.env
         run: |
@@ -104,18 +107,29 @@ jobs:
           INSTALLATION_ID=$INSTALLATION_ID
           APP_SLUG=$APP_SLUG
           PRIVATE_KEY_PATH=$HOME/.ssh/conahcnuj.pem
+          BASH_EXE="C:/Program Files/Git/bin/bash.exe"
           EOF
 
-      - name: Fetch installation token
+      - name: Fetch installation token via BASH_EXE (plugin path)
         run: |
           TOKEN="$(bash gh-app/get-token.sh)"
           echo "token length: ${#TOKEN}"
           test -n "$TOKEN"
+          case "$TOKEN" in
+            ghs_*) echo "token looks valid" ;;
+            *) echo "unexpected token prefix" >&2; exit 1 ;;
+          esac
+
+      - name: gh auth status must resolve to the App
+        run: |
+          GH_TOKEN="$(bash gh-app/get-token.sh)" gh auth status
+          GH_TOKEN="$(bash gh-app/get-token.sh)" gh auth status 2>&1 | grep -q "conahcnuj\[bot\]"
+          echo "gh is operating as the App"
 
       - name: Configure git credential helper
         run: |
-          git config --global user.name "$APP_SLUG[bot]"
-          git config --global user.email "$APP_ID+$APP_SLUG[bot]@users.noreply.github.com"
+          git config --global user.name "${APP_SLUG}[bot]"
+          git config --global user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
           git config --global credential.helper "!bash $PWD/gh-app/git-credential-helper.sh"
 
       - name: Authenticated ls-remote
