@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $Destination) {
-    $Destination = Join-Path $HOME ".config" "opencode"
+    $Destination = Join-Path (Join-Path $HOME ".config") "opencode"
 }
 
 $RepoRoot = $PSScriptRoot
@@ -42,9 +42,15 @@ if (Test-Path -LiteralPath $Example) {
     Write-Host "  copied app.env.example"
 }
 
-# Create app.env from example unless it already exists (keep existing config).
+# app.env: copy the real one if it ships with the repo source, otherwise
+# create from example (fresh clone / CI) unless one already exists at the
+# destination (keep existing local config).
+$SrcEnv = Join-Path $SrcGhApp "app.env"
 $DstEnv = Join-Path $DstGhApp "app.env"
-if (-not (Test-Path -LiteralPath $DstEnv)) {
+if (Test-Path -LiteralPath $SrcEnv) {
+    Copy-Item -LiteralPath $SrcEnv -Destination $DstEnv -Force
+    Write-Host "  copied app.env"
+} elseif (-not (Test-Path -LiteralPath $DstEnv)) {
     Copy-Item -LiteralPath $Example -Destination $DstEnv
     Write-Host "  created app.env from app.env.example (edit PRIVATE_KEY_PATH if needed)"
 }

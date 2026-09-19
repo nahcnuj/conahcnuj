@@ -55,7 +55,7 @@ async function getInstallationToken(): Promise<string> {
   if (cachedToken && Date.now() - cachedAt < TOKEN_TTL_MS) {
     return cachedToken
   }
-  const token = execFileSync("bash", [GET_TOKEN_SH], {
+  const token = execFileSync(config.BASH_EXE, [GET_TOKEN_SH], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   }).trim()
