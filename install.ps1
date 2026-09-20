@@ -61,5 +61,10 @@ $PluginName = "gh-app-token.ts"
 Copy-Item -LiteralPath (Join-Path $SrcPlugins $PluginName) -Destination (Join-Path $DstPlugins $PluginName) -Force
 Write-Host "  copied $PluginName"
 
+# opencode-context.md: global context reference file
+$DstContext = Join-Path $DstPlugins "opencode-context.md"
+Copy-Item -LiteralPath (Join-Path $RepoRoot "opencode-context.md") -Destination $DstContext -Force
+Write-Host "  copied opencode-context.md"
+
 Write-Host ""
-Write-Host "Done. Restart opencode to load the plugin (plugins/*.ts is auto-loaded)."
+Write-Host "Done. Restart opencode to load the plugin and context file (plugins/*.ts is auto-loaded)."
