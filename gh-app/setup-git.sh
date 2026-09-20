@@ -22,6 +22,7 @@ BOT_EMAIL="${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
 HELPER="${HERE}/git-credential-helper.sh"
 BASH_EXE="${BASH_EXE:-C:/Program Files/Git/bin/bash.exe}"
+# shellcheck disable=SC2086
 HELPER_CMD="!\"${BASH_EXE}\" \"${HELPER//\\//}\""
 
 SCOPE="--local"

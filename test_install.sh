@@ -45,6 +45,7 @@ fi
 # Cache until 10 min before expiry.
 if [[ -n "${EXPIRES_AT}" ]]; then
   CACHE_EXPIRES="$(( $(date -d "${EXPIRES_AT}" +%s) - 600 ))"
+# shellcheck disable=SC2004
 else
   CACHE_EXPIRES="$((NOW + 3000))"
 fi
