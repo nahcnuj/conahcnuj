@@ -53,25 +53,29 @@ if (Test-Path -LiteralPath $SrcEnv) {
 } elseif (-not (Test-Path -LiteralPath $DstEnv)) {
     Copy-Item -LiteralPath $Example -Destination $DstEnv
     Write-Host "  created app.env from app.env.example"
-    # Collect real values in the same run when interactive, so that
-    # ./install.ps1 alone leaves a working config (skipped in CI / pipes).
-    if (-not $env:CI -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
-        Write-Host "  enter App settings (empty = keep template value):"
-        $lines = Get-Content -LiteralPath $DstEnv
-        $keys = @("APP_ID", "INSTALLATION_ID", "APP_SLUG", "PRIVATE_KEY_PATH", "BASH_EXE")
+    Update-AppEnvInteractively $DstEnv
+}
+
+function Update-AppEnvInteractively([string]$EnvPath) {
+    # Fill real values in the same run so ./install.ps1 alone leaves a
+    # working config. Skipped when stdin isn't a console (CI / pipes).
+    if ($env:CI -or -not [Environment]::UserInteractive -or [Console]::IsInputRedirected) {
+        Write-Host "  (edit app.env values as needed)"
+        return
+    }
+    Write-Host "  enter App settings (empty = keep template value):"
+    $lines = Get-Content -LiteralPath $EnvPath
+    foreach ($key in @("APP_ID", "INSTALLATION_ID", "APP_SLUG", "PRIVATE_KEY_PATH", "BASH_EXE")) {
         for ($i = 0; $i -lt $lines.Count; $i++) {
-            $m = [regex]::Match($lines[$i], '^(?<k>[A-Z_]+)=(?<v>.*)$')
-            if ($m.Success -and ($keys -contains $m.Groups["k"].Value)) {
-                $cur = $m.Groups["v"].Value
-                $ans = Read-Host "  $($m.Groups['k'].Value) [$cur]"
-                if ($ans -ne "") { $lines[$i] = "$($m.Groups['k'].Value)=$ans" }
+            $m = [regex]::Match($lines[$i], "^$key=(.*)$")
+            if ($m.Success) {
+                $ans = Read-Host "  $key [$($m.Groups[1].Value)]"
+                if ($ans -ne "") { $lines[$i] = "$key=$ans" }
             }
         }
-        Set-Content -LiteralPath $DstEnv -Value $lines
-        Write-Host "  updated app.env"
-    } else {
-        Write-Host "  (edit app.env values as needed)"
     }
+    Set-Content -LiteralPath $EnvPath -Value $lines
+    Write-Host "  updated app.env"
 }
 
 # 2. opencode plugin

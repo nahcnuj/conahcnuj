@@ -40,8 +40,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 bash -n gh-app/*.sh gh-app/tests/*.sh
 shellcheck -x gh-app/*.sh gh-app/tests/*.sh   # -x で app.env.example を追従（チェックは無効化しない）
 
-# プラグイン型チェック（@types/node は plugins/package.json から取得）
-(cd plugins && npm install --no-audit --no-fund && npm exec -- tsc -p ../plugins --noEmit)
+# プラグイン型チェック（@types/node は plugins/package.json＋lock から取得）
+(cd plugins && npm ci --no-audit --no-fund && npm exec -- tsc -p ../plugins --noEmit)
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/mock-test.sh

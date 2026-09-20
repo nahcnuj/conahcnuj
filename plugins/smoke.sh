@@ -28,7 +28,7 @@ fi
   -File "${REPO}/install.ps1" -Destination "${TMP}/inst" >/dev/null
 INST="${TMP}/inst"
 
-(cd "${HERE}" && npm install --no-audit --no-fund)
+(cd "${HERE}" && npm ci --no-audit --no-fund)
 
 # 2) Stage the INSTALLED files under a fixed literal path with the same
 #    relative layout (so __dirname resolution finds the staged gh-app dir).

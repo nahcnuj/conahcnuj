@@ -141,7 +141,7 @@ jobs:
       - name: Typecheck plugin
         run: |
           cd plugins
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm exec -- tsc -p ../plugins --noEmit
 
   plugin-smoke:
