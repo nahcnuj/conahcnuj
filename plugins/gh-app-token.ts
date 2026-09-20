@@ -167,6 +167,12 @@ async function fetchInstallationToken(
         "a token. Set them in gh-app/app.env."
     )
   }
+  // IDs go into the request URL: digits only, so no URL structure can leak in.
+  if (!/^\d+$/.test(installationId)) {
+    throw new Error(
+      `Invalid INSTALLATION_ID for token exchange: ${installationId}`
+    )
+  }
   if (keyPath.startsWith("~")) {
     keyPath = path.join(os.homedir(), keyPath.slice(1))
   }

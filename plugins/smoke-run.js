@@ -31,11 +31,14 @@ async function main() {
   for (let i = 0; i < count; i++) {
     pairs[env[`GIT_CONFIG_KEY_${i}`]] = env[`GIT_CONFIG_VALUE_${i}`]
   }
+  const emailMatch =
+    typeof pairs["user.email"] === "string"
+      ? /^(\d+)\+([A-Za-z0-9-]+)\[bot\]@users\.noreply\.github\.com$/.exec(
+          pairs["user.email"]
+        )
+      : null
   assert(
-    typeof pairs["user.email"] === "string" &&
-      new RegExp(`^\\d+\\+${expectedSlug}\\[bot\\]@users\\.noreply\\.github\\.com$`).test(
-        pairs["user.email"]
-      ),
+    emailMatch !== null && emailMatch[2] === expectedSlug,
     `user.email has wrong shape, got: ${pairs["user.email"]}`
   )
   assert(
