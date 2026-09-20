@@ -284,8 +284,12 @@ jobs:
               > "${RUNNER_TEMP}/e2e-out.jsonl" 2>"${RUNNER_TEMP}/e2e-err.log" || true
             JSONL="$(grep -h '^{' "${RUNNER_TEMP}/e2e-out.jsonl" || true)"
             TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
-            echo "${TEXT}" | tail -20
-            BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | .part.state.metadata.exit' | grep -v -x -e 0 -e 2 || true)"
+            echo "${TEXT}" | tail -5
+            echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
+            # Bad: a bash call that neither succeeded (0), nor failed the
+            # sandbox way (2: no remote), nor was hook-blocked (git commit
+            # never executes: no exit at all).
+            BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != 0 and .exit != 2 and (.exit != null or ((.cmd // "") | contains("git commit") | not))) | [.cmd, .exit] | @tsv' || true)"
             if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then OK=1; break; fi
             echo "E2E model ${m} unsuitable (missing git vc or bad exit: ${BAD})"
           done
