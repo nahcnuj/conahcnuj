@@ -30,7 +30,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `plugins/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約と commit 誘導を検証） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
 | `plugins/package.json`・`tsconfig.json`・`plugin-stub.d.ts` | 型チェック基盤（`@types/node` 実物＋ `@opencode-ai/plugin` 最小 stub） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置 | 実 `app.env` があればそれを、無ければ example から作成 |
-| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`。`e2e-opencode` のみ `models: read` 追加） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
+| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
 
 ## ローカル検証手順
 
@@ -47,7 +47,7 @@ bash gh-app/tests/run.sh
 
 # e2e は CI の `e2e-opencode` ジョブで実行（手順は ci.yml に直接記載）。
 # ローカルで流す場合は opencode 本体・node・pwsh を用意し、ジョブの手順をなぞる
-#（無料モデル GitHub Models のため秘密鍵・課金不要。`models: read` 権限が必要）
+#（opencode の無料モデルを使うため秘密鍵・課金不要）
 
 # トークン取得の確認（実キーが app.env にある前提）
 bash gh-app/get-token.sh

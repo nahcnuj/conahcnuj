@@ -169,14 +169,11 @@ jobs:
         run: bash plugins/smoke.sh
 
   e2e-opencode:
-    name: E2E opencode run (GitHub Models free tier)
+    name: E2E opencode run (opencode free model)
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
-    permissions:
-      contents: read
-      models: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -195,9 +192,8 @@ jobs:
       # app.env over the installed copy: IDs come straight from repo
       # secrets; no private key is ever needed (no token is issued here).
       # The bot ID itself is auto-resolved from the public API.
-      - name: Stage app.env and free-model provider config
-        env:
-          GH_MODELS_KEY: ${{ secrets.GITHUB_TOKEN }}
+      # No provider config needed: opencode's own free models need no key.
+      - name: Stage app.env and model config
         run: |
           cat > "$RUNNER_TEMP/e2e-inst/gh-app/app.env" <<EOF
           APP_ID=${{ secrets.APP_ID }}
@@ -205,18 +201,10 @@ jobs:
           APP_SLUG=conahcnuj
           PRIVATE_KEY_PATH=/tmp/nonexistent.pem
           EOF
-          cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<EOF
+          cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<'EOF'
           {
-            "\$schema": "https://opencode.ai/config.json",
-            "model": "github-models/openai/gpt-4o-mini",
-            "provider": {
-              "github-models": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "GitHub Models (free)",
-                "options": { "baseURL": "https://models.github.ai/inference", "apiKey": "${GH_MODELS_KEY}" },
-                "models": { "openai/gpt-4o-mini": { "name": "GPT-4o mini" } }
-              }
-            }
+            "$schema": "https://opencode.ai/config.json",
+            "model": "opencode/mimo-v2.5-free"
           }
           EOF
 
