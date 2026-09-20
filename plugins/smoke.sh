@@ -8,9 +8,12 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
-trap 'rm -rf "${TMP}"' EXIT
+STAGE="${HERE}/.smoke"
+trap 'rm -rf "${TMP}" "${STAGE}"' EXIT
 
-npm --prefix "${HERE}" install --no-audit --no-fund
+# NOTE: no `npm --prefix` here: native npm on Windows ignores an msys-style
+# absolute prefix, so run inside the dir instead.
+(cd "${HERE}" && npm install --no-audit --no-fund)
 
 mkdir -p "${TMP}/smoke/plugins" "${TMP}/smoke/gh-app"
 cp "${HERE}/gh-app-token.ts" "${HERE}/plugin-stub.d.ts" "${TMP}/smoke/plugins/"
@@ -45,5 +48,10 @@ EOF
 # dir looking for node_modules/@types, so stage a copy at $TMP root.
 mkdir -p "${TMP}/node_modules"
 cp -r "${HERE}/node_modules/@types" "${TMP}/node_modules/"
-npm --prefix "${HERE}" exec -- tsc -p "${TMP}/smoke/plugins"
-node "${HERE}/smoke-run.js" "${TMP}/smoke/out/gh-app-token.js" 999
+(cd "${HERE}" && npm exec -- tsc -p "${TMP}/smoke/plugins")
+# Stage artifact + fake gh-app at a fixed literal path with the same relative
+# layout (so __dirname resolution finds the fake app.env). smoke-run.js must
+# not require() an argv-provided path (CodeQL path-injection).
+mkdir -p "${STAGE}"
+cp -r "${TMP}/smoke/out" "${TMP}/smoke/gh-app" "${STAGE}/"
+node "${HERE}/smoke-run.js" 999

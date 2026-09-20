@@ -136,11 +136,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       # @types/node from npm; @opencode-ai/plugin from the offline stub
-      # (plugins/plugin-stub.d.ts).
+      # (plugins/plugin-stub.d.ts). NOTE: plain `cd`, not `npm --prefix`:
+      # native npm on Windows ignores an msys-style absolute prefix.
       - name: Typecheck plugin
         run: |
-          npm --prefix plugins install --no-audit --no-fund
-          npm --prefix plugins exec -- tsc -p plugins --noEmit
+          cd plugins
+          npm install --no-audit --no-fund
+          npm exec -- tsc -p ../plugins --noEmit
 
   plugin-smoke:
     name: Plugin runtime smoke test

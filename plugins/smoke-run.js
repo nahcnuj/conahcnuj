@@ -1,17 +1,22 @@
 // Plugin runtime smoke test runner (plain Node, no deps).
-// Usage: node smoke-run.js <compiled gh-app-token.js> <expected bot user id>
+// Usage: bash plugins/smoke.sh (which stages ./.smoke/ first)
+//   or: node smoke-run.js <expected bot user id>
 //
 // Loads the compiled plugin with a fake gh-app dir (fake app.env), then
 // asserts the shell.env contract (GIT_CONFIG identity + alias.vc) and the
 // tool.execute.before redirect (git commit blocked, others pass through).
+// The require target is a fixed literal path on purpose: requiring an
+// argv-provided path trips CodeQL path-injection (high). smoke.sh stages
+// the compiled artifact plus a fake gh-app dir at ./.smoke/ (same relative
+// layout, so __dirname-based resolution finds the fake app.env).
 "use strict"
 
 const assert = require("node:assert")
 
 async function main() {
-  const [compiledPath, expectedId] = process.argv.slice(2)
-  assert(compiledPath && expectedId, "usage: node smoke-run.js <compiled js> <bot id>")
-  const { GhAppTokenPlugin } = require(compiledPath)
+  const [expectedId] = process.argv.slice(2)
+  assert(expectedId, "usage: node smoke-run.js <bot id>")
+  const { GhAppTokenPlugin } = require("./.smoke/out/gh-app-token.js")
   const plugin = await GhAppTokenPlugin({})
   assert(plugin["shell.env"], "missing shell.env hook")
   assert(plugin["tool.execute.before"], "missing tool.execute.before hook")
