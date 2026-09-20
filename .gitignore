@@ -1,6 +1,6 @@
 gh-app/token.cache
 gh-app/app.env
 plugins/node_modules/
-plugins/.smoke/
+test/.smoke/
 *.tmp
 *.log

@@ -166,7 +166,7 @@ jobs:
       # identity + alias.vc) and the git-commit redirect.
       # Needs node/npm from the runner; no secrets, no GitHub network.
       - name: Run plugin smoke test
-        run: bash plugins/smoke.sh
+        run: bash test/smoke.sh
 
   e2e-opencode:
     name: E2E opencode run (opencode free model)

@@ -2,6 +2,7 @@
   "private": true,
   "description": "Dev dependencies for typechecking the opencode plugin (CI lint-ts, local tsc). Not deployed by install.ps1.",
   "devDependencies": {
+    "@opencode-ai/plugin": "1.18.31",
     "@types/node": "26.6.2",
     "typescript": "5.9.2"
   }

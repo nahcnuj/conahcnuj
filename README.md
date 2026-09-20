@@ -22,6 +22,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
+├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置
 ├── .github/workflows/ci.yml   # GitHub Actions (Ubuntu / Windows)
 ├── .gitignore
@@ -49,8 +50,7 @@ bot アカウントに GPG 鍵は登録できないため、Verified にする�
 GitHub 自身にコミットを作成させるしかない。
 
 opencode 内でのコミット手順・オプション・仕様の詳細は AI エージェント向けの
-`AGENTS.md`（「コミット運用」節）にある。必要な App 権限は `Contents: Read and write`
-と `Workflows: Read and write`（`.github/workflows/` を変更する場合のみ）。
+`AGENTS.md`（「コミット運用」節）にある。
 
 ## インストール
 
@@ -59,7 +59,7 @@ opencode 内でのコミット手順・オプション・仕様の詳細は AI �
 - Windows + Git for Windows（`C:/Program Files/Git/bin/bash.exe`）
 - opencode が `~/.config/opencode/` をグローバル設定として使う
 
-### 1. 配置
+### 1. インストール
 
 ```sh
 git clone <repo>.git
@@ -67,27 +67,17 @@ cd <repo>
 ./install.ps1
 ```
 
-`~/.config/opencode/gh-app/` と `~/.config/opencode/plugins/` へ展開され、
-`plugins/*.ts` は opencode が自動ロードする。`~/.config/opencode` はユーザーワイド
-設定のため、このプラグインは **opencode で開く全てのリポジトリ・全てのセッション**
-に適用される。リポジトリ側での個別設定は不要。
+`~/.config/opencode/`（ユーザーワイド）へ展開されるため、全てのリポジトリ・セッションに適用される。
 
 ### 2. opencode を再起動
 
-`gh-app/app.env` に実値を入れてから再起動。再起動後、シェルで確認:
+`gh-app/app.env` に実値を入れてから再起動。再起動後、opencode のシェルで確認
+（自分のシェルが未ログインのままなのは正常。プラグインは opencode 内でのみ効く）:
 
 ```bash
 gh auth status
 # → Logged in to github.com account conahcnuj[bot] (GH_TOKEN)
 ```
-
-### 3. （任意）リポジトリ単位の git 設定
-
-```bash
-bash gh-app/setup-git.sh
-```
-
-またはプラグインが `GIT_CONFIG_*` を注入するため、opencode 上では不要。
 
 ## トラブルシューティング
 
@@ -103,27 +93,4 @@ bash gh-app/setup-git.sh
   動作確認はローカルで `bash gh-app/get-token.sh` → `bash gh-app/setup-git.sh` を
   実行して確認する。
 
-## CI
-
-GitHub Actions（`.github/workflows/ci.yml`）:
-
-| ジョブ               | 内容                                          | ランナー    |
-| -------------------- | --------------------------------------------- | ----------- |
-| `lint-bash`          | `bash -n` + `shellcheck -x`（`gh-app/*.sh` と `gh-app/tests/*.sh`。追従・チェック無効化なし） | Ubuntu / Windows |
-| `lint-ts`            | プラグインの型チェック（`@types/node` は npm、`@opencode-ai/plugin` は最小 stub） | Ubuntu |
-| `lint-ps`            | `install.ps1` の構文チェック                  | Windows     |
-| `install-test`       | `install.ps1` を一時ディレクトリへ展開＋配備ファイルの同一性検証 | Windows     |
-| `mock-test`          | `gh-app/tests/run.sh` 全 suite（秘密鍵・ネットワーク不要） | Ubuntu / Windows |
-| `plugin-smoke`       | `install.ps1`→プラグイン読込→env 契約の runtime 検証 | Ubuntu / Windows |
-| `e2e-opencode`       | 実 `opencode run` で `git vc` が自然に現れることを検証（opencode の無料モデル。秘密鍵・課金不要） | Ubuntu |
-
-workflow は読み取り専用なため、`permissions: contents: read` を明示している。
-
-秘密鍵やトークンを使う実機検証（e2e）は CI では行わない。ローカルで検証する場合
-は自分のリポジトリで:
-
-```bash
-bash gh-app/get-token.sh        # 実トークン取得を確認
-bash gh-app/setup-git.sh        # App 名義の git config を適用
-git ls-remote https://github.com/<owner>/<repo>.git HEAD
-```
+CI の内容は `.github/workflows/ci.yml` を参照（AGENTS.md にジョブ一覧あり）。
