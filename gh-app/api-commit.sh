@@ -11,18 +11,19 @@
 # API, which creates the commit server-side and signs it. That server-side
 # signature is the whole point: only GitHub-signed commits satisfy
 # "Commits must have verified signatures".
-#   bash gh-app/api-commit.sh -m "<message>"            # staged (git commit)
+#   bash gh-app/api-commit.sh -m "<message>"            # staged (git commit:
+#                                                     `git add file` first, as usual)
 #   bash gh-app/api-commit.sh -m "<message>" -a         # tracked worktree (git commit -a)
-#   bash gh-app/api-commit.sh -m "<message>" --file path=@file [--delete path]
 #   bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "<message>" -a
 #   bash gh-app/api-commit.sh <branch> -m "<message>"   # repo auto-detected
 #   bash gh-app/api-commit.sh <owner>/<repo> -m "<message>"  # branch auto-detected
 #
+# New files go through `git add` like normal git usage; there is no
+# content-passing option on purpose.
+#
 # Options:
 #   -a                Commit tracked worktree changes (modified/deleted tracked
 #                     files, staged or not; untracked files excluded).
-#                     Untracked files need explicit --file path=@file.
-#   --file p=c|p=@f   Add/update file p with inline content c or @local file f.
 #   --delete path     Delete path from the branch.
 #   --create-branch   Create <branch> from the default branch if it does not
 #                     exist yet (no unsigned commits involved).
@@ -59,7 +60,6 @@ auto_repo() {
 }
 
 MESSAGE=""
-declare -a FILE_SPECS=()
 declare -a DELETE_PATHS=()
 TRACKED=false
 CREATE_BRANCH=false
@@ -87,8 +87,6 @@ while [[ $# -gt 0 ]]; do
   case "${1}" in
     -m|--message)
       MESSAGE="${2}"; shift 2 ;;
-    -f|--file)
-      FILE_SPECS+=( "${2}" ); shift 2 ;;
     -d|--delete)
       DELETE_PATHS+=( "${2}" ); shift 2 ;;
     -a)
@@ -116,17 +114,13 @@ fi
 
 if [[ -z "${MESSAGE}" ]]; then
   echo "ERROR: -m/--message is required" >&2
-  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [-a | (--file p=c|p=@f ...)] [options]" >&2
+  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [-a] [--delete path] [options]" >&2
   exit 1
 fi
-if [[ "${TRACKED}" == true && ${#FILE_SPECS[@]} -gt 0 ]]; then
-  echo "ERROR: -a and --file are mutually exclusive" >&2
-  exit 1
-fi
-# No collection flag and no explicit files: commit staged changes like
+# No collection flag and no explicit deletions: commit staged changes like
 # plain `git commit`.
 STAGED=false
-if [[ "${TRACKED}" != true && ${#FILE_SPECS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+if [[ "${TRACKED}" != true && ${#DELETE_PATHS[@]} -eq 0 ]]; then
   STAGED=true
 fi
 
@@ -144,7 +138,8 @@ collect_worktree_changes() {
   pushd "$(git rev-parse --show-toplevel)" >/dev/null || exit 1
   # Tracked changes only (A/M/R/D), mirroring `git commit -a`.
   # With -z, a rename is two records: "R  <new>", then just the old path
-  # (verified: `R  b.txt\0a.txt\0`). Untracked (??) need explicit --file.
+  # (verified: `R  b.txt\0a.txt\0`). Untracked (??) are skipped: stage them
+  # with `git add` first, like normal git usage.
   pending_rename_new=""
   while IFS= read -r -d '' entry; do
     status="${entry:0:2}"
@@ -208,24 +203,6 @@ elif [[ "${STAGED}" == true ]]; then
   collect_staged_changes
 fi
 
-# Explicit --file specs first (kept order), then auto-collected files.
-for spec in "${FILE_SPECS[@]}"; do
-  file_path="${spec%%=*}"
-  raw="${spec#*=}"
-  if [[ "${raw}" == @* ]]; then
-    f="${raw#@}"
-    if [[ ! -f "${f}" ]]; then
-      echo "ERROR: file not found: ${f}" >&2
-      exit 1
-    fi
-    B64="$(openssl base64 -A -in "${f}")"
-  else
-    B64="$(printf '%s' "${raw}" | openssl base64 -A)"
-  fi
-  EP="$(json_escape "${file_path}")"
-  ADDITIONS+=( "{path:\"${EP}\",contents:\"${B64}\"}" )
-done
-
 for f in "${ADD_FILES[@]}"; do
   if [[ "${FROM_INDEX}" == true ]]; then
     # Staged content (may differ from the worktree file).
@@ -254,9 +231,6 @@ if [[ "${DRY_RUN}" == true ]]; then
   if [[ ${#ADD_FILES[@]} -gt 0 ]]; then
     printf '  %s\n' "${ADD_FILES[@]}"
   fi
-  for spec in "${FILE_SPECS[@]}"; do
-    printf '  %s\n' "${spec%%=*}"
-  done
   echo "Deletions:  ${#DELETE_PATHS[@]} file(s)"
   if [[ ${#DELETE_PATHS[@]} -gt 0 ]]; then
     printf '  %s\n' "${DELETE_PATHS[@]}"

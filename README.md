@@ -115,7 +115,7 @@ GitHub Actions（`.github/workflows/ci.yml`）:
 | `install-test`       | `install.ps1` を一時ディレクトリへ展開＋配備ファイルの同一性検証 | Windows     |
 | `mock-test`          | `gh-app/tests/run.sh` 全 suite（秘密鍵・ネットワーク不要） | Ubuntu / Windows |
 | `plugin-smoke`       | `install.ps1`→プラグイン読込→env 契約の runtime 検証 | Ubuntu / Windows |
-| `e2e-opencode`       | 実 `opencode run` で `git vc` が自然に現れることを検証（stub モデル。秘密鍵・課金不要） | Ubuntu |
+| `e2e-opencode`       | 実 `opencode run` で `git vc` が自然に現れることを検証（無料モデル GitHub Models。秘密鍵・課金不要） | Ubuntu |
 
 workflow は読み取り専用なため、`permissions: contents: read` を明示している。
 

@@ -2,7 +2,7 @@
 # api-commit.sh --dry-run worktree collection. --dry-run exits before any
 # token or network access; the fixture uses a fake origin URL that is never
 # contacted. Covers: -a (modified, deleted, renamed; untracked excluded),
-# staged mode, explicit --file/--delete; owner/repo auto-detection.
+# staged mode, explicit --delete; owner/repo auto-detection.
 # Usage: bash api-commit-dryrun.sh <staged gh-app dir>
 set -euo pipefail
 
@@ -112,10 +112,10 @@ done
 rm -rf "${FIX2}"
 echo "PASS api-commit.sh staged mode collects index only"
 
-# Explicit --file/--delete without a collection flag.
-OUT3="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg --file inline.txt=hello --delete gone.txt --dry-run)"
-if [[ "${OUT3}" != *"Additions:  1 file(s)"* || "${OUT3}" != *"inline.txt"* ]]; then
-  echo "FAIL: --dry-run --file mismatch:" >&2
+# Explicit --delete without a collection flag.
+OUT3="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg --delete gone.txt --dry-run)"
+if [[ "${OUT3}" != *"Additions:  0 file(s)"* ]]; then
+  echo "FAIL: --dry-run additions mismatch:" >&2
   echo "${OUT3}" >&2
   exit 1
 fi
@@ -124,4 +124,4 @@ if [[ "${OUT3}" != *"Deletions:  1 file(s)"* || "${OUT3}" != *"gone.txt"* ]]; th
   echo "${OUT3}" >&2
   exit 1
 fi
-echo "PASS api-commit.sh --dry-run --file/--delete"
+echo "PASS api-commit.sh --dry-run --delete"

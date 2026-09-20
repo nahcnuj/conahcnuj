@@ -1,11 +1,11 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import { execFileSync } from "node:child_process"
+import { createSign } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 const GH_APP_DIR = path.join(__dirname, "..", "gh-app")
-const GET_TOKEN_SH = path.join(GH_APP_DIR, "get-token.sh")
+const TOKEN_CACHE_FILE = path.join(GH_APP_DIR, "token.cache")
 const CREDENTIAL_HELPER_SH = path.join(GH_APP_DIR, "git-credential-helper.sh")
 
 // Only values with a usable default live here. Required values have no
@@ -14,15 +14,21 @@ const DEFAULT_CONFIG = {
   BASH_EXE: "C:/Program Files/Git/bin/bash.exe",
 }
 const REQUIRED_KEYS = ["APP_SLUG"] as const
+// Read from app.env when present, but never required up front: they are
+// only validated inside fetchInstallationToken.
+const TOKEN_KEYS = ["APP_ID", "INSTALLATION_ID", "PRIVATE_KEY_PATH"] as const
 
 type Config = typeof DEFAULT_CONFIG & {
   [K in (typeof REQUIRED_KEYS)[number]]: string
+} & {
+  [K in (typeof TOKEN_KEYS)[number]]?: string
 }
 
 /**
- * Parse `KEY=VALUE` lines (dotenv flavor). Returns every pair found;
- * callers decide which keys to accept. Surrounding quotes are stripped
- * and a leading `${HOME}` is expanded.
+ * Parse `KEY=VALUE` lines (dotenv flavor). Only known keys (defaults,
+ * required, token keys) are kept; anything else is ignored. Surrounding
+ * quotes are stripped and a leading `${HOME}` is expanded. Keys must look
+ * like `UPPER_SNAKE` so computed property writes stay safe.
  */
 function parseAppEnv(text: string): Record<string, string> {
   const out: Record<string, string> = {}
@@ -31,6 +37,7 @@ function parseAppEnv(text: string): Record<string, string> {
     if (!line || line.startsWith("#") || !line.includes("=")) continue
     const idx = line.indexOf("=")
     const key = line.slice(0, idx).trim()
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key)) continue
     let value = line.slice(idx + 1).trim()
     if (
       value.length >= 2 &&
@@ -47,49 +54,62 @@ function parseAppEnv(text: string): Record<string, string> {
 
 /**
  * Load config: defaults, then app.env (or app.env.example) overlay, then
- * required-key validation. Unknown keys (e.g. APP_ID, only used by the
- * shell scripts) are ignored here.
+ * required-key validation.
  */
 function loadAppEnv(): Config {
-  const parsed: Record<string, string> =
-    (() => {
-      const envFile = fs.existsSync(path.join(GH_APP_DIR, "app.env"))
-        ? path.join(GH_APP_DIR, "app.env")
-        : path.join(GH_APP_DIR, "app.env.example")
-      if (!fs.existsSync(envFile)) {
-        return {}
-      }
-      return parseAppEnv(fs.readFileSync(envFile, "utf8"))
-    })()
-  const config: Record<string, string> = { ...DEFAULT_CONFIG }
-  for (const key of [
-    ...Object.keys(DEFAULT_CONFIG),
-    ...(REQUIRED_KEYS as readonly string[]),
-  ]) {
+  const envFile = fs.existsSync(path.join(GH_APP_DIR, "app.env"))
+    ? path.join(GH_APP_DIR, "app.env")
+    : path.join(GH_APP_DIR, "app.env.example")
+  const parsed: Record<string, string> = fs.existsSync(envFile)
+    ? parseAppEnv(fs.readFileSync(envFile, "utf8"))
+    : {}
+  const config: Config = {
+    ...DEFAULT_CONFIG,
+    APP_SLUG: parsed["APP_SLUG"] ?? "",
+  }
+  for (const key of TOKEN_KEYS) {
     if (parsed[key]) {
       config[key] = parsed[key]
     }
   }
-  const missing = (REQUIRED_KEYS as readonly string[]).filter((k) => !config[k])
+  const missing = (REQUIRED_KEYS as readonly string[]).filter(
+    (k) => !(config as Record<string, string>)[k]
+  )
   if (missing.length > 0) {
     throw new Error(
       `Missing required gh-app config: ${missing.join(", ")}. ` +
         `Set them in gh-app/app.env (see app.env.example).`
     )
   }
-  return config as Config
+  return config
+}
+
+/**
+ * Base64url-encode bytes or text (JWT building block).
+ */
+function b64url(input: Uint8Array | string): string {
+  const buf =
+    typeof input === "string" ? Buffer.from(input, "utf8") : Buffer.from(input)
+  return buf
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")
 }
 
 /**
  * Resolve the bot account user ID (`<slug>[bot]`) via the public GitHub
- * API (no auth needed). APP_ID is deliberately NOT a fallback: it is the
- * App's own ID and never attributes commits to the bot account.
+ * API (no auth needed). The slug allowlist keeps user-controlled config
+ * out of the request URL. APP_ID is deliberately NOT a fallback: it is
+ * the App's own ID and never attributes commits to the bot account.
  */
 async function resolveBotUserId(slug: string): Promise<string> {
-  const res = await fetch(
-    `https://api.github.com/users/${slug}%5Bbot%5D`,
-    { headers: { Accept: "application/vnd.github+json" } }
-  )
+  if (!/^[A-Za-z0-9-]+$/.test(slug)) {
+    throw new Error(`Invalid APP_SLUG for bot lookup: ${slug}`)
+  }
+  const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, {
+    headers: { Accept: "application/vnd.github+json" },
+  })
   if (!res.ok) {
     throw new Error(
       `Cannot resolve bot user ID for ${slug}[bot] (HTTP ${res.status}): ` +
@@ -103,11 +123,112 @@ async function resolveBotUserId(slug: string): Promise<string> {
     !("id" in data) ||
     typeof (data as { id: unknown }).id !== "number"
   ) {
-    throw new Error(
-      `Unexpected user lookup response for ${slug}[bot].`
-    )
+    throw new Error(`Unexpected user lookup response for ${slug}[bot].`)
   }
   return String((data as { id: number }).id)
+}
+
+/**
+ * Read a cached installation token (`expiry|token`) when still valid.
+ * Returns null on any problem (missing/expired/malformed cache).
+ */
+function readTokenCache(cacheFile: string): string | null {
+  let raw: string
+  try {
+    raw = fs.readFileSync(cacheFile, "utf8")
+  } catch {
+    return null
+  }
+  const match = /^(\d+)\|(.+)$/.exec(raw.split("\n", 1)[0] ?? "")
+  if (!match) {
+    return null
+  }
+  if (Date.now() / 1000 >= Number(match[1])) {
+    return null
+  }
+  return match[2]
+}
+
+/**
+ * Fetch a fresh installation token: RS256-sign a JWT with the App private
+ * key and exchange it at the installations endpoint. Same wire behavior
+ * as gh-app/get-token.sh (shared `token.cache` format included).
+ */
+async function fetchInstallationToken(
+  config: Config,
+  cacheFile: string
+): Promise<string> {
+  const appId = config.APP_ID
+  const installationId = config.INSTALLATION_ID
+  let keyPath = config.PRIVATE_KEY_PATH
+  if (!appId || !installationId || !keyPath) {
+    throw new Error(
+      "APP_ID / INSTALLATION_ID / PRIVATE_KEY_PATH are required to issue " +
+        "a token. Set them in gh-app/app.env."
+    )
+  }
+  if (keyPath.startsWith("~")) {
+    keyPath = path.join(os.homedir(), keyPath.slice(1))
+  }
+  const now = Math.floor(Date.now() / 1000)
+  const signingInput =
+    b64url('{"alg":"RS256","typ":"JWT"}') +
+    "." +
+    b64url(JSON.stringify({ iat: now, exp: now + 540, iss: appId }))
+  const key = fs.readFileSync(keyPath, "utf8")
+  const signature = createSign("sha256").update(signingInput).sign(key)
+  const jwt = `${signingInput}.${b64url(signature)}`
+  const res = await fetch(
+    `https://api.github.com/app/installations/${installationId}/access_tokens`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: "application/vnd.github+json",
+      },
+    }
+  )
+  if (!res.ok) {
+    throw new Error(`Token exchange failed (HTTP ${res.status}).`)
+  }
+  const data: unknown = await res.json()
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("token" in data) ||
+    typeof (data as { token: unknown }).token !== "string" ||
+    !(data as { token: string }).token
+  ) {
+    throw new Error("Token exchange returned no token.")
+  }
+  const token = (data as { token: string }).token
+  const expiresAt = (data as { expires_at?: unknown }).expires_at
+  const expiresSec =
+    typeof expiresAt === "string" && !Number.isNaN(Date.parse(expiresAt))
+      ? Math.floor(Date.parse(expiresAt) / 1000) - 600
+      : now + 3000
+  fs.writeFileSync(cacheFile, `${expiresSec}|${token}`, "utf8")
+  return token
+}
+
+const config = loadAppEnv()
+
+let cachedToken: string | null = null
+let cachedAt = 0
+const TOKEN_TTL_MS = 50 * 60 * 1000
+
+async function getInstallationToken(): Promise<string> {
+  if (cachedToken && Date.now() - cachedAt < TOKEN_TTL_MS) {
+    return cachedToken
+  }
+  const cached = readTokenCache(TOKEN_CACHE_FILE)
+  if (cached) {
+    return cached
+  }
+  const token = await fetchInstallationToken(config, TOKEN_CACHE_FILE)
+  cachedToken = token
+  cachedAt = Date.now()
+  return token
 }
 
 /**
@@ -128,25 +249,6 @@ function parseBashCommand(args: unknown): string | null {
  */
 function isGitCommitCommand(cmd: string): boolean {
   return /(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)
-}
-
-const config = loadAppEnv()
-
-let cachedToken: string | null = null
-let cachedAt = 0
-const TOKEN_TTL_MS = 50 * 60 * 1000
-
-async function getInstallationToken(): Promise<string> {
-  if (cachedToken && Date.now() - cachedAt < TOKEN_TTL_MS) {
-    return cachedToken
-  }
-  const token = execFileSync(config.BASH_EXE, [GET_TOKEN_SH], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  }).trim()
-  cachedToken = token
-  cachedAt = Date.now()
-  return token
 }
 
 export const GhAppTokenPlugin: Plugin = async () => {

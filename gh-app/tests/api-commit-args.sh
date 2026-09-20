@@ -23,11 +23,11 @@ fi
 rm -rf "${FIXEMPTY}"
 echo "PASS api-commit.sh rejects empty commit"
 
-if bash "${APICOMMIT}" -m msg -a --file x=y >/dev/null 2>&1; then
-  echo "FAIL: api-commit.sh -a with --file should exit non-zero" >&2
+if bash "${APICOMMIT}" -m msg --file x=y >/dev/null 2>&1; then
+  echo "FAIL: api-commit.sh with removed --file should exit non-zero" >&2
   exit 1
 fi
-echo "PASS api-commit.sh rejects -a with --file"
+echo "PASS api-commit.sh rejects removed --file"
 
 if bash "${APICOMMIT}" -a >/dev/null 2>&1; then
   echo "FAIL: api-commit.sh without -m should exit non-zero" >&2
@@ -40,9 +40,3 @@ if bash "${APICOMMIT}" -m msg --bogus >/dev/null 2>&1; then
   exit 1
 fi
 echo "PASS api-commit.sh rejects unknown flag"
-
-if bash "${APICOMMIT}" o/r b -m msg --file x=@/tmp/nonexistent-mock-file >/dev/null 2>&1; then
-  echo "FAIL: api-commit.sh with missing @file should exit non-zero" >&2
-  exit 1
-fi
-echo "PASS api-commit.sh rejects missing @file"
