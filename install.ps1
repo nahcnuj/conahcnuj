@@ -15,6 +15,31 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# NOTE: helper functions must be defined before use: PowerShell defines a
+# function when execution reaches its definition, so a call placed above
+# the definition fails with "not recognized".
+function Update-AppEnvInteractively([string]$EnvPath) {
+    # Fill real values in the same run so ./install.ps1 alone leaves a
+    # working config. Skipped when stdin isn't a console (CI / pipes).
+    if ($env:CI -or -not [Environment]::UserInteractive -or [Console]::IsInputRedirected) {
+        Write-Host "  (edit app.env values as needed)"
+        return
+    }
+    Write-Host "  enter App settings (empty = keep template value):"
+    $lines = Get-Content -LiteralPath $EnvPath
+    foreach ($key in @("APP_ID", "INSTALLATION_ID", "APP_SLUG", "PRIVATE_KEY_PATH", "BASH_EXE")) {
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $m = [regex]::Match($lines[$i], "^$key=(.*)$")
+            if ($m.Success) {
+                $ans = Read-Host "  $key [$($m.Groups[1].Value)]"
+                if ($ans -ne "") { $lines[$i] = "$key=$ans" }
+            }
+        }
+    }
+    Set-Content -LiteralPath $EnvPath -Value $lines
+    Write-Host "  updated app.env"
+}
+
 if (-not $Destination) {
     $Destination = Join-Path (Join-Path $HOME ".config") "opencode"
 }
@@ -54,28 +79,6 @@ if (Test-Path -LiteralPath $SrcEnv) {
     Copy-Item -LiteralPath $Example -Destination $DstEnv
     Write-Host "  created app.env from app.env.example"
     Update-AppEnvInteractively $DstEnv
-}
-
-function Update-AppEnvInteractively([string]$EnvPath) {
-    # Fill real values in the same run so ./install.ps1 alone leaves a
-    # working config. Skipped when stdin isn't a console (CI / pipes).
-    if ($env:CI -or -not [Environment]::UserInteractive -or [Console]::IsInputRedirected) {
-        Write-Host "  (edit app.env values as needed)"
-        return
-    }
-    Write-Host "  enter App settings (empty = keep template value):"
-    $lines = Get-Content -LiteralPath $EnvPath
-    foreach ($key in @("APP_ID", "INSTALLATION_ID", "APP_SLUG", "PRIVATE_KEY_PATH", "BASH_EXE")) {
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            $m = [regex]::Match($lines[$i], "^$key=(.*)$")
-            if ($m.Success) {
-                $ans = Read-Host "  $key [$($m.Groups[1].Value)]"
-                if ($ans -ne "") { $lines[$i] = "$key=$ans" }
-            }
-        }
-    }
-    Set-Content -LiteralPath $EnvPath -Value $lines
-    Write-Host "  updated app.env"
 }
 
 # 2. opencode plugin
