@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # api-commit.sh --dry-run worktree collection. --dry-run exits before any
 # token or network access; the fixture uses a fake origin URL that is never
-# contacted. Covers: modified, untracked, deleted, renamed files; explicit
-# --file/--delete; owner/repo auto-detection from git remote.
+# contacted. Covers: -a (modified, deleted, renamed; untracked excluded),
+# staged mode, explicit --file/--delete; owner/repo auto-detection.
 # Usage: bash api-commit-dryrun.sh <staged gh-app dir>
 set -euo pipefail
 
@@ -24,34 +24,6 @@ printf 'new\n' > "${FIX}/new.txt"
 git -C "${FIX}" rm -q del.txt
 git -C "${FIX}" mv old.txt newname.txt
 git -C "${FIX}" remote add origin https://github.com/o/r.git
-
-# --all collects modify + untracked + delete + rename.
-OUT="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg --all --dry-run)"
-if [[ "${OUT}" != *"Additions:  3 file(s)"* ]]; then
-  echo "FAIL: --dry-run additions mismatch:" >&2
-  echo "${OUT}" >&2
-  exit 1
-fi
-for f in base.txt new.txt newname.txt; do
-  if [[ "${OUT}" != *"${f}"* ]]; then
-    echo "FAIL: --dry-run missing addition ${f}:" >&2
-    echo "${OUT}" >&2
-    exit 1
-  fi
-done
-if [[ "${OUT}" != *"Deletions:  2 file(s)"* ]]; then
-  echo "FAIL: --dry-run deletions mismatch:" >&2
-  echo "${OUT}" >&2
-  exit 1
-fi
-for f in del.txt old.txt; do
-  if [[ "${OUT}" != *"${f}"* ]]; then
-    echo "FAIL: --dry-run missing deletion ${f}:" >&2
-    echo "${OUT}" >&2
-    exit 1
-  fi
-done
-echo "PASS api-commit.sh --dry-run --all collects modify/add/delete/rename"
 
 # -a collects tracked worktree changes like `git commit -a`, excluding untracked.
 OUT5="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg -a --dry-run)"
@@ -80,7 +52,7 @@ fi
 echo "PASS api-commit.sh -a collects tracked only (git commit -a)"
 
 # Single positional branch name: owner/repo auto-detected from git remote.
-if OUT2="$(cd "${FIX}" && bash "${APICOMMIT}" somebranch -m msg --all --dry-run 2>&1)"; then
+if OUT2="$(cd "${FIX}" && bash "${APICOMMIT}" somebranch -m msg -a --dry-run 2>&1)"; then
   :
 else
   echo "FAIL: auto-detect run exited non-zero:" >&2
@@ -94,7 +66,7 @@ if [[ "${OUT2}" != *"Owner/Repo: o/r"* ]]; then
 fi
 echo "PASS api-commit.sh auto-detects owner/repo"
 
-# Staged mode (no --all): only staged changes, content read from the index.
+# Staged mode (no -a): only staged changes, content read from the index.
 # idx.txt is staged then deleted from the worktree: collecting it proves the
 # index (not worktree) is read. Unstaged/untracked files must be ignored.
 FIX2="$(mktemp -d)"

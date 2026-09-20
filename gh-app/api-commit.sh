@@ -13,20 +13,15 @@
 # "Commits must have verified signatures".
 #   bash gh-app/api-commit.sh -m "<message>"            # staged (git commit)
 #   bash gh-app/api-commit.sh -m "<message>" -a         # tracked worktree (git commit -a)
-#   bash gh-app/api-commit.sh -m "<message>" --all      # everything incl. untracked (git add -A + commit)
 #   bash gh-app/api-commit.sh -m "<message>" --file path=@file [--delete path]
-#   bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "<message>" --all
-#   bash gh-app/api-commit.sh <branch> -m "<message>" --all   # repo auto-detected
-#   bash gh-app/api-commit.sh <owner>/<repo> -m "<message>" --all  # branch auto-detected
+#   bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "<message>" -a
+#   bash gh-app/api-commit.sh <branch> -m "<message>"   # repo auto-detected
+#   bash gh-app/api-commit.sh <owner>/<repo> -m "<message>"  # branch auto-detected
 #
 # Options:
 #   -a                Commit tracked worktree changes (modified/deleted tracked
 #                     files, staged or not; untracked files excluded).
-#   --all             Commit every worktree change (added/modified/untracked files
-#                     and deletions) in a single verified commit.
-#                     NOTE: --all is a *commit* operation, not staging. It covers
-#                     the same file set `git add -A` would stage, but creates
-#                     the Verified commit in the same run instead of staging.
+#                     Untracked files need explicit --file path=@file.
 #   --file p=c|p=@f   Add/update file p with inline content c or @local file f.
 #   --delete path     Delete path from the branch.
 #   --create-branch   Create <branch> from the default branch if it does not
@@ -66,7 +61,6 @@ auto_repo() {
 MESSAGE=""
 declare -a FILE_SPECS=()
 declare -a DELETE_PATHS=()
-ALL=false
 TRACKED=false
 CREATE_BRANCH=false
 DRY_RUN=false
@@ -99,8 +93,6 @@ while [[ $# -gt 0 ]]; do
       DELETE_PATHS+=( "${2}" ); shift 2 ;;
     -a)
       TRACKED=true; shift ;;
-    --all)
-      ALL=true; shift ;;
     --create-branch)
       CREATE_BRANCH=true; shift ;;
     --dry-run)
@@ -124,21 +116,17 @@ fi
 
 if [[ -z "${MESSAGE}" ]]; then
   echo "ERROR: -m/--message is required" >&2
-  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [(-a | --all) | (--file p=c|p=@f ...)] [options]" >&2
+  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [-a | (--file p=c|p=@f ...)] [options]" >&2
   exit 1
 fi
-if [[ "${ALL}" == true && "${TRACKED}" == true ]]; then
-  echo "ERROR: --all and -a are mutually exclusive" >&2
-  exit 1
-fi
-if [[ ("${ALL}" == true || "${TRACKED}" == true) && ${#FILE_SPECS[@]} -gt 0 ]]; then
-  echo "ERROR: --all/-a and --file are mutually exclusive" >&2
+if [[ "${TRACKED}" == true && ${#FILE_SPECS[@]} -gt 0 ]]; then
+  echo "ERROR: -a and --file are mutually exclusive" >&2
   exit 1
 fi
 # No collection flag and no explicit files: commit staged changes like
 # plain `git commit`.
 STAGED=false
-if [[ "${ALL}" != true && "${TRACKED}" != true && ${#FILE_SPECS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+if [[ "${TRACKED}" != true && ${#FILE_SPECS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
   STAGED=true
 fi
 
@@ -151,12 +139,12 @@ json_escape() {
 declare -a ADDITIONS=()
 
 collect_worktree_changes() {
-  local entry status path u pending_rename_new
+  local entry status path pending_rename_new
   declare -a ADD_PATHS_COLLECT=()
   pushd "$(git rev-parse --show-toplevel)" >/dev/null || exit 1
-  # Tracked changes: A/M/R/D. With -z, a rename is two records: "R  <new>",
-  # then just the old path (verified: `R  b.txt\0a.txt\0`).
-  # Untracked (??) are collected via --others below.
+  # Tracked changes only (A/M/R/D), mirroring `git commit -a`.
+  # With -z, a rename is two records: "R  <new>", then just the old path
+  # (verified: `R  b.txt\0a.txt\0`). Untracked (??) need explicit --file.
   pending_rename_new=""
   while IFS= read -r -d '' entry; do
     status="${entry:0:2}"
@@ -173,13 +161,6 @@ collect_worktree_changes() {
       *) ADD_PATHS_COLLECT+=( "${path}" ) ;;
     esac
   done < <(git status --porcelain -z)
-  # Untracked files (real files, not the containing directory).
-  # Skipped for -a, mirroring `git commit -a` (untracked files excluded).
-  if [[ "${INCLUDE_UNTRACKED}" == true ]]; then
-    while IFS= read -r -d '' u; do
-      ADD_PATHS_COLLECT+=( "${u}" )
-    done < <(git ls-files --others --exclude-standard -z)
-  fi
   popd >/dev/null || exit 1
   mapfile -t ADD_FILES < <(printf '%s\n' "${ADD_PATHS_COLLECT[@]}" | sort -u | sed '/^$/d')
 }
@@ -220,11 +201,7 @@ collect_staged_changes() {
   mapfile -t ADD_FILES < <(printf '%s\n' "${ADD_PATHS_COLLECT[@]}" | sort -u | sed '/^$/d')
 }
 
-INCLUDE_UNTRACKED=true
-if [[ "${ALL}" == true ]]; then
-  collect_worktree_changes
-elif [[ "${TRACKED}" == true ]]; then
-  INCLUDE_UNTRACKED=false
+if [[ "${TRACKED}" == true ]]; then
   collect_worktree_changes
 elif [[ "${STAGED}" == true ]]; then
   FROM_INDEX=true
@@ -265,7 +242,7 @@ for f in "${ADD_FILES[@]}"; do
 done
 
 if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-  echo "ERROR: nothing to commit (nothing staged; stage with git add or use --all)" >&2
+  echo "ERROR: nothing to commit (nothing staged; stage with git add or use -a)" >&2
   exit 1
 fi
 
@@ -323,7 +300,7 @@ fi
 ADD_LIST="$(IFS=,; echo "${ADDITIONS[*]}")"
 declare -a DEL_LIST_ARR=()
 for dp in "${DELETE_PATHS[@]}"; do
-  DEL_LIST_ARR+=( "\"$(json_escape "${dp}")\"" )
+  DEL_LIST_ARR+=( "{path:\"$(json_escape "${dp}")\"}" )
 done
 DEL_LIST="$(IFS=,; echo "${DEL_LIST_ARR[*]}")"
 EB="$(json_escape "${BRANCH}")"

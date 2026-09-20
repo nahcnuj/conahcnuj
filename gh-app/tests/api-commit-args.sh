@@ -23,23 +23,13 @@ fi
 rm -rf "${FIXEMPTY}"
 echo "PASS api-commit.sh rejects empty commit"
 
-if bash "${APICOMMIT}" -m msg --all --file x=y >/dev/null 2>&1; then
-  echo "FAIL: api-commit.sh --all with --file should exit non-zero" >&2
-  exit 1
-fi
-echo "PASS api-commit.sh rejects --all with --file"
-if bash "${APICOMMIT}" -m msg --all -a >/dev/null 2>&1; then
-  echo "FAIL: api-commit.sh --all with -a should exit non-zero" >&2
-  exit 1
-fi
-echo "PASS api-commit.sh rejects --all with -a"
 if bash "${APICOMMIT}" -m msg -a --file x=y >/dev/null 2>&1; then
   echo "FAIL: api-commit.sh -a with --file should exit non-zero" >&2
   exit 1
 fi
 echo "PASS api-commit.sh rejects -a with --file"
 
-if bash "${APICOMMIT}" --all >/dev/null 2>&1; then
+if bash "${APICOMMIT}" -a >/dev/null 2>&1; then
   echo "FAIL: api-commit.sh without -m should exit non-zero" >&2
   exit 1
 fi

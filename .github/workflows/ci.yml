@@ -154,6 +154,10 @@ jobs:
     defaults:
       run:
         shell: bash
+    # Real IDs when the repo defines them, else fakes. No private key needed.
+    env:
+      APP_ID: ${{ secrets.APP_ID }}
+      INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -170,6 +174,11 @@ jobs:
     defaults:
       run:
         shell: bash
+    # APP_ID etc. come from repo secrets when present (else self-explanatory
+    # fakes). No private key is ever needed: no token is issued in this flow.
+    env:
+      E2E_APP_ID: ${{ secrets.APP_ID }}
+      E2E_INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -179,8 +188,79 @@ jobs:
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # Full loop with a real `opencode run` (scripted local stub model, no
-      # secrets, no GitHub network): install.ps1 -> plugin load -> `git vc`
-      # surfaces naturally via the commit block. See e2e/run.sh.
-      - name: Run e2e
-        run: bash e2e/run.sh
+      # Install exactly like a user would, into a temp dir.
+      - name: Install plugin via install.ps1
+        run: |
+          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File ./install.ps1 -Destination "$RUNNER_TEMP/e2e-inst"
+          test -f "$RUNNER_TEMP/e2e-inst/plugins/gh-app-token.ts"
+          test -f "$RUNNER_TEMP/e2e-inst/gh-app/api-commit.sh"
+
+      # Fake app.env over the installed copy (BOT_USER_ID wins over
+      # auto-resolve; bogus BASH_EXE keeps get-token.sh from running).
+      - name: Stage fake app.env and stub provider config
+        run: |
+          cat > "$RUNNER_TEMP/e2e-inst/gh-app/app.env" <<EOF
+          APP_ID=${E2E_APP_ID:-00000}
+          BOT_USER_ID=999
+          INSTALLATION_ID=${E2E_INSTALLATION_ID:-00000}
+          APP_SLUG=smokeapp
+          PRIVATE_KEY_PATH=/tmp/nonexistent.pem
+          BASH_EXE=/nonexistent-bash
+          EOF
+          cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<'EOF'
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "model": "stub/e2e-stub",
+            "provider": {
+              "stub": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "e2e stub (local)",
+                "options": { "baseURL": "http://127.0.0.1:18081/v1", "apiKey": "dummy" },
+                "models": { "e2e-stub": { "name": "e2e stub" } }
+              }
+            }
+          }
+          EOF
+
+      # Fixture repo (no AGENTS.md): the agent can only discover `git vc`
+      # through the plugin hook, not repo docs.
+      - name: Stage fixture repo with a staged change
+        run: |
+          FIX="$RUNNER_TEMP/e2e-fixture"
+          mkdir -p "$FIX"
+          git -C "$FIX" init -q
+          git -C "$FIX" config user.email "e2e@test"
+          git -C "$FIX" config user.name "e2e"
+          printf 'hello\n' > "$FIX/file.txt"
+          git -C "$FIX" add -A
+          git -C "$FIX" commit -qm init
+          printf 'change\n' >> "$FIX/file.txt"
+          git -C "$FIX" add file.txt
+
+      # Real `opencode run` against a scripted local stub model (e2e/stub.js
+      # makes exactly one tool call: bash `git commit`). The `git vc` string
+      # in the output can only originate from the REAL plugin hook blocking
+      # `git commit`, proving install -> load -> env -> hook end to end.
+      - name: Run opencode and assert git vc surfaces
+        run: |
+          node e2e/stub.js 18081 >/dev/null 2>&1 &
+          SRV_PID=$!
+          trap 'kill "$SRV_PID" 2>/dev/null || true' EXIT
+          for ((i = 0; i < 30; i++)); do
+            if (echo > /dev/tcp/127.0.0.1/18081) >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          OUT="$(OPENCODE_CONFIG_DIR="$RUNNER_TEMP/e2e-inst" \
+            OPENCODE_DISABLE_AUTOUPDATE=true \
+            OPENCODE_DISABLE_MODELS_FETCH=true \
+            timeout 240 opencode run --dir "$RUNNER_TEMP/e2e-fixture" --title e2e \
+            "Commit the staged changes with message e2e test" 2>&1 || true)"
+          echo "$OUT" | tail -15
+          if [[ "$OUT" != *"git vc"* ]]; then
+            echo "E2E FAIL: 'git vc' not found in opencode output" >&2
+            exit 1
+          fi
+          echo "E2E OK: 'git vc' surfaced naturally in a real opencode session"

@@ -24,7 +24,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   └── app.env.example        #   設定テンプレート
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置
-├── e2e/                       # 実 opencode run による e2e（stub モデル。秘密鍵・課金不要）
+├── e2e/                       # e2e 用 stub モデル（手順本体は ci.yml の e2e-opencode に記載）
 ├── .github/workflows/ci.yml   # GitHub Actions (Ubuntu / Windows)
 ├── .gitignore
 └── AGENTS.md

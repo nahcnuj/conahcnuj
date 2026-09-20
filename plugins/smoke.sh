@@ -40,10 +40,12 @@ cp "${HERE}/plugin-stub.d.ts" "${STAGE}/src/"
 cp "${INST}/gh-app/"*.sh "${STAGE}/gh-app/"
 # Fake app.env over the staged copy (BOT_USER_ID wins over auto-resolve;
 # bogus BASH_EXE keeps get-token.sh from running: no key, no network).
-cat > "${STAGE}/gh-app/app.env" <<'EOF'
-APP_ID=00000
+# APP_ID etc. come from the environment when provided (CI secrets), else
+# self-explanatory fakes; no private key is ever needed.
+cat > "${STAGE}/gh-app/app.env" <<EOF
+APP_ID=${APP_ID:-00000}
 BOT_USER_ID=999
-INSTALLATION_ID=00000
+INSTALLATION_ID=${INSTALLATION_ID:-00000}
 APP_SLUG=smokeapp
 PRIVATE_KEY_PATH=/tmp/nonexistent.pem
 BASH_EXE=/nonexistent-bash

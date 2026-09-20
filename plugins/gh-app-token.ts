@@ -103,9 +103,9 @@ export const GhAppTokenPlugin: Plugin = async () => {
   const bashExe = config.BASH_EXE.replace(/\\/g, "/")
   // `git vc` (verified-commit): one-line Verified commit of the whole worktree.
   // owner/repo/branch are auto-detected from git remote + HEAD, so it works
-  // in any repo: `git vc -m "msg" --all`
+  // in any repo: `git vc -m "msg"` (staged) or `git vc -m "msg" -a` (tracked)
   const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
-  const vcUsage = `git vc -m "<message>" --all (or: bash "${apiCommitSh}" -m "<message>" --all)`
+  const vcUsage = `git vc -m "<message>" [-a] (or: bash "${apiCommitSh}" -m "<message>" [-a])`
 
   return {
     "shell.env": async (input, output) => {
