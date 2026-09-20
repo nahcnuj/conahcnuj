@@ -71,11 +71,16 @@ Copy-Item gh-app\app.env.example gh-app\app.env
 
 ```ini
 APP_ID=<your-app-id>
+BOT_USER_ID=<your-bot-user-id>
 INSTALLATION_ID=<your-installation-id>
 APP_SLUG=conahcnuj
 PRIVATE_KEY_PATH=${HOME}/.ssh/conahcnuj.private-key.pem
 BASH_EXE="C:/Program Files/Git/bin/bash.exe"
 ```
+
+`BOT_USER_ID` は GitHub App の bot アカウント（`conahcnuj[bot]`）のユーザー ID で、
+GitHub がコミットを bot に帰属させるために使う（`APP_ID` とは別物）。
+取得: `gh api users/conahcnuj%5Bbot%5D --jq '.id'`
 
 秘密鍵（`.pem`）は**このリポジトリに絶対にコミットしない**こと。`app.env` も `.gitignore` 済み。
 

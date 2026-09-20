@@ -10,6 +10,7 @@ const CREDENTIAL_HELPER_SH = path.join(GH_APP_DIR, "git-credential-helper.sh")
 
 const DEFAULT_CONFIG = {
   APP_ID: "",
+  BOT_USER_ID: "",
   APP_SLUG: "",
   BASH_EXE: "C:/Program Files/Git/bin/bash.exe",
 }
@@ -45,7 +46,7 @@ function loadAppEnv(): typeof DEFAULT_CONFIG {
 
 const config = loadAppEnv()
 const BOT_NAME = `${config.APP_SLUG}[bot]`
-const BOT_EMAIL = `${config.APP_ID}+${config.APP_SLUG}[bot]@users.noreply.github.com`
+const BOT_EMAIL = `${config.BOT_USER_ID || config.APP_ID}+${config.APP_SLUG}[bot]@users.noreply.github.com`
 
 let cachedToken: string | null = null
 let cachedAt = 0
