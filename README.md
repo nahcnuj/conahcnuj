@@ -64,12 +64,7 @@ cd <repo>
 
 ### 2. opencode を再起動
 
-`gh-app/app.env` に実値を入れてから再起動。再起動後、opencode のシェルで確認
-（自分のシェルが未ログインのままなのは正常）:
-
-```bash
-gh auth status
-```
+`gh-app/app.env` に実値を入れてから再起動する（確認手順は AGENTS.md）。
 
 ## トラブルシューティング
 
