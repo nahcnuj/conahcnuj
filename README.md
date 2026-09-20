@@ -45,63 +45,15 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 **Verified 署名のついたコミット**を 1 件作成する。コミットは GitHub 側が作成するため、
 「Commits must have verified signatures」等のブランチルールを満たす。
 
-bash と `curl` / `openssl` / `sed` があれば Ubuntu でも Windows（Git Bash）でも動く。
+なぜ普通の `git commit` ではダメなのか: opencode 上の git は App 名義で動き、
+署名鍵を持たない。`commit.gpgsign=false` なら unsigned コミットになりブロックされ、
+`true` に変えても署名鍵が無いため `git commit` 自体が「gpg failed to sign」で失敗する
+（bot アカウントに GPG 鍵は登録できない）。GitHub が Verified と認めるのは登録済み鍵の
+署名か GitHub 自身の作成コミットだけなので、API 経由で作るしかない。
 
-```bash
-# どのリポジトリでも同じ1行（owner/repo/branch は git remote と現在ブランチから自動検出）
-git vc -m "commit message" --all      # 作業ツリーの変更（新規・変更・削除）を一括コミット
-
-# このリポジトリ内では直接スクリプトを叩いても同じ
-bash gh-app/api-commit.sh -m "commit message" --all
-
-# ファイルを明示指定（author は conahcnuj[bot]）
-bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "commit message" \
-  --file path/to/file=新内容 \        # インライン
-  --file path/to/file=@local-file     # ローカルファイルの中身
-  --delete path/to/removed            # 削除
-
-# 新規ブランチ（デフォルトブランチ起点で ref を作成。unsigned コミットを介さない）
-git vc -m "commit message" --all --create-branch
-
-# 何がコミットされるか事前確認（API を呼ばない）
-bash gh-app/api-commit.sh -m "commit message" --all --dry-run
-```
-
-`git commit` は使わないこと。プラグインが `commit.gpgsign=false` を注入するため
-unsigned コミットになり、「Commits must have verified signatures」のブランチルールで
-ブロックされる。opencode 上ではプラグインが `git commit` を検知してエラーにし、
-`git vc` を案内する（git の alias は組み込みコマンドを上書きできないため、新規名
-`vc` で提供する）。
-
-`commit.gpgsign=true` にしても解決しない。署名には GitHub アカウントに登録済みの
-GPG 公開鍵に対応する秘密鍵が必要だが、GitHub App の bot アカウントにそのような鍵は
-登録できない。GitHub が「Verified」と認めるのは、(a) 登録済み鍵での署名か、
-(b) GitHub 自身が作成・署名したコミット（Web UI / API の `createCommitOnBranch`）
-のみ。`git vc`（＝`api-commit.sh`）は (b) の経路を使う。
-`git add -A`＋`git commit -m` との違いはこの1点に集約される: 収集する作業ツリーの
-内容は同じだが、コミットの作成場所（ローカルか GitHub サーバー側か）が違い、
-サーバー側作成のものだけが署名付きになる。
-
-### 仕様（api-commit.sh）
-
-- 1 実行でブランチ先端に Verified コミットを **1 件だけ**作る。author は
-  `conahcnuj[bot]`、committer は GitHub（署名付き）。
-- `--all` の収集規則（`git status --porcelain -z` 基準）:
-  - 追加・更新: 新規（staged/unstaged）、変更、untracked ファイル（中身は作業ツリー現物）
-  - 削除: 削除されたパス（`D`）
-  - リネーム: 新パスを追加・旧パスを削除として扱う
-- owner/repo・branch の決定規則: 先頭の位置引数（`<owner>/<repo>` は `/` 含みで判定、
-  それ以外は branch 名）→ 無ければ `git remote get-url origin` と現在ブランチから
-  自動検出。
-- `--create-branch` が無い状態でブランチが存在しなければエラー。
-  付きの場合はデフォルトブランチ先端から ref を作成（コミット push を介さない）。
-- `--dry-run` はトークン・network 不要で収集結果のみ表示（offline テスト可）。
-- 既存ブランチへの追記のみ。履歴の書き換え・force-push はしない。
-  unsigned コミットが既にあるブランチは、先に `git fetch` → `git reset --hard`
-  で作り直してから使うこと。
-
-必要な App 権限は `Contents: Read and write` と `Workflows: Read and write`
-（`.github/workflows/` を変更する場合のみ）。
+opencode 内でのコミット手順・オプション・仕様の詳細は AI エージェント向けの
+`AGENTS.md`（「コミット運用」節）にある。必要な App 権限は `Contents: Read and write`
+と `Workflows: Read and write`（`.github/workflows/` を変更する場合のみ）。
 
 ## インストール
 

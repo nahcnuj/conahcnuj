@@ -85,6 +85,7 @@ jobs:
             "gh-app/git-credential-helper.sh",
             "gh-app/setup-git.sh",
             "gh-app/api-commit.sh",
+            "gh-app/bot-user-id.sh",
             "gh-app/mock-test.sh",
             "gh-app/app.env.example",
             "plugins/gh-app-token.ts"
@@ -93,6 +94,11 @@ jobs:
             $p = Join-Path $dest $rel
             if (-not (Test-Path -LiteralPath $p)) {
               Write-Error "missing: $rel"
+              exit 1
+            }
+            $srcHash = (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $rel)).Hash
+            if ((Get-FileHash -LiteralPath $p).Hash -ne $srcHash) {
+              Write-Error "content mismatch: $rel"
               exit 1
             }
           }
@@ -123,9 +129,35 @@ jobs:
   lint-ts:
     name: Typecheck opencode plugin
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # Offline stub types (plugins/plugin-stub.d.ts), no npm install needed.
+      # @types/node from npm; @opencode-ai/plugin from the offline stub
+      # (plugins/plugin-stub.d.ts).
       - name: Typecheck plugin
-        run: npx --yes -p typescript@5.9.2 tsc -p plugins --noEmit
+        run: |
+          npm --prefix plugins install --no-audit --no-fund
+          npm --prefix plugins exec -- tsc -p plugins --noEmit
+
+  plugin-smoke:
+    name: Plugin runtime smoke test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # Compiles the plugin, loads it against a fake gh-app dir (fake
+      # app.env, unreachable BASH_EXE) and asserts the shell.env contract
+      # (GIT_CONFIG identity + alias.vc) and the git-commit redirect.
+      # Needs node/npm from the runner; no secrets, no GitHub network.
+      - name: Run plugin smoke test
+        run: bash plugins/smoke.sh

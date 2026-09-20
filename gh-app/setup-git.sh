@@ -17,13 +17,8 @@ set -a
 . "${ENV_FILE}"
 set +a
 
-if [[ -z "${BOT_USER_ID:-}" ]]; then
-  echo "ERROR: BOT_USER_ID is not set. Set it to the bot account user ID" >&2
-  echo "(gh api users/${APP_SLUG}%5Bbot%5D --jq .id), not APP_ID." >&2
-  echo "APP_ID is the GitHub App's ID (JWT iss) and never attributes commits" >&2
-  echo "to the bot account." >&2
-  exit 1
-fi
+# Bot user ID: app.env value wins, otherwise auto-resolved from the API.
+BOT_USER_ID="$(bash "${HERE}/bot-user-id.sh")"
 BOT_NAME="${APP_SLUG}[bot]"
 BOT_EMAIL="${BOT_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 

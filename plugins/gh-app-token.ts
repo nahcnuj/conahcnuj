@@ -45,14 +45,32 @@ function loadAppEnv(): typeof DEFAULT_CONFIG {
 }
 
 const config = loadAppEnv()
-if (!config.BOT_USER_ID) {
+const BOT_USER_ID_SH = path.join(GH_APP_DIR, "bot-user-id.sh")
+function resolveBotUserId(): string {
+  const raw = config.BOT_USER_ID
+  if (raw && !raw.startsWith("<")) {
+    return raw
+  }
+  // Not set (or left as a placeholder): auto-resolve from the public API.
   // APP_ID (the GitHub App's ID, used for JWT `iss`) never attributes commits
-  // to the bot account, so there is no usable fallback: fail fast with a fix.
+  // to the bot account, so it is deliberately NOT used as a fallback.
+  try {
+    const out = execFileSync(config.BASH_EXE, [BOT_USER_ID_SH], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    }).trim()
+    if (/^\d+$/.test(out)) {
+      return out
+    }
+  } catch {
+    // fall through to the actionable error below (e.g. offline)
+  }
   throw new Error(
-    "BOT_USER_ID is not set. Set it to the bot account user ID " +
-      "(`gh api users/<slug>%5Bbot%5D --jq .id`), not APP_ID."
+    "BOT_USER_ID is not set and auto-resolve failed. Set it to the bot " +
+      "account user ID (`gh api users/<slug>%5Bbot%5D --jq .id`), not APP_ID."
   )
 }
+config.BOT_USER_ID = resolveBotUserId()
 const BOT_NAME = `${config.APP_SLUG}[bot]`
 const BOT_EMAIL = `${config.BOT_USER_ID}+${config.APP_SLUG}[bot]@users.noreply.github.com`
 

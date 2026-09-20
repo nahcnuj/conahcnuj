@@ -6,7 +6,8 @@
 # "Commits must have verified signatures".
 #
 # Usage (run inside the repo; owner/repo/branch are auto-detected from git):
-#   bash gh-app/api-commit.sh -m "<message>" --all
+#   bash gh-app/api-commit.sh -m "<message>"            # staged changes (like git commit)
+#   bash gh-app/api-commit.sh -m "<message>" --all      # every worktree change (like git add -A + commit)
 #   bash gh-app/api-commit.sh -m "<message>" --file path=@file [--delete path]
 #   bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "<message>" --all
 #   bash gh-app/api-commit.sh <branch> -m "<message>" --all   # repo auto-detected
@@ -123,9 +124,10 @@ if [[ "${ALL}" == true && ${#FILE_SPECS[@]} -gt 0 ]]; then
   echo "ERROR: --all and --file are mutually exclusive" >&2
   exit 1
 fi
+# No --all/--file/--delete: commit staged changes like plain `git commit`.
+STAGED=false
 if [[ "${ALL}" != true && ${#FILE_SPECS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-  echo "ERROR: nothing to commit (use --all, --file, or --delete)" >&2
-  exit 1
+  STAGED=true
 fi
 
 # JSON/GraphQL-escape a string (backslashes first, then double quotes).
@@ -168,9 +170,46 @@ collect_worktree_changes() {
 }
 
 declare -a ADD_FILES=()
+FROM_INDEX=false
+
+# Staged changes (like plain `git commit`): content comes from the index via
+# `git show :path`. Format (verified): `D\0path`, `A\0path`, `R100\0old\0new`.
+collect_staged_changes() {
+  local st path old new
+  declare -a ADD_PATHS_COLLECT=()
+  pushd "$(git rev-parse --show-toplevel)" >/dev/null || exit 1
+  while IFS= read -r -d '' st; do
+    case "${st}" in
+      R*|C*)
+        IFS= read -r -d '' old || exit 1
+        IFS= read -r -d '' new || exit 1
+        ADD_PATHS_COLLECT+=( "${new}" )
+        if [[ "${st}" == R* ]]; then
+          DELETE_PATHS+=( "${old}" )
+        fi
+        ;;
+      D)
+        IFS= read -r -d '' path || exit 1
+        DELETE_PATHS+=( "${path}" )
+        ;;
+      A|M|T)
+        IFS= read -r -d '' path || exit 1
+        ADD_PATHS_COLLECT+=( "${path}" )
+        ;;
+      *)
+        echo "ERROR: unexpected diff status: ${st}" >&2
+        exit 1 ;;
+    esac
+  done < <(git diff --cached --name-status -z)
+  popd >/dev/null || exit 1
+  mapfile -t ADD_FILES < <(printf '%s\n' "${ADD_PATHS_COLLECT[@]}" | sort -u | sed '/^$/d')
+}
 
 if [[ "${ALL}" == true ]]; then
   collect_worktree_changes
+elif [[ "${STAGED}" == true ]]; then
+  FROM_INDEX=true
+  collect_staged_changes
 fi
 
 # Explicit --file specs first (kept order), then auto-collected files.
@@ -192,14 +231,24 @@ for spec in "${FILE_SPECS[@]}"; do
 done
 
 for f in "${ADD_FILES[@]}"; do
-  if [[ ! -f "${f}" ]]; then
-    echo "ERROR: file not found: ${f}" >&2
-    exit 1
+  if [[ "${FROM_INDEX}" == true ]]; then
+    # Staged content (may differ from the worktree file).
+    B64="$(git show ":${f}" | openssl base64 -A)"
+  else
+    if [[ ! -f "${f}" ]]; then
+      echo "ERROR: file not found: ${f}" >&2
+      exit 1
+    fi
+    B64="$(openssl base64 -A -in "${f}")"
   fi
-  B64="$(openssl base64 -A -in "${f}")"
   EP="$(json_escape "${f}")"
   ADDITIONS+=( "{path:\"${EP}\",contents:\"${B64}\"}" )
 done
+
+if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+  echo "ERROR: nothing to commit (nothing staged; stage with git add or use --all)" >&2
+  exit 1
+fi
 
 if [[ "${DRY_RUN}" == true ]]; then
   echo "Owner/Repo: ${REPO}"

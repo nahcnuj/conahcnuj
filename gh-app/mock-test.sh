@@ -14,6 +14,7 @@ mkdir -p "${TMP}/gh-app"
 cp "${HERE}/get-token.sh" "${TMP}/gh-app/"
 cp "${HERE}/git-credential-helper.sh" "${TMP}/gh-app/"
 cp "${HERE}/api-commit.sh" "${TMP}/gh-app/"
+cp "${HERE}/bot-user-id.sh" "${TMP}/gh-app/"
 cat > "${TMP}/gh-app/app.env" <<'EOF'
 APP_ID=00000
 INSTALLATION_ID=00000

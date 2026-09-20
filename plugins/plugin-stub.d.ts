@@ -1,41 +1,6 @@
-// Minimal offline type surface for CI typechecking (no npm install).
+// Minimal offline type surface for the opencode-specific module
+// (npm install only provides @types/node + typescript; see package.json).
 // Covers only what plugins/gh-app-token.ts uses: Plugin, hook input/output.
-declare const __dirname: string;
-
-declare module "node:child_process" {
-  export function execFileSync(
-    file: string,
-    args: readonly string[],
-    options: Record<string, unknown>
-  ): string;
-}
-
-declare module "node:fs" {
-  export function existsSync(path: string): boolean;
-  export function readFileSync(path: string, encoding: string): string;
-  const _default: {
-    existsSync(path: string): boolean;
-    readFileSync(path: string, encoding: string): string;
-  };
-  export default _default;
-}
-
-declare module "node:os" {
-  export function homedir(): string;
-  const _default: {
-    homedir(): string;
-  };
-  export default _default;
-}
-
-declare module "node:path" {
-  export function join(...parts: string[]): string;
-  const _default: {
-    join(...parts: string[]): string;
-  };
-  export default _default;
-}
-
 declare module "@opencode-ai/plugin" {
   export interface HookInput {
     tool: string;

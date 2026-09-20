@@ -7,10 +7,20 @@ set -euo pipefail
 STAGE="${1:?staged gh-app dir required}"
 APICOMMIT="${STAGE}/api-commit.sh"
 
-if bash "${APICOMMIT}" o/r b -m msg >/dev/null 2>&1; then
-  echo "FAIL: api-commit.sh without files should exit non-zero" >&2
+FIXEMPTY="$(mktemp -d)"
+git -C "${FIXEMPTY}" init -q
+git -C "${FIXEMPTY}" config user.email "mock@test"
+git -C "${FIXEMPTY}" config user.name "mock"
+printf 'x\n' > "${FIXEMPTY}/x.txt"
+git -C "${FIXEMPTY}" add -A
+git -C "${FIXEMPTY}" commit -qm init
+# Staged mode with a clean index: nothing to commit (offline guard).
+if ( cd "${FIXEMPTY}" && bash "${APICOMMIT}" o/r b -m msg --dry-run >/dev/null 2>&1 ); then
+  echo "FAIL: api-commit.sh with clean index should exit non-zero" >&2
+  rm -rf "${FIXEMPTY}"
   exit 1
 fi
+rm -rf "${FIXEMPTY}"
 echo "PASS api-commit.sh rejects empty commit"
 
 if bash "${APICOMMIT}" -m msg --all --file x=y >/dev/null 2>&1; then
