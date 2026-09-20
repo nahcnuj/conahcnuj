@@ -64,7 +64,7 @@ cd <repo>
 
 ### 2. opencode を再起動
 
-`gh-app/app.env` に実値を入れてから再起動する（確認手順は AGENTS.md）。
+`gh-app/app.env` に実値を入れてから OpenCode を再起動する。
 
 ## トラブルシューティング
 

@@ -68,7 +68,7 @@ bash gh-app/api-commit.sh -m "message" -a --dry-run   # owner/repo/branch 自動
   powershell -ExecutionPolicy Bypass -File install.ps1
   ```
   その後 opencode を再起動。CI（`install-test` / `lint-ps`）にも同じ検証がある。
-- 再起動後は opencode 内のシェルで `gh auth status` が bot アカウントを示すことを確認する（自分のシェルが未ログインのままなのは正常。プラグインは opencode 内でのみ効く）。
+- 再起動後は opencode 内のシェルで `gh auth status` が bot アカウントを示すことを確認する。
 - secrets を使う実機検証（`get-token.sh` / `api-commit.sh`）は CI で行わず、ローカルで確認する。
 
 ## コミット運用
