@@ -212,6 +212,9 @@ async function fetchInstallationToken(
   const key = fs.readFileSync(keyPath, "utf8")
   const signature = createSign("sha256").update(signingInput).sign(key)
   const jwt = `${signingInput}.${b64url(signature)}`
+  // Only the short-lived signed JWT leaves this machine, and only to
+  // api.github.com. The private key itself is never transmitted: it is
+  // read locally purely to sign with.
   const res = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
@@ -236,6 +239,11 @@ async function fetchInstallationToken(
     throw new Error("Token exchange returned no token.")
   }
   const token = (data as { token: string }).token
+  // The cache file is read back as a credential, so enforce the token
+  // shape here: GitHub tokens are URL-safe without separators or spaces.
+  if (!/^[A-Za-z0-9_.~-]+$/.test(token)) {
+    throw new Error("Token exchange returned a malformed token.")
+  }
   const expiresAt = (data as { expires_at?: unknown }).expires_at
   const expiresSec =
     typeof expiresAt === "string" && !Number.isNaN(Date.parse(expiresAt))
@@ -285,6 +293,71 @@ function isGitCommitCommand(cmd: string): boolean {
   return /(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)
 }
 
+interface ShellIdentity {
+  botName: string
+  botEmail: string
+  vcCmd: string
+}
+
+/**
+ * `shell.env` hook body: publish the App identity to every shell the
+ * session spawns. GH_TOKEN is best-effort (a missing key must not break
+ * shell startup); the git identity below is always enforced.
+ */
+async function injectShellEnv(
+  env: Record<string, string>,
+  identity: ShellIdentity
+): Promise<void> {
+  const token = await getInstallationToken().catch(() => null)
+
+  // GH_TOKEN: lets gh CLI / GitHub API calls run as the App.
+  if (token) {
+    env.GH_TOKEN = token
+  }
+
+  // GIT_CONFIG_*: force every git operation in this project to use the App identity.
+  // Built from an array so KEY/VALUE indices and COUNT never drift apart.
+  const helperSh = CREDENTIAL_HELPER_SH.replace(/\\/g, "/")
+  const helperCmd = `!"${config.BASH_EXE}" "${helperSh}"`
+  const gitConfig: Array<[string, string]> = [
+    ["user.name", identity.botName],
+    ["user.email", identity.botEmail],
+    ["credential.helper", helperCmd],
+    ["commit.gpgsign", "false"],
+    ["alias.vc", identity.vcCmd],
+  ]
+  env.GIT_CONFIG_COUNT = String(gitConfig.length)
+  gitConfig.forEach(([key, value], i) => {
+    env[`GIT_CONFIG_KEY_${i}`] = key
+    env[`GIT_CONFIG_VALUE_${i}`] = value
+  })
+}
+
+/**
+ * `tool.execute.before` hook body: `git commit` under the App identity is
+ * always unsigned (commit.gpgsign is forced to false above) and fails
+ * "Commits must have verified signatures" branch rules. Git aliases cannot
+ * shadow the `commit` builtin, so block it here and point at the Verified
+ * path instead. Throws to block, returns silently to allow.
+ */
+function blockUnsignedCommit(
+  tool: string,
+  args: unknown,
+  botName: string,
+  vcUsage: string
+): void {
+  if (tool !== "bash") {
+    return
+  }
+  const cmd = parseBashCommand(args)
+  if (cmd !== null && isGitCommitCommand(cmd)) {
+    throw new Error(
+      `Do not use \`git commit\`: commits made as ${botName} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
+        `Create a Verified commit instead: ${vcUsage}`
+    )
+  }
+}
+
 export const GhAppTokenPlugin: Plugin = async () => {
   const botUserId = await resolveBotUserId(config.APP_SLUG)
   const botName = `${config.APP_SLUG}[bot]`
@@ -298,45 +371,11 @@ export const GhAppTokenPlugin: Plugin = async () => {
   const vcUsage = `git vc -m "<message>" [-a] (or: bash "${apiCommitSh}" -m "<message>" [-a])`
 
   return {
-    "shell.env": async (input, output) => {
-      const token = await getInstallationToken().catch(() => null)
-
-      // GH_TOKEN: lets gh CLI / GitHub API calls run as the App.
-      if (token) {
-        output.env.GH_TOKEN = token
-      }
-
-      // GIT_CONFIG_*: force every git operation in this project to use the App identity.
-      // Built from an array so KEY/VALUE indices and COUNT never drift apart.
-      const helperSh = CREDENTIAL_HELPER_SH.replace(/\\/g, "/")
-      const helperCmd = `!"${config.BASH_EXE}" "${helperSh}"`
-      const gitConfig: Array<[string, string]> = [
-        ["user.name", botName],
-        ["user.email", botEmail],
-        ["credential.helper", helperCmd],
-        ["commit.gpgsign", "false"],
-        ["alias.vc", vcCmd],
-      ]
-      output.env.GIT_CONFIG_COUNT = String(gitConfig.length)
-      gitConfig.forEach(([key, value], i) => {
-        output.env[`GIT_CONFIG_KEY_${i}`] = key
-        output.env[`GIT_CONFIG_VALUE_${i}`] = value
-      })
+    "shell.env": async (_input, output) => {
+      await injectShellEnv(output.env, { botName, botEmail, vcCmd })
     },
     "tool.execute.before": async (input, output) => {
-      // `git commit` under the App identity is always unsigned (commit.gpgsign
-      // is forced to false above) and fails "Commits must have verified
-      // signatures" branch rules. Git aliases cannot shadow the `commit`
-      // builtin, so block it here and point at the Verified path instead.
-      if (input.tool === "bash") {
-        const cmd = parseBashCommand(output.args)
-        if (cmd !== null && isGitCommitCommand(cmd)) {
-          throw new Error(
-            `Do not use \`git commit\`: commits made as ${botName} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
-              `Create a Verified commit instead: ${vcUsage}`
-          )
-        }
-      }
+      blockUnsignedCommit(input.tool, output.args, botName, vcUsage)
     },
   }
 }
