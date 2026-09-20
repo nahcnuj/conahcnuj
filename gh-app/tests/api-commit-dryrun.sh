@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# api-commit.sh --dry-run worktree collection. --dry-run exits before any
+# token or network access; the fixture uses a fake origin URL that is never
+# contacted. Covers: modified, untracked, deleted, renamed files; explicit
+# --file/--delete; owner/repo auto-detection from git remote.
+# Usage: bash api-commit-dryrun.sh <staged gh-app dir>
+set -euo pipefail
+
+STAGE="${1:?staged gh-app dir required}"
+APICOMMIT="${STAGE}/api-commit.sh"
+
+FIX="$(mktemp -d)"
+trap 'rm -rf "${FIX}"' EXIT
+git -C "${FIX}" init -q
+git -C "${FIX}" config user.email "mock@test"
+git -C "${FIX}" config user.name "mock"
+printf 'base\n' > "${FIX}/base.txt"
+printf 'del\n' > "${FIX}/del.txt"
+printf 'mv\n' > "${FIX}/old.txt"
+git -C "${FIX}" add -A
+git -C "${FIX}" commit -qm init
+printf 'mod\n' >> "${FIX}/base.txt"
+printf 'new\n' > "${FIX}/new.txt"
+git -C "${FIX}" rm -q del.txt
+git -C "${FIX}" mv old.txt newname.txt
+git -C "${FIX}" remote add origin https://github.com/o/r.git
+
+# --all collects modify + untracked + delete + rename.
+OUT="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg --all --dry-run)"
+if [[ "${OUT}" != *"Additions:  3 file(s)"* ]]; then
+  echo "FAIL: --dry-run additions mismatch:" >&2
+  echo "${OUT}" >&2
+  exit 1
+fi
+for f in base.txt new.txt newname.txt; do
+  if [[ "${OUT}" != *"${f}"* ]]; then
+    echo "FAIL: --dry-run missing addition ${f}:" >&2
+    echo "${OUT}" >&2
+    exit 1
+  fi
+done
+if [[ "${OUT}" != *"Deletions:  2 file(s)"* ]]; then
+  echo "FAIL: --dry-run deletions mismatch:" >&2
+  echo "${OUT}" >&2
+  exit 1
+fi
+for f in del.txt old.txt; do
+  if [[ "${OUT}" != *"${f}"* ]]; then
+    echo "FAIL: --dry-run missing deletion ${f}:" >&2
+    echo "${OUT}" >&2
+    exit 1
+  fi
+done
+echo "PASS api-commit.sh --dry-run --all collects modify/add/delete/rename"
+
+# Single positional branch name: owner/repo auto-detected from git remote.
+if OUT2="$(cd "${FIX}" && bash "${APICOMMIT}" somebranch -m msg --all --dry-run 2>&1)"; then
+  :
+else
+  echo "FAIL: auto-detect run exited non-zero:" >&2
+  echo "${OUT2}" >&2
+  exit 1
+fi
+if [[ "${OUT2}" != *"Owner/Repo: o/r"* ]]; then
+  echo "FAIL: auto-detect owner/repo mismatch:" >&2
+  echo "${OUT2}" >&2
+  exit 1
+fi
+echo "PASS api-commit.sh auto-detects owner/repo"
+
+# Explicit --file/--delete without --all.
+OUT3="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg --file inline.txt=hello --delete gone.txt --dry-run)"
+if [[ "${OUT3}" != *"Additions:  1 file(s)"* || "${OUT3}" != *"inline.txt"* ]]; then
+  echo "FAIL: --dry-run --file mismatch:" >&2
+  echo "${OUT3}" >&2
+  exit 1
+fi
+if [[ "${OUT3}" != *"Deletions:  1 file(s)"* || "${OUT3}" != *"gone.txt"* ]]; then
+  echo "FAIL: --dry-run --delete mismatch:" >&2
+  echo "${OUT3}" >&2
+  exit 1
+fi
+echo "PASS api-commit.sh --dry-run --file/--delete"

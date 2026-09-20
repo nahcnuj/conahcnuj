@@ -15,6 +15,13 @@
 # Options:
 #   --all             Commit every worktree change (added/modified/untracked files
 #                     and deletions) in a single verified commit.
+#                     This collects the same worktree state that `git add -A`
+#                     would stage, but instead of creating a local (unsigned)
+#                     commit with `git commit`, it sends the file contents to
+#                     the GitHub API, which creates the commit server-side and
+#                     signs it. That server-side signature is the whole point:
+#                     only GitHub-signed commits satisfy "Commits must have
+#                     verified signatures".
 #   --file p=c|p=@f   Add/update file p with inline content c or @local file f.
 #   --delete path     Delete path from the branch.
 #   --create-branch   Create <branch> from the default branch if it does not

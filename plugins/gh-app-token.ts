@@ -45,8 +45,16 @@ function loadAppEnv(): typeof DEFAULT_CONFIG {
 }
 
 const config = loadAppEnv()
+if (!config.BOT_USER_ID) {
+  // APP_ID (the GitHub App's ID, used for JWT `iss`) never attributes commits
+  // to the bot account, so there is no usable fallback: fail fast with a fix.
+  throw new Error(
+    "BOT_USER_ID is not set. Set it to the bot account user ID " +
+      "(`gh api users/<slug>%5Bbot%5D --jq .id`), not APP_ID."
+  )
+}
 const BOT_NAME = `${config.APP_SLUG}[bot]`
-const BOT_EMAIL = `${config.BOT_USER_ID || config.APP_ID}+${config.APP_SLUG}[bot]@users.noreply.github.com`
+const BOT_EMAIL = `${config.BOT_USER_ID}+${config.APP_SLUG}[bot]@users.noreply.github.com`
 
 let cachedToken: string | null = null
 let cachedAt = 0
@@ -85,19 +93,21 @@ export const GhAppTokenPlugin: Plugin = async () => {
       }
 
       // GIT_CONFIG_*: force every git operation in this project to use the App identity.
+      // Built from an array so KEY/VALUE indices and COUNT never drift apart.
       const helperSh = CREDENTIAL_HELPER_SH.replace(/\\/g, "/")
       const helperCmd = `!"${config.BASH_EXE}" "${helperSh}"`
-      output.env.GIT_CONFIG_COUNT = "5"
-      output.env.GIT_CONFIG_KEY_0 = "user.name"
-      output.env.GIT_CONFIG_VALUE_0 = BOT_NAME
-      output.env.GIT_CONFIG_KEY_1 = "user.email"
-      output.env.GIT_CONFIG_VALUE_1 = BOT_EMAIL
-      output.env.GIT_CONFIG_KEY_2 = "credential.helper"
-      output.env.GIT_CONFIG_VALUE_2 = helperCmd
-      output.env.GIT_CONFIG_KEY_3 = "commit.gpgsign"
-      output.env.GIT_CONFIG_VALUE_3 = "false"
-      output.env.GIT_CONFIG_KEY_4 = "alias.vc"
-      output.env.GIT_CONFIG_VALUE_4 = vcCmd
+      const gitConfig: Array<[string, string]> = [
+        ["user.name", BOT_NAME],
+        ["user.email", BOT_EMAIL],
+        ["credential.helper", helperCmd],
+        ["commit.gpgsign", "false"],
+        ["alias.vc", vcCmd],
+      ]
+      output.env.GIT_CONFIG_COUNT = String(gitConfig.length)
+      gitConfig.forEach(([key, value], i) => {
+        output.env[`GIT_CONFIG_KEY_${i}`] = key
+        output.env[`GIT_CONFIG_VALUE_${i}`] = value
+      })
     },
     "tool.execute.before": async (input, output) => {
       // `git commit` under the App identity is always unsigned (commit.gpgsign

@@ -38,10 +38,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Syntax check
-        run: bash -n gh-app/*.sh
+        run: bash -n gh-app/*.sh gh-app/tests/*.sh
 
       - name: ShellCheck
-        run: shellcheck -x gh-app/*.sh
+        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh
 
   lint-ps:
     name: Check install.ps1 syntax
@@ -84,6 +84,8 @@ jobs:
             "gh-app/get-token.sh",
             "gh-app/git-credential-helper.sh",
             "gh-app/setup-git.sh",
+            "gh-app/api-commit.sh",
+            "gh-app/mock-test.sh",
             "gh-app/app.env.example",
             "plugins/gh-app-token.ts"
           )
@@ -113,39 +115,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Cache-hit path returns token without key/network
-        run: |
-          T="$(mktemp -d)"
-          cp gh-app/*.sh "$T/"
-          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
-          EXPIRES="$(( $(date +%s) + 3600 ))"
-          printf '%s|%s' "$EXPIRES" "ghs_mock_token_abc" > "$T/token.cache"
-          OUT="$(bash "$T/get-token.sh")"
-          test "$OUT" = "ghs_mock_token_abc"
-          echo "cache-hit returns cached token OK"
+      # Full offline suite: token cache, credential helper, api-commit.sh
+      # arg validation and --dry-run worktree collection (gh-app/tests/).
+      - name: Run mock-test.sh suite
+        run: bash gh-app/mock-test.sh
 
-      - name: Expired cache is not reused
-        run: |
-          T="$(mktemp -d)"
-          cp gh-app/*.sh "$T/"
-          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
-          EXPIRES="$(( $(date +%s) - 3600 ))"
-          printf '%s|%s' "$EXPIRES" "ghs_expired_token" > "$T/token.cache"
-          OUT="$(bash "$T/get-token.sh" 2>&1 || true)"
-          case "$OUT" in
-            *ghs_expired_token*) echo "ERROR: expired cache reused" >&2; exit 1 ;;
-            *) echo "expired cache rejected OK" ;;
-          esac
+  lint-ts:
+    name: Typecheck opencode plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Credential helper emits username/password (cached token)
-        run: |
-          T="$(mktemp -d)"
-          cp gh-app/*.sh "$T/"
-          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
-          EXPIRES="$(( $(date +%s) + 3600 ))"
-          printf '%s|%s' "$EXPIRES" "ghs_mock_token_abc" > "$T/token.cache"
-          OUT="$(printf 'protocol=https\nhost=github.com\n\n' | bash "$T/git-credential-helper.sh" get)"
-          echo "$OUT" | grep -q '^username=x-access-token$'
-          echo "$OUT" | grep -q '^password=ghs_mock_token_abc$'
-          test "$(echo "$OUT" | wc -l)" -eq 2
-          echo "credential helper output OK"
+      # Offline stub types (plugins/plugin-stub.d.ts), no npm install needed.
+      - name: Typecheck plugin
+        run: npx --yes -p typescript@5.9.2 tsc -p plugins --noEmit

@@ -20,7 +20,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── git-credential-helper.sh  # git 用 credential helper
 │   ├── setup-git.sh           #   リポジトリに bot 向け git config を適用
 │   ├── api-commit.sh          #   GraphQL（createCommitOnBranch）で Verified コミットを作成
-│   ├── mock-test.sh           #   offline モックテスト（秘密鍵・ネットワーク不要）
+│   ├── mock-test.sh           #   offline モックテストのランナー（秘密鍵・ネットワーク不要）
+│   ├── tests/                 #   観点別テスト（get-token-cache / git-credential-helper / api-commit-args / api-commit-dryrun）
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
@@ -71,6 +72,15 @@ unsigned コミットになり、「Commits must have verified signatures」の�
 ブロックされる。opencode 上ではプラグインが `git commit` を検知してエラーにし、
 `git vc` を案内する（git の alias は組み込みコマンドを上書きできないため、新規名
 `vc` で提供する）。
+
+`commit.gpgsign=true` にしても解決しない。署名には GitHub アカウントに登録済みの
+GPG 公開鍵に対応する秘密鍵が必要だが、GitHub App の bot アカウントにそのような鍵は
+登録できない。GitHub が「Verified」と認めるのは、(a) 登録済み鍵での署名か、
+(b) GitHub 自身が作成・署名したコミット（Web UI / API の `createCommitOnBranch`）
+のみ。`git vc`（＝`api-commit.sh`）は (b) の経路を使う。
+`git add -A`＋`git commit -m` との違いはこの1点に集約される: 収集する作業ツリーの
+内容は同じだが、コミットの作成場所（ローカルか GitHub サーバー側か）が違い、
+サーバー側作成のものだけが署名付きになる。
 
 ### 仕様（api-commit.sh）
 
@@ -131,7 +141,10 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 `~/.config/opencode/gh-app/` と `~/.config/opencode/plugins/` へ展開され、
-`plugins/*.ts` は opencode が自動ロードする。
+`plugins/*.ts` は opencode が自動ロードする。`~/.config/opencode` はユーザーワイド
+設定のため、このプラグイン（`GH_TOKEN` 注入・bot 名義・`git vc` alias・`git commit`
+ブロック）は **opencode で開く全てのリポジトリ・全てのセッション**に適用される。
+リポジトリ側での個別設定は不要。
 
 ### 3. opencode を再起動
 
@@ -170,10 +183,11 @@ GitHub Actions（`.github/workflows/ci.yml`）:
 
 | ジョブ               | 内容                                          | ランナー    |
 | -------------------- | --------------------------------------------- | ----------- |
-| `lint-bash`          | `bash -n` + `shellcheck -x`（追従・チェック無効化なし） | Ubuntu / Windows |
+| `lint-bash`          | `bash -n` + `shellcheck -x`（`gh-app/*.sh` と `gh-app/tests/*.sh`。追従・チェック無効化なし） | Ubuntu / Windows |
+| `lint-ts`            | プラグインの型チェック（`tsc -p plugins`。offline stub 型のみで npm install 不要） | Ubuntu |
 | `lint-ps`            | `install.ps1` の構文チェック                  | Windows     |
 | `install-test`       | `install.ps1` を一時ディレクトリへ展開検証    | Windows     |
-| `mock-test`          | モックテスト（秘密鍵・ネットワーク不要）      | Ubuntu / Windows |
+| `mock-test`          | `gh-app/mock-test.sh` 全 suite（秘密鍵・ネットワーク不要） | Ubuntu / Windows |
 
 workflow は読み取り専用なため、`permissions: contents: read` を明示している。
 

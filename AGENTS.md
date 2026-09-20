@@ -22,8 +22,9 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/git-credential-helper.sh` | git credential helper（stdin を読み捨て stdout に username/password 出力） | |
 | `gh-app/setup-git.sh` | リポジトリへ bot 向け git config を適用 | 設定は `app.env` から取得 |
 | `gh-app/api-commit.sh` | GraphQL（`createCommitOnBranch`）で Verified コミットをブランチに作成。`--all` で作業ツリー全体を一括コミット、owner/repo/branch は自動検出 | `curl`/`openssl`/`sed` が必要。Ubuntu / Windows（Git Bash）で動作 |
-| `gh-app/mock-test.sh` | offline モックテスト（キャッシュ / credential helper / api-commit 引数検証と `--dry-run` 収集） | 秘密鍵・ネットワーク不要。CI の `mock-test` と同じ検証 |
-| `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする |
+| `gh-app/mock-test.sh` | offline モックテストのランナー（`tests/` 配下を順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
+| `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする（`BOT_USER_ID` は必須。`APP_ID` へのフォールバックは無い） |
+| `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun`） | いずれも秘密鍵・ネットワーク不要。`mock-test.sh` から実行 |
 | `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_COUNT/KEY/VALUE_*`（bot 名義 + `alias.vc`）注入、`tool.execute.before` で `git commit` をブロック | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置 | 実 `app.env` があればそれを、無ければ example から作成 |
 | `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` は Ubuntu + Windows、`lint-ps` / `install-test` は Windows のみ |
@@ -32,8 +33,11 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 
 ```bash
 # 構文チェック（Ubuntu で確認）
-bash -n gh-app/*.sh
-shellcheck -x gh-app/*.sh   # -x で app.env.example を追従（チェックは無効化しない）
+bash -n gh-app/*.sh gh-app/tests/*.sh
+shellcheck -x gh-app/*.sh gh-app/tests/*.sh   # -x で app.env.example を追従（チェックは無効化しない）
+
+# プラグイン型チェック（ネットワークから typescript 取得）
+npx --yes -p typescript@5.9.2 tsc -p plugins --noEmit
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/mock-test.sh
