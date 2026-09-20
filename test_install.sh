@@ -4,7 +4,6 @@ APP_ID=331119074
 INSTALLATION_ID=162902772
 PRIVATE_KEY_PATH="C:/Users/nahcnuj/.ssh/conahcnuj.2026-09-18.private-key.pem"
 
-# shellcheck source=gh-app/app.env.example
 # If app.env is missing, fall back to the committed example.
 if [[ ! -f "gh-app/app.env" && -f "gh-app/app.env.example" ]]; then
   : # use example as fallback

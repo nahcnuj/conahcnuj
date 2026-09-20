@@ -2,9 +2,9 @@
 set -euo pipefail
 cd /c/Users/nahcnuj/conahcnuj
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${DIR}/../gh-app/app.env"
-if [[ ! -f "${ENV_FILE}" && -f "${DIR}/../gh-app/app.env.example" ]]; then
-  ENV_FILE="${DIR}/../gh-app/app.env.example"
+ENV_FILE="${DIR}/gh-app/app.env"
+if [[ ! -f "${ENV_FILE}" && -f "${DIR}/gh-app/app.env.example" ]]; then
+  ENV_FILE="${DIR}/gh-app/app.env.example"
 fi
 set -a
 # shellcheck source=gh-app/app.env.example
