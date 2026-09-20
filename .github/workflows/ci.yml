@@ -262,18 +262,29 @@ jobs:
           popd >/dev/null || exit 1
           popd >/dev/null || exit 1
 
-      # Real `opencode run` with a free model. The `git vc` string in the
-      # output can only originate from the REAL plugin hook blocking
-      # `git commit`, proving install -> load -> env -> hook end to end.
+      # Real `opencode run`, trying every model `opencode models` lists
+      # (first success wins; the pinned free model is the fallback when the
+      # list is empty). The `git vc` string in the output can only originate
+      # from the REAL plugin hook blocking `git commit`, proving
+      # install -> load -> env -> hook end to end.
       - name: Run opencode and assert git vc surfaces
         run: |
-          OUT="$(OPENCODE_CONFIG_DIR="$RUNNER_TEMP/e2e-inst" \
-            OPENCODE_DISABLE_AUTOUPDATE=true \
-            OPENCODE_DISABLE_MODELS_FETCH=true \
-            timeout 240 opencode run --dir "$RUNNER_TEMP/e2e-fixture" --title e2e \
-            "Commit the staged changes with message e2e test. Execute the necessary commands." 2>&1 || true)"
-          echo "$OUT" | tail -20
-          if [[ "$OUT" != *"git vc"* ]]; then
+          MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
+          if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+          echo "${MODELS}" | head -12
+          OK=0
+          OUT=""
+          for m in $(echo "${MODELS}" | head -12); do
+            echo "E2E trying model: ${m}"
+            OUT="$(OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
+              OPENCODE_DISABLE_AUTOUPDATE=true \
+              OPENCODE_DISABLE_MODELS_FETCH=true \
+              timeout 150 opencode run --model "${m}" --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
+              "Commit the staged changes with message e2e test. Execute the necessary commands." 2>&1 || true)"
+            if [[ "${OUT}" == *"git vc"* ]]; then OK=1; break; fi
+          done
+          echo "${OUT}" | tail -20
+          if [ "${OK}" != "1" ]; then
             echo "E2E FAIL: 'git vc' not found in opencode output" >&2
             exit 1
           fi
