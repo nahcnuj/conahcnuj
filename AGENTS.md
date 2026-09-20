@@ -22,7 +22,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/git-credential-helper.sh` | git credential helper（stdin を読み捨て stdout に username/password 出力） | |
 | `gh-app/setup-git.sh` | リポジトリへ bot 向け git config を適用 | 設定は `app.env` から取得 |
 | `gh-app/api-commit.sh` | GraphQL（`createCommitOnBranch`）で Verified コミットをブランチに作成。`--all` で作業ツリー全体を一括コミット、owner/repo/branch は自動検出 | `curl`/`openssl`/`sed` が必要。Ubuntu / Windows（Git Bash）で動作 |
-| `gh-app/mock-test.sh` | offline モックテスト（キャッシュ / credential helper） | 秘密鍵・ネットワーク不要。CI の `mock-test` と同じ検証 |
+| `gh-app/mock-test.sh` | offline モックテスト（キャッシュ / credential helper / api-commit 引数検証と `--dry-run` 収集） | 秘密鍵・ネットワーク不要。CI の `mock-test` と同じ検証 |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする |
 | `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_COUNT/KEY/VALUE_*`（bot 名義 + `alias.vc`）注入、`tool.execute.before` で `git commit` をブロック | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置 | 実 `app.env` があればそれを、無ければ example から作成 |

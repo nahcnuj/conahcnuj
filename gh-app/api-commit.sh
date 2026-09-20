@@ -9,6 +9,8 @@
 #   bash gh-app/api-commit.sh -m "<message>" --all
 #   bash gh-app/api-commit.sh -m "<message>" --file path=@file [--delete path]
 #   bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "<message>" --all
+#   bash gh-app/api-commit.sh <branch> -m "<message>" --all   # repo auto-detected
+#   bash gh-app/api-commit.sh <owner>/<repo> -m "<message>" --all  # branch auto-detected
 #
 # Options:
 #   --all             Commit every worktree change (added/modified/untracked files
@@ -17,7 +19,8 @@
 #   --delete path     Delete path from the branch.
 #   --create-branch   Create <branch> from the default branch if it does not
 #                     exist yet (no unsigned commits involved).
-#   --dry-run         Print what would be committed without calling the API.
+#   --dry-run         Print what would be committed without calling the API
+#                     (no token/network needed; usable for offline tests).
 #
 # The author identity is the App (conahcnuj[bot]) and the committer is GitHub.com.
 
@@ -62,6 +65,15 @@ if [[ $# -ge 2 && "${1}" != -* && "${2}" != -* ]]; then
   REPO="${1}"
   BRANCH="${2}"
   shift 2
+# A single positional arg is <owner>/<repo> if it contains "/", else <branch>;
+# the other side is auto-detected.
+elif [[ $# -ge 1 && "${1}" != -* ]]; then
+  if [[ "${1}" == */* ]]; then
+    REPO="${1}"
+  else
+    BRANCH="${1}"
+  fi
+  shift
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -113,41 +125,8 @@ fi
 json_escape() {
   printf '%s' "${1}" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
-# Installation token (cached by get-token.sh). The script is run by bash, so
-# just invoke it directly; BASH_EXE is only needed when spawning bash from
-# outside bash (e.g. PowerShell).
-TOKEN="$(bash "${DIR}/get-token.sh")"
-API="${API_BASE}/repos/${REPO}"
-
-# 1) Current HEAD sha of the branch (|| true: a missing branch must fall
-#    through to the --create-branch handling instead of tripping set -e).
-HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
-HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
-if [[ -z "${HEAD_SHA}" ]]; then
-  if [[ "${CREATE_BRANCH}" != true ]]; then
-    echo "ERROR: branch ${BRANCH} not found (does it exist? use --create-branch to create it from the default branch)" >&2
-    exit 1
-  fi
-  # 1b) Create the branch ref from the default branch head (no commits pushed).
-  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
-  if [[ -z "${DEFAULT_BRANCH}" ]]; then
-    echo "ERROR: cannot determine default branch of ${REPO}" >&2
-    exit 1
-  fi
-  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
-  BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
-  if [[ -z "${BASE_SHA}" ]]; then
-    echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
-    exit 1
-  fi
-  BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
-  echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
-  HEAD_SHA="${BASE_SHA}"
-fi
-
-# 2) Collect added/modified file contents (exact bytes, no newline mangling) and
-#    deletion paths.
+# 1) Collect added/modified file contents (exact bytes, no newline mangling) and
+#    deletion paths. No network/token needed up to and including --dry-run.
 declare -a ADDITIONS=()
 
 collect_worktree_changes() {
@@ -231,6 +210,39 @@ if [[ "${DRY_RUN}" == true ]]; then
     printf '  %s\n' "${DELETE_PATHS[@]}"
   fi
   exit 0
+fi
+
+# Installation token (cached by get-token.sh). The script is run by bash, so
+# just invoke it directly; BASH_EXE is only needed when spawning bash from
+# outside bash (e.g. PowerShell).
+TOKEN="$(bash "${DIR}/get-token.sh")"
+API="${API_BASE}/repos/${REPO}"
+
+# 2) Current HEAD sha of the branch (|| true: a missing branch must fall
+#    through to the --create-branch handling instead of tripping set -e).
+HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
+HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
+if [[ -z "${HEAD_SHA}" ]]; then
+  if [[ "${CREATE_BRANCH}" != true ]]; then
+    echo "ERROR: branch ${BRANCH} not found (does it exist? use --create-branch to create it from the default branch)" >&2
+    exit 1
+  fi
+  # 2b) Create the branch ref from the default branch head (no commits pushed).
+  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
+  if [[ -z "${DEFAULT_BRANCH}" ]]; then
+    echo "ERROR: cannot determine default branch of ${REPO}" >&2
+    exit 1
+  fi
+  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
+  BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
+  if [[ -z "${BASE_SHA}" ]]; then
+    echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
+    exit 1
+  fi
+  BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
+  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
+  echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
+  HEAD_SHA="${BASE_SHA}"
 fi
 
 ADD_LIST="$(IFS=,; echo "${ADDITIONS[*]}")"

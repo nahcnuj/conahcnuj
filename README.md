@@ -72,6 +72,24 @@ unsigned コミットになり、「Commits must have verified signatures」の�
 `git vc` を案内する（git の alias は組み込みコマンドを上書きできないため、新規名
 `vc` で提供する）。
 
+### 仕様（api-commit.sh）
+
+- 1 実行でブランチ先端に Verified コミットを **1 件だけ**作る。author は
+  `conahcnuj[bot]`、committer は GitHub（署名付き）。
+- `--all` の収集規則（`git status --porcelain -z` 基準）:
+  - 追加・更新: 新規（staged/unstaged）、変更、untracked ファイル（中身は作業ツリー現物）
+  - 削除: 削除されたパス（`D`）
+  - リネーム: 新パスを追加・旧パスを削除として扱う
+- owner/repo・branch の決定規則: 先頭の位置引数（`<owner>/<repo>` は `/` 含みで判定、
+  それ以外は branch 名）→ 無ければ `git remote get-url origin` と現在ブランチから
+  自動検出。
+- `--create-branch` が無い状態でブランチが存在しなければエラー。
+  付きの場合はデフォルトブランチ先端から ref を作成（コミット push を介さない）。
+- `--dry-run` はトークン・network 不要で収集結果のみ表示（offline テスト可）。
+- 既存ブランチへの追記のみ。履歴の書き換え・force-push はしない。
+  unsigned コミットが既にあるブランチは、先に `git fetch` → `git reset --hard`
+  で作り直してから使うこと。
+
 必要な App 権限は `Contents: Read and write` と `Workflows: Read and write`
 （`.github/workflows/` を変更する場合のみ）。
 
