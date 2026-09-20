@@ -1,9 +1,10 @@
 // Plugin runtime smoke test runner (plain Node, no deps).
 // Usage: bash plugins/smoke.sh (which stages ./.smoke/ first)
-//   or: node smoke-run.js <expected bot user id>
+//   or: node smoke-run.js <expected app slug>
 //
-// Loads the compiled plugin with a fake gh-app dir (fake app.env), then
-// asserts the shell.env contract (GIT_CONFIG identity + alias.vc) and the
+// Loads the compiled plugin with a fake gh-app dir (fake app.env; the bot
+// ID itself is auto-resolved from the public API), then asserts the
+// shell.env contract (GIT_CONFIG identity + alias.vc) and the
 // tool.execute.before redirect (git commit blocked, others pass through).
 // The require target is a fixed literal path on purpose: requiring an
 // argv-provided path trips CodeQL path-injection (high). smoke.sh stages
@@ -14,8 +15,8 @@
 const assert = require("node:assert")
 
 async function main() {
-  const [expectedId] = process.argv.slice(2)
-  assert(expectedId, "usage: node smoke-run.js <bot id>")
+  const [expectedSlug] = process.argv.slice(2)
+  assert(expectedSlug, "usage: node smoke-run.js <app slug>")
   const { GhAppTokenPlugin } = require("./.smoke/out/gh-app-token.js")
   const plugin = await GhAppTokenPlugin({})
   assert(plugin["shell.env"], "missing shell.env hook")
@@ -31,8 +32,11 @@ async function main() {
     pairs[env[`GIT_CONFIG_KEY_${i}`]] = env[`GIT_CONFIG_VALUE_${i}`]
   }
   assert(
-    typeof pairs["user.email"] === "string" && pairs["user.email"].startsWith(`${expectedId}+`),
-    `user.email should start with ${expectedId}+, got: ${pairs["user.email"]}`
+    typeof pairs["user.email"] === "string" &&
+      new RegExp(`^\\d+\\+${expectedSlug}\\[bot\\]@users\\.noreply\\.github\\.com$`).test(
+        pairs["user.email"]
+      ),
+    `user.email has wrong shape, got: ${pairs["user.email"]}`
   )
   assert(
     typeof pairs["alias.vc"] === "string" && pairs["alias.vc"].includes("api-commit.sh"),

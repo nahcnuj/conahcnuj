@@ -112,7 +112,7 @@ done
 rm -rf "${FIX2}"
 echo "PASS api-commit.sh staged mode collects index only"
 
-# Explicit --file/--delete without --all.
+# Explicit --file/--delete without a collection flag.
 OUT3="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg --file inline.txt=hello --delete gone.txt --dry-run)"
 if [[ "${OUT3}" != *"Additions:  1 file(s)"* || "${OUT3}" != *"inline.txt"* ]]; then
   echo "FAIL: --dry-run --file mismatch:" >&2

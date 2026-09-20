@@ -23,10 +23,9 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/setup-git.sh` | リポジトリへ bot 向け git config を適用 | 設定は `app.env` から取得 |
 | `gh-app/api-commit.sh` | GraphQL（`createCommitOnBranch`）で Verified コミットをブランチに作成。無印は staged、`-a` は tracked 変更をコミット、owner/repo/branch は自動検出 | `curl`/`openssl`/`sed` が必要。Ubuntu / Windows（Git Bash）で動作 |
 | `gh-app/bot-user-id.sh` | bot アカウントの user ID を出力（app.env 優先、無ければ公開 API から自動解決） | ネットワーク不要なのは app.env 設定済みの場合のみ |
-| `gh-app/mock-test.sh` | offline モックテストのランナー（`tests/` 配下を順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
+| `gh-app/tests/run.sh` | offline モックテストのランナー（同ディレクトリの観点別テストを順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする。`BOT_USER_ID` は書かない（公開 API から自動解決。手動上書き時のみ追加） |
-| `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`mock-test.sh` から実行 |
-| `e2e/` | 実 `opencode run` による e2e 資材（`stub.js`。手順本体は CI の `e2e-opencode` ジョブに直接記載） | opencode / node / pwsh が必要。秘密鍵・GitHub network 不要（APP_ID 等は secrets があれば使用、無ければ fake） |
+| `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`run.sh` から実行 |
 | `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`tool.execute.before` で `git commit` をブロック | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決 |
 | `plugins/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約と commit 誘導を検証） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
 | `plugins/package.json`・`tsconfig.json`・`plugin-stub.d.ts` | 型チェック基盤（`@types/node` 実物＋ `@opencode-ai/plugin` 最小 stub） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
@@ -41,10 +40,10 @@ bash -n gh-app/*.sh gh-app/tests/*.sh
 shellcheck -x gh-app/*.sh gh-app/tests/*.sh   # -x で app.env.example を追従（チェックは無効化しない）
 
 # プラグイン型チェック（@types/node は plugins/package.json＋lock から取得）
-(cd plugins && npm ci --no-audit --no-fund && npm exec -- tsc -p ../plugins --noEmit)
+(cd plugins && npm ci --no-audit --no-fund && ./node_modules/.bin/tsc -p ../plugins --noEmit)
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
-bash gh-app/mock-test.sh
+bash gh-app/tests/run.sh
 
 # e2e は CI の `e2e-opencode` ジョブで実行（手順は ci.yml に直接記載）。
 # ローカルで流す場合は opencode 本体・node・pwsh を用意し、ジョブの手順をなぞる

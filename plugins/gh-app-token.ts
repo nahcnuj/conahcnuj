@@ -8,28 +8,25 @@ const GH_APP_DIR = path.join(__dirname, "..", "gh-app")
 const GET_TOKEN_SH = path.join(GH_APP_DIR, "get-token.sh")
 const CREDENTIAL_HELPER_SH = path.join(GH_APP_DIR, "git-credential-helper.sh")
 
+// Only values with a usable default live here. Required values have no
+// defaults at all: absence fails fast with a fix (see loadAppEnv).
 const DEFAULT_CONFIG = {
-  APP_ID: "",
-  APP_SLUG: "",
   BASH_EXE: "C:/Program Files/Git/bin/bash.exe",
 }
-// Optional overrides accepted from app.env (no unusable empty default:
-// absence means "auto-resolve", never a value used as-is).
-const OPTIONAL_KEYS = ["BOT_USER_ID"] as const
+const REQUIRED_KEYS = ["APP_SLUG"] as const
 
 type Config = typeof DEFAULT_CONFIG & {
-  [K in (typeof OPTIONAL_KEYS)[number]]?: string
+  [K in (typeof REQUIRED_KEYS)[number]]: string
 }
 
-function loadAppEnv(): Config {
-  const config: Config = { ...DEFAULT_CONFIG }
-  const envFile = fs.existsSync(path.join(GH_APP_DIR, "app.env"))
-    ? path.join(GH_APP_DIR, "app.env")
-    : path.join(GH_APP_DIR, "app.env.example")
-  if (!fs.existsSync(envFile)) {
-    return config
-  }
-  for (const raw of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+/**
+ * Parse `KEY=VALUE` lines (dotenv flavor). Returns every pair found;
+ * callers decide which keys to accept. Surrounding quotes are stripped
+ * and a leading `${HOME}` is expanded.
+ */
+function parseAppEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim()
     if (!line || line.startsWith("#") || !line.includes("=")) continue
     const idx = line.indexOf("=")
@@ -43,42 +40,97 @@ function loadAppEnv(): Config {
       value = value.slice(1, -1)
     }
     value = value.replace(/^\$\{HOME\}/, os.homedir())
-    if (key in config || (OPTIONAL_KEYS as readonly string[]).includes(key)) {
-      ;(config as Record<string, string>)[key] = value
+    out[key] = value
+  }
+  return out
+}
+
+/**
+ * Load config: defaults, then app.env (or app.env.example) overlay, then
+ * required-key validation. Unknown keys (e.g. APP_ID, only used by the
+ * shell scripts) are ignored here.
+ */
+function loadAppEnv(): Config {
+  const parsed: Record<string, string> =
+    (() => {
+      const envFile = fs.existsSync(path.join(GH_APP_DIR, "app.env"))
+        ? path.join(GH_APP_DIR, "app.env")
+        : path.join(GH_APP_DIR, "app.env.example")
+      if (!fs.existsSync(envFile)) {
+        return {}
+      }
+      return parseAppEnv(fs.readFileSync(envFile, "utf8"))
+    })()
+  const config: Record<string, string> = { ...DEFAULT_CONFIG }
+  for (const key of [
+    ...Object.keys(DEFAULT_CONFIG),
+    ...(REQUIRED_KEYS as readonly string[]),
+  ]) {
+    if (parsed[key]) {
+      config[key] = parsed[key]
     }
   }
-  return config
+  const missing = (REQUIRED_KEYS as readonly string[]).filter((k) => !config[k])
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required gh-app config: ${missing.join(", ")}. ` +
+        `Set them in gh-app/app.env (see app.env.example).`
+    )
+  }
+  return config as Config
+}
+
+/**
+ * Resolve the bot account user ID (`<slug>[bot]`) via the public GitHub
+ * API (no auth needed). APP_ID is deliberately NOT a fallback: it is the
+ * App's own ID and never attributes commits to the bot account.
+ */
+async function resolveBotUserId(slug: string): Promise<string> {
+  const res = await fetch(
+    `https://api.github.com/users/${slug}%5Bbot%5D`,
+    { headers: { Accept: "application/vnd.github+json" } }
+  )
+  if (!res.ok) {
+    throw new Error(
+      `Cannot resolve bot user ID for ${slug}[bot] (HTTP ${res.status}): ` +
+        `check network access to api.github.com.`
+    )
+  }
+  const data: unknown = await res.json()
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("id" in data) ||
+    typeof (data as { id: unknown }).id !== "number"
+  ) {
+    throw new Error(
+      `Unexpected user lookup response for ${slug}[bot].`
+    )
+  }
+  return String((data as { id: number }).id)
+}
+
+/**
+ * Extract a bash command string from tool args. Returns null when the
+ * shape is anything else (never throws: unknown tools pass through).
+ */
+function parseBashCommand(args: unknown): string | null {
+  if (typeof args !== "object" || args === null) {
+    return null
+  }
+  const cmd = (args as { command?: unknown }).command
+  return typeof cmd === "string" ? cmd : null
+}
+
+/**
+ * True when a command line invokes `git commit` (the unsigned path under
+ * the App identity). Other git subcommands are left alone.
+ */
+function isGitCommitCommand(cmd: string): boolean {
+  return /(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)
 }
 
 const config = loadAppEnv()
-const BOT_USER_ID_SH = path.join(GH_APP_DIR, "bot-user-id.sh")
-function resolveBotUserId(): string {
-  const raw = config.BOT_USER_ID
-  if (raw && !raw.startsWith("<")) {
-    return raw
-  }
-  // Not set (or left as a placeholder): auto-resolve from the public API.
-  // APP_ID (the GitHub App's ID, used for JWT `iss`) never attributes commits
-  // to the bot account, so it is deliberately NOT used as a fallback.
-  try {
-    const out = execFileSync(config.BASH_EXE, [BOT_USER_ID_SH], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "inherit"],
-    }).trim()
-    if (/^\d+$/.test(out)) {
-      return out
-    }
-  } catch {
-    // fall through to the actionable error below (e.g. offline)
-  }
-  throw new Error(
-    "BOT_USER_ID is not set and auto-resolve failed. Set it to the bot " +
-      "account user ID (`gh api users/<slug>%5Bbot%5D --jq .id`), not APP_ID."
-  )
-}
-config.BOT_USER_ID = resolveBotUserId()
-const BOT_NAME = `${config.APP_SLUG}[bot]`
-const BOT_EMAIL = `${config.BOT_USER_ID}+${config.APP_SLUG}[bot]@users.noreply.github.com`
 
 let cachedToken: string | null = null
 let cachedAt = 0
@@ -98,12 +150,14 @@ async function getInstallationToken(): Promise<string> {
 }
 
 export const GhAppTokenPlugin: Plugin = async () => {
+  const botUserId = await resolveBotUserId(config.APP_SLUG)
+  const botName = `${config.APP_SLUG}[bot]`
+  const botEmail = `${botUserId}+${config.APP_SLUG}[bot]@users.noreply.github.com`
   const ghAppDir = GH_APP_DIR.replace(/\\/g, "/")
   const apiCommitSh = `${ghAppDir}/api-commit.sh`
   const bashExe = config.BASH_EXE.replace(/\\/g, "/")
-  // `git vc` (verified-commit): one-line Verified commit of the whole worktree.
-  // owner/repo/branch are auto-detected from git remote + HEAD, so it works
-  // in any repo: `git vc -m "msg"` (staged) or `git vc -m "msg" -a` (tracked)
+  // `git vc` (verified-commit): commit staged changes, or `-a` for tracked.
+  // owner/repo/branch are auto-detected, so it works in any repo.
   const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
   const vcUsage = `git vc -m "<message>" [-a] (or: bash "${apiCommitSh}" -m "<message>" [-a])`
 
@@ -121,8 +175,8 @@ export const GhAppTokenPlugin: Plugin = async () => {
       const helperSh = CREDENTIAL_HELPER_SH.replace(/\\/g, "/")
       const helperCmd = `!"${config.BASH_EXE}" "${helperSh}"`
       const gitConfig: Array<[string, string]> = [
-        ["user.name", BOT_NAME],
-        ["user.email", BOT_EMAIL],
+        ["user.name", botName],
+        ["user.email", botEmail],
         ["credential.helper", helperCmd],
         ["commit.gpgsign", "false"],
         ["alias.vc", vcCmd],
@@ -139,11 +193,10 @@ export const GhAppTokenPlugin: Plugin = async () => {
       // signatures" branch rules. Git aliases cannot shadow the `commit`
       // builtin, so block it here and point at the Verified path instead.
       if (input.tool === "bash") {
-        const args = output.args as { command?: unknown }
-        const cmd = typeof args.command === "string" ? args.command : ""
-        if (/(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)) {
+        const cmd = parseBashCommand(output.args)
+        if (cmd !== null && isGitCommitCommand(cmd)) {
           throw new Error(
-            `Do not use \`git commit\`: commits made as ${BOT_NAME} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
+            `Do not use \`git commit\`: commits made as ${botName} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
               `Create a Verified commit instead: ${vcUsage}`
           )
         }

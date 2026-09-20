@@ -38,15 +38,14 @@ mkdir -p "${STAGE}/src" "${STAGE}/gh-app"
 cp "${INST}/plugins/gh-app-token.ts" "${STAGE}/src/"
 cp "${HERE}/plugin-stub.d.ts" "${STAGE}/src/"
 cp "${INST}/gh-app/"*.sh "${STAGE}/gh-app/"
-# Fake app.env over the staged copy (BOT_USER_ID wins over auto-resolve;
-# bogus BASH_EXE keeps get-token.sh from running: no key, no network).
-# APP_ID etc. come from the environment when provided (CI secrets), else
-# self-explanatory fakes; no private key is ever needed.
+# Fake app.env over the staged copy. The bot ID is auto-resolved from the
+# public API (APP_SLUG must be real); bogus BASH_EXE keeps get-token.sh from
+# running: no key, no token issuance. APP_ID etc. come from the environment
+# when provided (CI secrets), else self-explanatory fakes.
 cat > "${STAGE}/gh-app/app.env" <<EOF
 APP_ID=${APP_ID:-00000}
-BOT_USER_ID=999
 INSTALLATION_ID=${INSTALLATION_ID:-00000}
-APP_SLUG=smokeapp
+APP_SLUG=conahcnuj
 PRIVATE_KEY_PATH=/tmp/nonexistent.pem
 BASH_EXE=/nonexistent-bash
 EOF
@@ -71,6 +70,6 @@ EOF
 
 # 3) @types/node resolves by walking up from the tsconfig dir to the repo's
 #    node_modules (installed above).
-(cd "${HERE}" && npm exec -- tsc -p "${STAGE}/src")
+"${HERE}/node_modules/.bin/tsc" -p "${STAGE}/src"
 
-node "${HERE}/smoke-run.js" 999
+node "${HERE}/smoke-run.js" conahcnuj

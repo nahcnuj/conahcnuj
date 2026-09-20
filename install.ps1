@@ -35,6 +35,23 @@ Get-ChildItem -Path $SrcGhApp -Filter "*.sh" -File | ForEach-Object {
     Write-Host "  copied $($_.Name)"
 }
 
+# 1b. gh-app/tests scripts (offline mock tests, same relative layout).
+# Also drop the legacy top-level location (moved to tests/run.sh).
+$LegacyMock = Join-Path $DstGhApp "mock-test.sh"
+if (Test-Path -LiteralPath $LegacyMock) {
+    Remove-Item -LiteralPath $LegacyMock -Force
+    Write-Host "  removed legacy mock-test.sh (moved to tests/run.sh)"
+}
+$SrcTests = Join-Path $SrcGhApp "tests"
+$DstTests = Join-Path $DstGhApp "tests"
+if (Test-Path -LiteralPath $SrcTests) {
+    New-Item -ItemType Directory -Force -Path $DstTests | Out-Null
+    Get-ChildItem -Path $SrcTests -Filter "*.sh" -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $DstTests $_.Name) -Force
+        Write-Host "  copied tests/$($_.Name)"
+    }
+}
+
 # app.env.example
 $Example = Join-Path $SrcGhApp "app.env.example"
 if (Test-Path -LiteralPath $Example) {

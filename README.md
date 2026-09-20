@@ -18,13 +18,11 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── git-credential-helper.sh  # git 用 credential helper
 │   ├── setup-git.sh           #   リポジトリに bot 向け git config を適用
 │   ├── api-commit.sh          #   GraphQL（createCommitOnBranch）で Verified コミットを作成
-│   ├── mock-test.sh           #   offline モックテストのランナー（秘密鍵・ネットワーク不要）
-│   ├── tests/                 #   観点別テスト（get-token-cache / git-credential-helper / api-commit-args / api-commit-dryrun / bot-user-id）
+│   ├── tests/                 #   offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置
-├── e2e/                       # e2e 用 stub モデル（手順本体は ci.yml の e2e-opencode に記載）
 ├── .github/workflows/ci.yml   # GitHub Actions (Ubuntu / Windows)
 ├── .gitignore
 └── AGENTS.md
@@ -115,7 +113,7 @@ GitHub Actions（`.github/workflows/ci.yml`）:
 | `lint-ts`            | プラグインの型チェック（`@types/node` は npm、`@opencode-ai/plugin` は最小 stub） | Ubuntu |
 | `lint-ps`            | `install.ps1` の構文チェック                  | Windows     |
 | `install-test`       | `install.ps1` を一時ディレクトリへ展開＋配備ファイルの同一性検証 | Windows     |
-| `mock-test`          | `gh-app/mock-test.sh` 全 suite（秘密鍵・ネットワーク不要） | Ubuntu / Windows |
+| `mock-test`          | `gh-app/tests/run.sh` 全 suite（秘密鍵・ネットワーク不要） | Ubuntu / Windows |
 | `plugin-smoke`       | `install.ps1`→プラグイン読込→env 契約の runtime 検証 | Ubuntu / Windows |
 | `e2e-opencode`       | 実 `opencode run` で `git vc` が自然に現れることを検証（stub モデル。秘密鍵・課金不要） | Ubuntu |
 
