@@ -108,9 +108,10 @@ jobs:
           }
           # Only gh-app-token.ts may live in the deployed plugins dir:
           # package.json/lock, tsconfig, node_modules are local typecheck
-          # tooling and must never be deployed.
-          $deployedPlugins = Get-ChildItem -LiteralPath (Join-Path $dest "plugins") -File |
-            Select-Object -ExpandProperty Name
+          # tooling and must never be deployed. @( ) because a single
+          # result has no .Count.
+          $deployedPlugins = @(Get-ChildItem -LiteralPath (Join-Path $dest "plugins") -File |
+            Select-Object -ExpandProperty Name)
           if ($deployedPlugins.Count -ne 1 -or $deployedPlugins[0] -ne "gh-app-token.ts") {
             Write-Error "unexpected plugins payload: $($deployedPlugins -join ', ')"
             exit 1
@@ -186,9 +187,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      # Pinned version: unpinned lookup hits api.github.com without auth
+      # and gets rate-limited on shared runners. Verified locally with 1.18.31.
       - name: Install opencode
         run: |
-          curl -fsSL https://opencode.ai/install | bash
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.31
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
