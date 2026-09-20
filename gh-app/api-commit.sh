@@ -5,24 +5,25 @@
 # the green "Verified" badge and satisfy branch rules such as
 # "Commits must have verified signatures".
 #
-# Usage (run inside the repo; owner/repo/branch are auto-detected from git):
-#   bash gh-app/api-commit.sh -m "<message>"            # staged changes (like git commit)
-#   bash gh-app/api-commit.sh -m "<message>" --all      # every worktree change (like git add -A + commit)
+# Usage (run inside the repo; owner/repo/branch are auto-detected from git).
+# Collection modes mirror `git commit` flags; the difference from plain git
+# is only where the commit is created: file contents are sent to the GitHub
+# API, which creates the commit server-side and signs it. That server-side
+# signature is the whole point: only GitHub-signed commits satisfy
+# "Commits must have verified signatures".
+#   bash gh-app/api-commit.sh -m "<message>"            # staged (git commit)
+#   bash gh-app/api-commit.sh -m "<message>" -a         # tracked worktree (git commit -a)
+#   bash gh-app/api-commit.sh -m "<message>" --all      # everything incl. untracked (git add -A + commit)
 #   bash gh-app/api-commit.sh -m "<message>" --file path=@file [--delete path]
 #   bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "<message>" --all
 #   bash gh-app/api-commit.sh <branch> -m "<message>" --all   # repo auto-detected
 #   bash gh-app/api-commit.sh <owner>/<repo> -m "<message>" --all  # branch auto-detected
 #
 # Options:
+#   -a                Commit tracked worktree changes (modified/deleted tracked
+#                     files, staged or not; untracked files excluded).
 #   --all             Commit every worktree change (added/modified/untracked files
 #                     and deletions) in a single verified commit.
-#                     This collects the same worktree state that `git add -A`
-#                     would stage, but instead of creating a local (unsigned)
-#                     commit with `git commit`, it sends the file contents to
-#                     the GitHub API, which creates the commit server-side and
-#                     signs it. That server-side signature is the whole point:
-#                     only GitHub-signed commits satisfy "Commits must have
-#                     verified signatures".
 #   --file p=c|p=@f   Add/update file p with inline content c or @local file f.
 #   --delete path     Delete path from the branch.
 #   --create-branch   Create <branch> from the default branch if it does not
@@ -63,6 +64,7 @@ MESSAGE=""
 declare -a FILE_SPECS=()
 declare -a DELETE_PATHS=()
 ALL=false
+TRACKED=false
 CREATE_BRANCH=false
 DRY_RUN=false
 REPO=""
@@ -92,6 +94,8 @@ while [[ $# -gt 0 ]]; do
       FILE_SPECS+=( "${2}" ); shift 2 ;;
     -d|--delete)
       DELETE_PATHS+=( "${2}" ); shift 2 ;;
+    -a)
+      TRACKED=true; shift ;;
     --all)
       ALL=true; shift ;;
     --create-branch)
@@ -117,16 +121,21 @@ fi
 
 if [[ -z "${MESSAGE}" ]]; then
   echo "ERROR: -m/--message is required" >&2
-  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [--all | (--file p=c|p=@f ...)] [options]" >&2
+  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [(-a | --all) | (--file p=c|p=@f ...)] [options]" >&2
   exit 1
 fi
-if [[ "${ALL}" == true && ${#FILE_SPECS[@]} -gt 0 ]]; then
-  echo "ERROR: --all and --file are mutually exclusive" >&2
+if [[ "${ALL}" == true && "${TRACKED}" == true ]]; then
+  echo "ERROR: --all and -a are mutually exclusive" >&2
   exit 1
 fi
-# No --all/--file/--delete: commit staged changes like plain `git commit`.
+if [[ ("${ALL}" == true || "${TRACKED}" == true) && ${#FILE_SPECS[@]} -gt 0 ]]; then
+  echo "ERROR: --all/-a and --file are mutually exclusive" >&2
+  exit 1
+fi
+# No collection flag and no explicit files: commit staged changes like
+# plain `git commit`.
 STAGED=false
-if [[ "${ALL}" != true && ${#FILE_SPECS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+if [[ "${ALL}" != true && "${TRACKED}" != true && ${#FILE_SPECS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
   STAGED=true
 fi
 
@@ -162,9 +171,12 @@ collect_worktree_changes() {
     esac
   done < <(git status --porcelain -z)
   # Untracked files (real files, not the containing directory).
-  while IFS= read -r -d '' u; do
-    ADD_PATHS_COLLECT+=( "${u}" )
-  done < <(git ls-files --others --exclude-standard -z)
+  # Skipped for -a, mirroring `git commit -a` (untracked files excluded).
+  if [[ "${INCLUDE_UNTRACKED}" == true ]]; then
+    while IFS= read -r -d '' u; do
+      ADD_PATHS_COLLECT+=( "${u}" )
+    done < <(git ls-files --others --exclude-standard -z)
+  fi
   popd >/dev/null || exit 1
   mapfile -t ADD_FILES < <(printf '%s\n' "${ADD_PATHS_COLLECT[@]}" | sort -u | sed '/^$/d')
 }
@@ -205,7 +217,11 @@ collect_staged_changes() {
   mapfile -t ADD_FILES < <(printf '%s\n' "${ADD_PATHS_COLLECT[@]}" | sort -u | sed '/^$/d')
 }
 
+INCLUDE_UNTRACKED=true
 if [[ "${ALL}" == true ]]; then
+  collect_worktree_changes
+elif [[ "${TRACKED}" == true ]]; then
+  INCLUDE_UNTRACKED=false
   collect_worktree_changes
 elif [[ "${STAGED}" == true ]]; then
   FROM_INDEX=true

@@ -6,10 +6,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 
 - `gh` CLI / GitHub API が **App 名義（`conahcnuj[bot]`）** で動く
 - opencode 内の git 操作が **App 名義** で行われる
-  - `git commit` の `user.name` / `user.email`（ただし `commit.gpgsign=false` のため unsigned。コミットは後述の `git vc` を使う）
+  - `user.name` / `user.email` による帰属付け
   - `git push` 等の認証（credential helper）
-  - `git vc` alias（Verified コミット作成）の注入
-- `git commit` はプラグインの `tool.execute.before` フックでブロックし、`git vc` へ誘導する
 
 ## 構成
 
@@ -47,9 +45,9 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 
 なぜ普通の `git commit` ではダメなのか: opencode 上の git は App 名義で動き、
 署名鍵を持たない。`commit.gpgsign=false` なら unsigned コミットになりブロックされ、
-`true` に変えても署名鍵が無いため `git commit` 自体が「gpg failed to sign」で失敗する
-（bot アカウントに GPG 鍵は登録できない）。GitHub が Verified と認めるのは登録済み鍵の
-署名か GitHub 自身の作成コミットだけなので、API 経由で作るしかない。
+`true` に変えても鍵が無いため `git commit` 自体が失敗する。
+bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
+GitHub 自身にコミットを作成させるしかない。
 
 opencode 内でのコミット手順・オプション・仕様の詳細は AI エージェント向けの
 `AGENTS.md`（「コミット運用」節）にある。必要な App 権限は `Contents: Read and write`
@@ -62,52 +60,32 @@ opencode 内でのコミット手順・オプション・仕様の詳細は AI �
 - Windows + Git for Windows（`C:/Program Files/Git/bin/bash.exe`）
 - opencode が `~/.config/opencode/` をグローバル設定として使う
 
-### 1. 設定ファイルを作成
+### 1. 配置
 
-```powershell
-Copy-Item gh-app\app.env.example gh-app\app.env
-```
-
-`gh-app\app.env` を編集:
-
-```ini
-APP_ID=<your-app-id>
-BOT_USER_ID=<your-bot-user-id>
-INSTALLATION_ID=<your-installation-id>
-APP_SLUG=conahcnuj
-PRIVATE_KEY_PATH=${HOME}/.ssh/conahcnuj.private-key.pem
-BASH_EXE="C:/Program Files/Git/bin/bash.exe"
-```
-
-`BOT_USER_ID` は GitHub App の bot アカウント（`conahcnuj[bot]`）のユーザー ID で、
-GitHub がコミットを bot に帰属させるために使う（`APP_ID` とは別物）。
-取得: `gh api users/conahcnuj%5Bbot%5D --jq '.id'`
-
-秘密鍵（`.pem`）は**このリポジトリに絶対にコミットしない**こと。`app.env` も `.gitignore` 済み。
-
-### 2. グローバル設定へ配置
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
-# 任意の場所へ:  -Destination C:\path\to\dir
+```sh
+git clone <repo>.git
+cd <repo>
+./install.ps1
 ```
 
 `~/.config/opencode/gh-app/` と `~/.config/opencode/plugins/` へ展開され、
 `plugins/*.ts` は opencode が自動ロードする。`~/.config/opencode` はユーザーワイド
-設定のため、このプラグイン（`GH_TOKEN` 注入・bot 名義・`git vc` alias・`git commit`
-ブロック）は **opencode で開く全てのリポジトリ・全てのセッション**に適用される。
-リポジトリ側での個別設定は不要。
+設定のため、このプラグインは **opencode で開く全てのリポジトリ・全てのセッション**
+に適用される。リポジトリ側での個別設定は不要。
 
-### 3. opencode を再起動
+### 2. 設定して再起動
 
-再起動後、シェルで確認:
+`gh-app/app.env` に実値を設定する。秘密鍵（`.pem`）は**このリポジトリに絶対に
+コミットしない**こと。`app.env` も `.gitignore` 済み。
+
+その後 opencode を再起動。再起動後、シェルで確認:
 
 ```bash
 gh auth status
 # → Logged in to github.com account conahcnuj[bot] (GH_TOKEN)
 ```
 
-### 4. （任意）リポジトリ単位の git 設定
+### 3. （任意）リポジトリ単位の git 設定
 
 ```bash
 bash gh-app/setup-git.sh
@@ -136,10 +114,11 @@ GitHub Actions（`.github/workflows/ci.yml`）:
 | ジョブ               | 内容                                          | ランナー    |
 | -------------------- | --------------------------------------------- | ----------- |
 | `lint-bash`          | `bash -n` + `shellcheck -x`（`gh-app/*.sh` と `gh-app/tests/*.sh`。追従・チェック無効化なし） | Ubuntu / Windows |
-| `lint-ts`            | プラグインの型チェック（`tsc -p plugins`。offline stub 型のみで npm install 不要） | Ubuntu |
+| `lint-ts`            | プラグインの型チェック（`@types/node` は npm、`@opencode-ai/plugin` は最小 stub） | Ubuntu |
 | `lint-ps`            | `install.ps1` の構文チェック                  | Windows     |
-| `install-test`       | `install.ps1` を一時ディレクトリへ展開検証    | Windows     |
+| `install-test`       | `install.ps1` を一時ディレクトリへ展開＋配備ファイルの同一性検証 | Windows     |
 | `mock-test`          | `gh-app/mock-test.sh` 全 suite（秘密鍵・ネットワーク不要） | Ubuntu / Windows |
+| `plugin-smoke`       | `install.ps1`→プラグイン読込→env 契約の runtime 検証 | Ubuntu / Windows |
 
 workflow は読み取り専用なため、`permissions: contents: read` を明示している。
 

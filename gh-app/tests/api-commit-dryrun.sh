@@ -53,6 +53,32 @@ for f in del.txt old.txt; do
 done
 echo "PASS api-commit.sh --dry-run --all collects modify/add/delete/rename"
 
+# -a collects tracked worktree changes like `git commit -a`, excluding untracked.
+OUT5="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg -a --dry-run)"
+if [[ "${OUT5}" != *"Additions:  2 file(s)"* ]]; then
+  echo "FAIL: -a additions mismatch:" >&2
+  echo "${OUT5}" >&2
+  exit 1
+fi
+if [[ "${OUT5}" != *"Deletions:  2 file(s)"* ]]; then
+  echo "FAIL: -a deletions mismatch:" >&2
+  echo "${OUT5}" >&2
+  exit 1
+fi
+for f in base.txt newname.txt del.txt old.txt; do
+  if [[ "${OUT5}" != *"${f}"* ]]; then
+    echo "FAIL: -a missing ${f}:" >&2
+    echo "${OUT5}" >&2
+    exit 1
+  fi
+done
+if printf '%s\n' "${OUT5}" | grep -qx '  new.txt'; then
+  echo "FAIL: -a leaked untracked file:" >&2
+  echo "${OUT5}" >&2
+  exit 1
+fi
+echo "PASS api-commit.sh -a collects tracked only (git commit -a)"
+
 # Single positional branch name: owner/repo auto-detected from git remote.
 if OUT2="$(cd "${FIX}" && bash "${APICOMMIT}" somebranch -m msg --all --dry-run 2>&1)"; then
   :

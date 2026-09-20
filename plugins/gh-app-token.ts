@@ -10,13 +10,19 @@ const CREDENTIAL_HELPER_SH = path.join(GH_APP_DIR, "git-credential-helper.sh")
 
 const DEFAULT_CONFIG = {
   APP_ID: "",
-  BOT_USER_ID: "",
   APP_SLUG: "",
   BASH_EXE: "C:/Program Files/Git/bin/bash.exe",
 }
+// Optional overrides accepted from app.env (no unusable empty default:
+// absence means "auto-resolve", never a value used as-is).
+const OPTIONAL_KEYS = ["BOT_USER_ID"] as const
 
-function loadAppEnv(): typeof DEFAULT_CONFIG {
-  const config = { ...DEFAULT_CONFIG }
+type Config = typeof DEFAULT_CONFIG & {
+  [K in (typeof OPTIONAL_KEYS)[number]]?: string
+}
+
+function loadAppEnv(): Config {
+  const config: Config = { ...DEFAULT_CONFIG }
   const envFile = fs.existsSync(path.join(GH_APP_DIR, "app.env"))
     ? path.join(GH_APP_DIR, "app.env")
     : path.join(GH_APP_DIR, "app.env.example")
@@ -37,7 +43,7 @@ function loadAppEnv(): typeof DEFAULT_CONFIG {
       value = value.slice(1, -1)
     }
     value = value.replace(/^\$\{HOME\}/, os.homedir())
-    if (key in config) {
+    if (key in config || (OPTIONAL_KEYS as readonly string[]).includes(key)) {
       ;(config as Record<string, string>)[key] = value
     }
   }
