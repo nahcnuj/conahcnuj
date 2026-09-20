@@ -158,8 +158,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       # Compiles the plugin, loads it against a fake gh-app dir (fake
-      # app.env, unreachable BASH_EXE) and asserts the shell.env contract
-      # (GIT_CONFIG identity + alias.vc) and the git-commit redirect.
+      # app.env overlaid), and asserts the shell.env contract (GIT_CONFIG
+      # identity + alias.vc) and the git-commit redirect.
       # Needs node/npm from the runner; no secrets, no GitHub network.
       - name: Run plugin smoke test
         run: bash plugins/smoke.sh
+
+  e2e-opencode:
+    name: E2E opencode run (stub model)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install opencode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Full loop with a real `opencode run` (scripted local stub model, no
+      # secrets, no GitHub network): install.ps1 -> plugin load -> `git vc`
+      # surfaces naturally via the commit block. See e2e/run.sh.
+      - name: Run e2e
+        run: bash e2e/run.sh

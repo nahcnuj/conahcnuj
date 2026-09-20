@@ -25,7 +25,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/bot-user-id.sh` | bot アカウントの user ID を出力（app.env 優先、無ければ公開 API から自動解決） | ネットワーク不要なのは app.env 設定済みの場合のみ |
 | `gh-app/mock-test.sh` | offline モックテストのランナー（`tests/` 配下を順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする。`BOT_USER_ID` は書かない（公開 API から自動解決。手動上書き時のみ追加） |
-| `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun`） | いずれも秘密鍵・ネットワーク不要。`mock-test.sh` から実行 |
+| `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`mock-test.sh` から実行 |
+| `e2e/` | 実 `opencode run` による e2e（`run.sh` が install→stub モデル→`git vc` 出現を検証） | opencode / node / pwsh が必要。秘密鍵・GitHub network 不要。CI の `e2e-opencode` で実行 |
 | `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`tool.execute.before` で `git commit` をブロック | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決 |
 | `plugins/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約と commit 誘導を検証） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
 | `plugins/package.json`・`tsconfig.json`・`plugin-stub.d.ts` | 型チェック基盤（`@types/node` 実物＋ `@opencode-ai/plugin` 最小 stub） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
@@ -44,6 +45,9 @@ shellcheck -x gh-app/*.sh gh-app/tests/*.sh   # -x で app.env.example を追従
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/mock-test.sh
+
+# e2e（opencode 本体・node・pwsh が必要。stub モデルのため秘密鍵・課金不要）
+bash e2e/run.sh
 
 # トークン取得の確認（実キーが app.env にある前提）
 bash gh-app/get-token.sh
@@ -82,7 +86,8 @@ bash gh-app/api-commit.sh -m "message" --all --dry-run   # owner/repo/branch 自
   owner/repo/branch は `git remote` と現在ブランチから自動検出される。
 - `api-commit.sh` の仕様:
   - 1 実行でブランチ先端に Verified コミットを **1 件だけ**作る（author は bot、committer は GitHub・署名付き）。`git add -A`＋`git commit -m` と収集内容は同じだが、作成場所（GitHub サーバー側）が違うため署名付きになる。
-  - 無印は staged の内容を index（`git show :path`）から読む（`git commit` 相当）。`-a` は tracked の作業ツリー変更を読む（untracked 除外。`git commit -a` 相当）。`--all` は作業ツリー全体を読む（untracked 含む。`git add -A` 相当。削除・リネーム対応）。
+  - 無印は staged の内容を index（`git show :path`）から読む（`git commit` 相当）。`-a` は tracked の作業ツリー変更を読む（untracked 除外。`git commit -a` 相当）。`--all` は作業ツリー全体を読む（untracked 含む。削除・リネーム対応）。
+  - 注意: `--all` はコミット操作であり、ステージングでは無い。`git add -A` と同じファイル集合を対象にするが、収集と Verified コミット作成を1実行で行う（中間ステージは作らない）。
   - `--file path=内容 / path=@file`（明示追加・更新）、`--delete <path>`（明示削除）、`--create-branch`（デフォルトブランチ起点で ref を作成。新規ブランチ用）、`--dry-run`（API を呼ばず収集結果のみ表示。token/network 不要）。
   - 既存ブランチへの追記のみ。履歴の書き換え・force-push はしない。unsigned コミットが既にあるブランチは、先に `git fetch` → `git reset --hard` で作り直してから使うこと。
 - `git push` で unsigned コミットを送らない。`api-commit.sh` はコミットを直接リモートブランチに作成するため push 不要。ローカル同期は `git fetch origin` → `git reset --hard origin/<branch>`。

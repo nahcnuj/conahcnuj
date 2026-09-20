@@ -52,7 +52,26 @@ if (Test-Path -LiteralPath $SrcEnv) {
     Write-Host "  copied app.env"
 } elseif (-not (Test-Path -LiteralPath $DstEnv)) {
     Copy-Item -LiteralPath $Example -Destination $DstEnv
-    Write-Host "  created app.env from app.env.example (edit PRIVATE_KEY_PATH if needed)"
+    Write-Host "  created app.env from app.env.example"
+    # Collect real values in the same run when interactive, so that
+    # ./install.ps1 alone leaves a working config (skipped in CI / pipes).
+    if (-not $env:CI -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        Write-Host "  enter App settings (empty = keep template value):"
+        $lines = Get-Content -LiteralPath $DstEnv
+        $keys = @("APP_ID", "INSTALLATION_ID", "APP_SLUG", "PRIVATE_KEY_PATH", "BASH_EXE")
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $m = [regex]::Match($lines[$i], '^(?<k>[A-Z_]+)=(?<v>.*)$')
+            if ($m.Success -and ($keys -contains $m.Groups["k"].Value)) {
+                $cur = $m.Groups["v"].Value
+                $ans = Read-Host "  $($m.Groups['k'].Value) [$cur]"
+                if ($ans -ne "") { $lines[$i] = "$($m.Groups['k'].Value)=$ans" }
+            }
+        }
+        Set-Content -LiteralPath $DstEnv -Value $lines
+        Write-Host "  updated app.env"
+    } else {
+        Write-Host "  (edit app.env values as needed)"
+    }
 }
 
 # 2. opencode plugin

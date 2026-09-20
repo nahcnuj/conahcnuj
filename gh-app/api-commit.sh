@@ -24,6 +24,9 @@
 #                     files, staged or not; untracked files excluded).
 #   --all             Commit every worktree change (added/modified/untracked files
 #                     and deletions) in a single verified commit.
+#                     NOTE: --all is a *commit* operation, not staging. It covers
+#                     the same file set `git add -A` would stage, but creates
+#                     the Verified commit in the same run instead of staging.
 #   --file p=c|p=@f   Add/update file p with inline content c or @local file f.
 #   --delete path     Delete path from the branch.
 #   --create-branch   Create <branch> from the default branch if it does not
