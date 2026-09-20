@@ -6,8 +6,10 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 
 - `gh` CLI / GitHub API が **App 名義（`conahcnuj[bot]`）** で動く
 - opencode 内の git 操作が **App 名義** で行われる
-  - `git commit` の `user.name` / `user.email`
+  - `git commit` の `user.name` / `user.email`（ただし `commit.gpgsign=false` のため unsigned。コミットは後述の `git vc` を使う）
   - `git push` 等の認証（credential helper）
+  - `git vc` alias（Verified コミット作成）の注入
+- `git commit` はプラグインの `tool.execute.before` フックでブロックし、`git vc` へ誘導する
 
 ## 構成
 
@@ -45,11 +47,30 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 bash と `curl` / `openssl` / `sed` があれば Ubuntu でも Windows（Git Bash）でも動く。
 
 ```bash
-# ファイルを 1 コミットで追加・更新（author は conahcnuj[bot]）
+# どのリポジトリでも同じ1行（owner/repo/branch は git remote と現在ブランチから自動検出）
+git vc -m "commit message" --all      # 作業ツリーの変更（新規・変更・削除）を一括コミット
+
+# このリポジトリ内では直接スクリプトを叩いても同じ
+bash gh-app/api-commit.sh -m "commit message" --all
+
+# ファイルを明示指定（author は conahcnuj[bot]）
 bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "commit message" \
   --file path/to/file=新内容 \        # インライン
   --file path/to/file=@local-file     # ローカルファイルの中身
+  --delete path/to/removed            # 削除
+
+# 新規ブランチ（デフォルトブランチ起点で ref を作成。unsigned コミットを介さない）
+git vc -m "commit message" --all --create-branch
+
+# 何がコミットされるか事前確認（API を呼ばない）
+bash gh-app/api-commit.sh -m "commit message" --all --dry-run
 ```
+
+`git commit` は使わないこと。プラグインが `commit.gpgsign=false` を注入するため
+unsigned コミットになり、「Commits must have verified signatures」のブランチルールで
+ブロックされる。opencode 上ではプラグインが `git commit` を検知してエラーにし、
+`git vc` を案内する（git の alias は組み込みコマンドを上書きできないため、新規名
+`vc` で提供する）。
 
 必要な App 権限は `Contents: Read and write` と `Workflows: Read and write`
 （`.github/workflows/` を変更する場合のみ）。

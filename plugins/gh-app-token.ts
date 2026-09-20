@@ -66,6 +66,15 @@ async function getInstallationToken(): Promise<string> {
 }
 
 export const GhAppTokenPlugin: Plugin = async () => {
+  const ghAppDir = GH_APP_DIR.replace(/\\/g, "/")
+  const apiCommitSh = `${ghAppDir}/api-commit.sh`
+  const bashExe = config.BASH_EXE.replace(/\\/g, "/")
+  // `git vc` (verified-commit): one-line Verified commit of the whole worktree.
+  // owner/repo/branch are auto-detected from git remote + HEAD, so it works
+  // in any repo: `git vc -m "msg" --all`
+  const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
+  const vcUsage = `git vc -m "<message>" --all (or: bash "${apiCommitSh}" -m "<message>" --all)`
+
   return {
     "shell.env": async (input, output) => {
       const token = await getInstallationToken().catch(() => null)
@@ -78,7 +87,7 @@ export const GhAppTokenPlugin: Plugin = async () => {
       // GIT_CONFIG_*: force every git operation in this project to use the App identity.
       const helperSh = CREDENTIAL_HELPER_SH.replace(/\\/g, "/")
       const helperCmd = `!"${config.BASH_EXE}" "${helperSh}"`
-      output.env.GIT_CONFIG_COUNT = "4"
+      output.env.GIT_CONFIG_COUNT = "5"
       output.env.GIT_CONFIG_KEY_0 = "user.name"
       output.env.GIT_CONFIG_VALUE_0 = BOT_NAME
       output.env.GIT_CONFIG_KEY_1 = "user.email"
@@ -87,6 +96,24 @@ export const GhAppTokenPlugin: Plugin = async () => {
       output.env.GIT_CONFIG_VALUE_2 = helperCmd
       output.env.GIT_CONFIG_KEY_3 = "commit.gpgsign"
       output.env.GIT_CONFIG_VALUE_3 = "false"
+      output.env.GIT_CONFIG_KEY_4 = "alias.vc"
+      output.env.GIT_CONFIG_VALUE_4 = vcCmd
+    },
+    "tool.execute.before": async (input, output) => {
+      // `git commit` under the App identity is always unsigned (commit.gpgsign
+      // is forced to false above) and fails "Commits must have verified
+      // signatures" branch rules. Git aliases cannot shadow the `commit`
+      // builtin, so block it here and point at the Verified path instead.
+      if (input.tool === "bash") {
+        const args = output.args as { command?: unknown }
+        const cmd = typeof args.command === "string" ? args.command : ""
+        if (/(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)) {
+          throw new Error(
+            `Do not use \`git commit\`: commits made as ${BOT_NAME} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
+              `Create a Verified commit instead: ${vcUsage}`
+          )
+        }
+      }
     },
   }
 }
