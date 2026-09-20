@@ -76,7 +76,7 @@ cd <repo>
 
 ### 2. opencode を再起動
 
-再起動後、シェルで確認:
+`gh-app/app.env` に実値を入れてから再起動。再起動後、シェルで確認:
 
 ```bash
 gh auth status
