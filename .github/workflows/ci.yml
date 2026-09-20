@@ -285,6 +285,7 @@ jobs:
             JSONL="$(grep -h '^{' "${RUNNER_TEMP}/e2e-out.jsonl" || true)"
             TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
             echo "${TEXT}" | tail -5
+            echo "=== tool diagnostics ==="
             echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
             # Bad: a bash call that neither succeeded (0), nor failed the
             # sandbox way (2: no remote), nor was hook-blocked (git commit
