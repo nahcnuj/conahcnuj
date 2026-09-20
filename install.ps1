@@ -5,7 +5,9 @@
 #   powershell -ExecutionPolicy Bypass -File install.ps1                # -> $HOME/.config/opencode
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Destination C:\path\to\dir
 #
-# Copies gh-app/* (scripts + app.env.example) and plugins/gh-app-token.ts.
+# Copies gh-app/* (scripts + app.env.example) and plugins/gh-app-token.ts ONLY.
+# plugins/package.json, package-lock.json, tsconfig.json and node_modules are
+# local typecheck tooling and are never deployed.
 # If the destination has no app.env yet, it is created from app.env.example.
 
 [CmdletBinding()]

@@ -106,6 +106,15 @@ jobs:
             Write-Error "app.env was not created from example"
             exit 1
           }
+          # Only gh-app-token.ts may live in the deployed plugins dir:
+          # package.json/lock, tsconfig, node_modules are local typecheck
+          # tooling and must never be deployed.
+          $deployedPlugins = Get-ChildItem -LiteralPath (Join-Path $dest "plugins") -File |
+            Select-Object -ExpandProperty Name
+          if ($deployedPlugins.Count -ne 1 -or $deployedPlugins[0] -ne "gh-app-token.ts") {
+            Write-Error "unexpected plugins payload: $($deployedPlugins -join ', ')"
+            exit 1
+          }
           Write-Host "all files deployed OK"
 
   mock-test:
