@@ -195,7 +195,7 @@ jobs:
 
   e2e-opencode:
     name: E2E opencode run (opencode free model)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     defaults:
       run:
         shell: bash
@@ -264,28 +264,33 @@ jobs:
 
       # Real `opencode run`, trying every model `opencode models` lists
       # (first success wins; the pinned free model is the fallback when the
-      # list is empty). The `git vc` string in the output can only originate
-      # from the REAL plugin hook blocking `git commit`, proving
-      # install -> load -> env -> hook end to end.
+      # list is empty). JSON events let us assert both halves: `git vc`
+      # surfaced AND no tool call died abnormally. Exit 2 is the sandbox
+      # norm (api-commit.sh cannot auto-detect owner/repo in a fixture
+      # with no remote); anything else fails the run.
       - name: Run opencode and assert git vc surfaces
         run: |
           MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
           if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
           echo "${MODELS}" | head -12
           OK=0
-          OUT=""
           for m in $(echo "${MODELS}" | head -12); do
             echo "E2E trying model: ${m}"
-            OUT="$(OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
+            OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
               OPENCODE_DISABLE_AUTOUPDATE=true \
               OPENCODE_DISABLE_MODELS_FETCH=true \
-              timeout 150 opencode run --model "${m}" --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
-              "Commit the staged changes with message e2e test. Execute the necessary commands." 2>&1 || true)"
-            if [[ "${OUT}" == *"git vc"* ]]; then OK=1; break; fi
+              timeout 150 opencode run --format json --model "${m}" --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
+              "Commit the staged changes with message e2e test. Execute the necessary commands." \
+              > "${RUNNER_TEMP}/e2e-out.jsonl" 2>"${RUNNER_TEMP}/e2e-err.log" || true
+            JSONL="$(grep -h '^{' "${RUNNER_TEMP}/e2e-out.jsonl" || true)"
+            TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
+            echo "${TEXT}" | tail -20
+            BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | .part.state.metadata.exit' | grep -v -x -e 0 -e 2 || true)"
+            if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then OK=1; break; fi
+            echo "E2E model ${m} unsuitable (missing git vc or bad exit: ${BAD})"
           done
-          echo "${OUT}" | tail -20
           if [ "${OK}" != "1" ]; then
-            echo "E2E FAIL: 'git vc' not found in opencode output" >&2
+            echo "E2E FAIL: no model surfaced 'git vc' with clean exits" >&2
             exit 1
           fi
           echo "E2E OK: 'git vc' surfaced naturally in a real opencode session"

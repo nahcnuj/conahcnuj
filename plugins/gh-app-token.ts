@@ -8,17 +8,24 @@ const GH_APP_DIR = path.join(__dirname, "..", "gh-app")
 const TOKEN_CACHE_FILE = path.join(GH_APP_DIR, "token.cache")
 const CREDENTIAL_HELPER_SH = path.join(GH_APP_DIR, "git-credential-helper.sh")
 
-// Only values with a usable default live here. Required values have no
-// defaults at all: absence fails fast with a fix (see loadAppEnv).
-const DEFAULT_CONFIG = {
-  BASH_EXE: "C:/Program Files/Git/bin/bash.exe",
+// Git Bash on Windows; plain PATH lookup everywhere else (an explicit
+// app.env value always wins, even when it does not exist yet: smoke tests
+// stage a bogus path on purpose and must still load).
+const BASH_EXE_WINDOWS = "C:/Program Files/Git/bin/bash.exe"
+function resolveBashExe(explicit: string | undefined): string {
+  if (explicit) {
+    return explicit
+  }
+  return process.platform === "win32" ? BASH_EXE_WINDOWS : "bash"
 }
 const REQUIRED_KEYS = ["APP_SLUG"] as const
 // Read from app.env when present, but never required up front: they are
 // only validated inside fetchInstallationToken.
 const TOKEN_KEYS = ["APP_ID", "INSTALLATION_ID", "PRIVATE_KEY_PATH"] as const
 
-type Config = typeof DEFAULT_CONFIG & {
+type Config = {
+  BASH_EXE: string
+} & {
   [K in (typeof REQUIRED_KEYS)[number]]: string
 } & {
   [K in (typeof TOKEN_KEYS)[number]]?: string
@@ -64,7 +71,7 @@ function loadAppEnv(): Config {
     ? parseAppEnv(fs.readFileSync(envFile, "utf8"))
     : {}
   const config: Config = {
-    ...DEFAULT_CONFIG,
+    BASH_EXE: resolveBashExe(parsed["BASH_EXE"]),
     APP_SLUG: parsed["APP_SLUG"] ?? "",
   }
   for (const key of TOKEN_KEYS) {
