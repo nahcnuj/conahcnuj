@@ -1,4 +1,5 @@
 gh-app/token.cache
+gh-app/bot-id.cache
 gh-app/app.env
 plugins/node_modules/
 test/.smoke/

@@ -213,6 +213,9 @@ jobs:
           APP_SLUG=conahcnuj
           PRIVATE_KEY_PATH=/tmp/nonexistent.pem
           EOF
+          # Seed the bot-ID cache: the public lookup shares runner IPs and
+          # gets rate-limited; the ID itself is immutable public info.
+          printf '331119074' > "$RUNNER_TEMP/e2e-inst/gh-app/bot-id.cache"
           cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<'EOF'
           {
             "$schema": "https://opencode.ai/config.json",

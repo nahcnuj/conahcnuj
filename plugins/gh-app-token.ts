@@ -97,13 +97,35 @@ function b64url(input: Uint8Array | string): string {
     .replace(/=+$/, "")
 }
 
+const BOT_ID_CACHE_FILE = path.join(GH_APP_DIR, "bot-id.cache")
+
 /**
- * Resolve the bot account user ID (`<slug>[bot]`) via the public GitHub
- * API (no auth needed). The slug allowlist keeps user-controlled config
- * out of the request URL. APP_ID is deliberately NOT a fallback: it is
- * the App's own ID and never attributes commits to the bot account.
+ * Read a cached bot user ID (plain digits). Bot IDs are immutable, so the
+ * cache never expires; a malformed cache is ignored like a missing one.
+ */
+function readBotIdCache(cacheFile: string): string | null {
+  let raw: string
+  try {
+    raw = fs.readFileSync(cacheFile, "utf8")
+  } catch {
+    return null
+  }
+  const id = raw.trim()
+  return /^\d+$/.test(id) ? id : null
+}
+
+/**
+ * Resolve the bot account user ID (`<slug>[bot]`): persistent cache first,
+ * then the public GitHub API (no auth needed), caching the result. The
+ * slug allowlist keeps user-controlled config out of the request URL.
+ * APP_ID is deliberately NOT a fallback: it is the App's own ID and never
+ * attributes commits to the bot account.
  */
 async function resolveBotUserId(slug: string): Promise<string> {
+  const cached = readBotIdCache(BOT_ID_CACHE_FILE)
+  if (cached) {
+    return cached
+  }
   if (!/^[A-Za-z0-9-]+$/.test(slug)) {
     throw new Error(`Invalid APP_SLUG for bot lookup: ${slug}`)
   }
@@ -125,7 +147,13 @@ async function resolveBotUserId(slug: string): Promise<string> {
   ) {
     throw new Error(`Unexpected user lookup response for ${slug}[bot].`)
   }
-  return String((data as { id: number }).id)
+  const id = String((data as { id: number }).id)
+  try {
+    fs.writeFileSync(BOT_ID_CACHE_FILE, id, "utf8")
+  } catch {
+    // Cache is best-effort only; the resolved ID is still returned.
+  }
+  return id
 }
 
 /**

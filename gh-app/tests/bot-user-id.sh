@@ -23,3 +23,13 @@ if [[ "${OUT}" != "12345" ]]; then
   exit 1
 fi
 echo "PASS bot-user-id.sh prefers app.env value (no network)"
+
+# Seeded cache wins over the (unreachable) API without network.
+sed -i '/^BOT_USER_ID=/d' "${STAGE}/app.env"
+printf '777' > "${STAGE}/bot-id.cache"
+OUT="$(GH_APP_API_BASE="http://127.0.0.1:9" bash "${STAGE}/bot-user-id.sh")"
+if [[ "${OUT}" != "777" ]]; then
+  echo "FAIL: cache should win, got '${OUT}'" >&2
+  exit 1
+fi
+echo "PASS bot-user-id.sh prefers cache (no network)"

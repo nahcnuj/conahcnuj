@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Print the bot account user ID (<slug>[bot]) for noreply email attribution.
-# Uses BOT_USER_ID from app.env when set to a real value; otherwise looks it
-# up via the public GitHub API (no auth needed). Exits non-zero with guidance
-# when neither works (e.g. offline).
+# Order: BOT_USER_ID from app.env when set to a real value, then the
+# persistent cache (bot IDs are immutable), then the public GitHub API
+# (no auth needed). Exits non-zero with guidance when none works.
+# APP_ID is never a fallback: it is the App's own ID and never attributes
+# commits to the bot account.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,11 +19,20 @@ set -a
 set +a
 
 API_BASE="${GH_APP_API_BASE:-https://api.github.com}"
+CACHE_FILE="${DIR}/bot-id.cache"
 
 ID="${BOT_USER_ID:-}"
 if [[ -n "${ID}" && "${ID}" != "<"* ]]; then
   printf '%s' "${ID}"
   exit 0
+fi
+
+if [[ -f "${CACHE_FILE}" ]]; then
+  CACHED="$(tr -d '\n \t' < "${CACHE_FILE}")"
+  if [[ "${CACHED}" =~ ^[0-9]+$ ]]; then
+    printf '%s' "${CACHED}"
+    exit 0
+  fi
 fi
 
 if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
@@ -39,4 +50,5 @@ if [[ -z "${ID}" ]]; then
   echo "(gh api users/${APP_SLUG}%5Bbot%5D --jq .id), not APP_ID." >&2
   exit 1
 fi
+printf '%s' "${ID}" > "${CACHE_FILE}" 2>/dev/null || true
 printf '%s' "${ID}"

@@ -15,8 +15,8 @@
 const assert = require("node:assert")
 
 async function main() {
-  const [expectedSlug] = process.argv.slice(2)
-  assert(expectedSlug, "usage: node smoke-run.js <app slug>")
+  const [expectedSlug, expectedId] = process.argv.slice(2)
+  assert(expectedSlug && expectedId, "usage: node smoke-run.js <app slug> <bot id>")
   const { GhAppTokenPlugin } = require("./.smoke/out/gh-app-token.js")
   const plugin = await GhAppTokenPlugin({})
   assert(plugin["shell.env"], "missing shell.env hook")
@@ -38,7 +38,9 @@ async function main() {
         )
       : null
   assert(
-    emailMatch !== null && emailMatch[2] === expectedSlug,
+    emailMatch !== null &&
+      emailMatch[1] === expectedId &&
+      emailMatch[2] === expectedSlug,
     `user.email has wrong shape, got: ${pairs["user.email"]}`
   )
   assert(

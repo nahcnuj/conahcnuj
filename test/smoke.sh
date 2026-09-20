@@ -38,6 +38,9 @@ INST="${TMP}/inst"
 mkdir -p "${STAGE}/src" "${STAGE}/gh-app"
 cp "${INST}/plugins/gh-app-token.ts" "${STAGE}/src/"
 cp "${INST}/gh-app/"*.sh "${STAGE}/gh-app/"
+# Seed the bot-ID cache: keeps this test deterministic and offline-safe
+# (the public-API lookup behind it shares runner IPs and gets rate-limited).
+printf '331119074' > "${STAGE}/gh-app/bot-id.cache"
 # Fake app.env over the staged copy. The bot ID is auto-resolved from the
 # public API (APP_SLUG must be real); bogus BASH_EXE keeps get-token.sh from
 # running: no key, no token issuance. APP_ID etc. come from the environment
@@ -73,4 +76,4 @@ cp -r "${PLUGINS_DIR}/node_modules/@types" "${STAGE}/node_modules/"
 cp -r "${PLUGINS_DIR}/node_modules/@opencode-ai" "${STAGE}/node_modules/"
 "${PLUGINS_DIR}/node_modules/.bin/tsc" -p "${STAGE}/src"
 
-node "${HERE}/smoke-run.js" conahcnuj
+node "${HERE}/smoke-run.js" conahcnuj 331119074
