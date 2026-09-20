@@ -68,4 +68,22 @@ if [[ "${HELPER_OUT}" != *"password=${MOCK_TOKEN}"* ]]; then
 fi
 echo "PASS credential-helper outputs username/password for cached token"
 
+# 4) Test Python date parsing fallback (for macOS/Windows Git Bash where date -d fails).
+# This exercises the fallback at get-token.sh:70-71 without network/keys.
+ISO_TIME="2026-09-20T12:00:00Z"
+EXPECTED_EPOCH="1789905600"
+PY_OUT="$(python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('${ISO_TIME}'.replace('Z', '+00:00')).timestamp()))")"
+if [[ "${PY_OUT}" != "${EXPECTED_EPOCH}" ]]; then
+  echo "FAIL: Python date parsing returned '${PY_OUT}', expected '${EXPECTED_EPOCH}'" >&2
+  exit 1
+fi
+echo "PASS Python date parsing fallback (ISO -> epoch)"
+
+# 5) Verify get-token.sh contains the Python fallback code path (line 70-71).
+if ! grep -q "python3 -c \"import datetime" "${HERE}/get-token.sh"; then
+  echo "FAIL: Python fallback not found in get-token.sh" >&2
+  exit 1
+fi
+echo "PASS Python fallback code path present in get-token.sh"
+
 echo "ALL MOCK TESTS PASSED"

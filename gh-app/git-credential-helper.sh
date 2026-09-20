@@ -13,6 +13,7 @@ if [[ "${OPERATION}" != "get" ]]; then
 fi
 
 # Consume the credential request that git sent on stdin.
+# shellcheck disable=SC2086
 cat > /dev/null || true
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

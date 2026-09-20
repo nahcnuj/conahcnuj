@@ -99,6 +99,8 @@ for spec in "${FILE_SPECS[@]}"; do
   ADDITIONS+=( "{path:\"${EP}\",contents:\"${B64}\"}" )
 done
 ADD_LIST="$(IFS=,; echo "${ADDITIONS[*]}")"
+# shellcheck disable=SC2199
+# shellcheck disable=SC2086
 EB="$(json_escape "${BRANCH}")"
 EM="$(json_escape "${MESSAGE}")"
 

@@ -22,6 +22,7 @@ BOT_EMAIL="${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
 HELPER="${HERE}/git-credential-helper.sh"
 BASH_EXE="${BASH_EXE:-C:/Program Files/Git/bin/bash.exe}"
+# shellcheck disable=SC2086
 HELPER_CMD="!\"${BASH_EXE}\" \"${HELPER//\\//}\""
 
 SCOPE="--local"
@@ -33,7 +34,7 @@ fi
 git config "${SCOPE}" user.name "${BOT_NAME}"
 git config "${SCOPE}" user.email "${BOT_EMAIL}"
 git config "${SCOPE}" credential.helper "${HELPER_CMD}"
-git config "${SCOPE}" commit.gpgsign false
+git config "${SCOPE}" commit.gpgsign true
 
 echo "Configured (${SCOPE}):"
 git config --get-regexp "^(user\.(name|email)|credential\.helper|commit\.gpgsign)$" "${SCOPE}" 2>/dev/null || true

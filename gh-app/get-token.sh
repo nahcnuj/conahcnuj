@@ -63,7 +63,11 @@ fi
 
 # Cache until 10 min before expiry.
 if [[ -n "${EXPIRES_AT}" ]]; then
-  CACHE_EXPIRES="$(( $(date -d "${EXPIRES_AT}" +%s) - 600 ))"
+  if date -d "@0" +%s >/dev/null 2>&1; then
+    CACHE_EXPIRES="$(( $(date -d "${EXPIRES_AT}" +%s) - 600 ))"
+  else
+    CACHE_EXPIRES="$(( $(python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('${EXPIRES_AT}'.replace('Z', '+00:00')).timestamp()))") - 600 ))"
+  fi
 else
   CACHE_EXPIRES="$((NOW + 3000))"
 fi
