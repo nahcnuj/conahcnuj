@@ -10,20 +10,22 @@ STAGE="${1:?staged gh-app dir required}"
 APICOMMIT="${STAGE}/api-commit.sh"
 
 FIX="$(mktemp -d)"
-trap 'rm -rf "${FIX}"' EXIT
-git -C "${FIX}" init -q
-git -C "${FIX}" config user.email "mock@test"
-git -C "${FIX}" config user.name "mock"
-printf 'base\n' > "${FIX}/base.txt"
-printf 'del\n' > "${FIX}/del.txt"
-printf 'mv\n' > "${FIX}/old.txt"
-git -C "${FIX}" add -A
-git -C "${FIX}" commit -qm init
-printf 'mod\n' >> "${FIX}/base.txt"
-printf 'new\n' > "${FIX}/new.txt"
-git -C "${FIX}" rm -q del.txt
-git -C "${FIX}" mv old.txt newname.txt
-git -C "${FIX}" remote add origin https://github.com/o/r.git
+trap 'rm -rf "${FIX}" "${FIX2:-}"' EXIT
+pushd "${FIX}" >/dev/null || exit 1
+git init -q
+git config user.email "mock@test"
+git config user.name "mock"
+printf 'base\n' > base.txt
+printf 'del\n' > del.txt
+printf 'mv\n' > old.txt
+git add -A
+git commit -qm init
+printf 'mod\n' >> base.txt
+printf 'new\n' > new.txt
+git rm -q del.txt
+git mv old.txt newname.txt
+git remote add origin https://github.com/o/r.git
+popd >/dev/null || exit 1
 
 # -a collects tracked worktree changes like `git commit -a`, excluding untracked.
 OUT5="$(cd "${FIX}" && bash "${APICOMMIT}" o/r b -m msg -a --dry-run)"
@@ -70,20 +72,22 @@ echo "PASS api-commit.sh auto-detects owner/repo"
 # idx.txt is staged then deleted from the worktree: collecting it proves the
 # index (not worktree) is read. Unstaged/untracked files must be ignored.
 FIX2="$(mktemp -d)"
-git -C "${FIX2}" init -q
-git -C "${FIX2}" config user.email "mock@test"
-git -C "${FIX2}" config user.name "mock"
-printf 'keep\n' > "${FIX2}/keep.txt"
-git -C "${FIX2}" add -A
-git -C "${FIX2}" commit -qm init
-printf 'staged-change\n' > "${FIX2}/staged.txt"
-git -C "${FIX2}" add staged.txt
-printf 'indexed\n' > "${FIX2}/idx.txt"
-git -C "${FIX2}" add idx.txt
-rm "${FIX2}/idx.txt"
-printf 'unstaged\n' >> "${FIX2}/keep.txt"
-printf 'untracked\n' > "${FIX2}/untracked.txt"
-git -C "${FIX2}" remote add origin https://github.com/o/r2.git
+pushd "${FIX2}" >/dev/null || exit 1
+git init -q
+git config user.email "mock@test"
+git config user.name "mock"
+printf 'keep\n' > keep.txt
+git add -A
+git commit -qm init
+printf 'staged-change\n' > staged.txt
+git add staged.txt
+printf 'indexed\n' > idx.txt
+git add idx.txt
+rm idx.txt
+printf 'unstaged\n' >> keep.txt
+printf 'untracked\n' > untracked.txt
+git remote add origin https://github.com/o/r2.git
+popd >/dev/null || exit 1
 OUT4="$(cd "${FIX2}" && bash "${APICOMMIT}" o/r b -m msg --dry-run)"
 if [[ "${OUT4}" != *"Additions:  2 file(s)"* ]]; then
   echo "FAIL: staged additions mismatch:" >&2

@@ -6,8 +6,6 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 
 - `gh` CLI / GitHub API が **App 名義（`conahcnuj[bot]`）** で動く
 - opencode 内の git 操作が **App 名義** で行われる
-  - `user.name` / `user.email` による帰属付け
-  - `git push` 等の認証（credential helper）
 
 ## 構成
 
@@ -49,9 +47,6 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
 GitHub 自身にコミットを作成させるしかない。
 
-opencode 内でのコミット手順・オプション・仕様の詳細は AI エージェント向けの
-`AGENTS.md`（「コミット運用」節）にある。
-
 ## インストール
 
 前提:
@@ -67,16 +62,13 @@ cd <repo>
 ./install.ps1
 ```
 
-`~/.config/opencode/`（ユーザーワイド）へ展開されるため、全てのリポジトリ・セッションに適用される。
-
 ### 2. opencode を再起動
 
 `gh-app/app.env` に実値を入れてから再起動。再起動後、opencode のシェルで確認
-（自分のシェルが未ログインのままなのは正常。プラグインは opencode 内でのみ効く）:
+（自分のシェルが未ログインのままなのは正常）:
 
 ```bash
 gh auth status
-# → Logged in to github.com account conahcnuj[bot] (GH_TOKEN)
 ```
 
 ## トラブルシューティング
@@ -92,5 +84,3 @@ gh auth status
   CI の `mock-test` は秘密鍵・ネットワーク不要の offline 検証のみ。実トークンの
   動作確認はローカルで `bash gh-app/get-token.sh` → `bash gh-app/setup-git.sh` を
   実行して確認する。
-
-CI の内容は `.github/workflows/ci.yml` を参照（AGENTS.md にジョブ一覧あり）。

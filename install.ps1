@@ -37,20 +37,13 @@ Get-ChildItem -Path $SrcGhApp -Filter "*.sh" -File | ForEach-Object {
     Write-Host "  copied $($_.Name)"
 }
 
-# 1b. gh-app/tests scripts (offline mock tests, same relative layout).
-# Also drop the legacy top-level location (moved to tests/run.sh).
-$LegacyMock = Join-Path $DstGhApp "mock-test.sh"
-if (Test-Path -LiteralPath $LegacyMock) {
-    Remove-Item -LiteralPath $LegacyMock -Force
-    Write-Host "  removed legacy mock-test.sh (moved to tests/run.sh)"
-}
-$SrcTests = Join-Path $SrcGhApp "tests"
-$DstTests = Join-Path $DstGhApp "tests"
-if (Test-Path -LiteralPath $SrcTests) {
-    New-Item -ItemType Directory -Force -Path $DstTests | Out-Null
-    Get-ChildItem -Path $SrcTests -Filter "*.sh" -File | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $DstTests $_.Name) -Force
-        Write-Host "  copied tests/$($_.Name)"
+# 1b. Test code is never deployed: tests run from the repo in CI.
+# Drop leftovers from earlier installs that shipped them.
+foreach ($legacy in @("mock-test.sh", "tests")) {
+    $p = Join-Path $DstGhApp $legacy
+    if (Test-Path -LiteralPath $p) {
+        Remove-Item -LiteralPath $p -Recurse -Force
+        Write-Host "  removed legacy $legacy (test code is not deployed)"
     }
 }
 

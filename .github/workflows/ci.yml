@@ -86,7 +86,6 @@ jobs:
             "gh-app/setup-git.sh",
             "gh-app/api-commit.sh",
             "gh-app/bot-user-id.sh",
-            "gh-app/tests/run.sh",
             "gh-app/app.env.example",
             "plugins/gh-app-token.ts"
           )
@@ -145,9 +144,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # @types/node from npm; @opencode-ai/plugin from the offline stub
-      # (plugins/plugin-stub.d.ts). NOTE: plain `cd`, not `npm --prefix`:
-      # native npm on Windows ignores an msys-style absolute prefix.
+      - name: Cache npm
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('plugins/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      # @types/node + @opencode-ai/plugin from npm (pinned lockfile).
+      # NOTE: plain `cd`, not `npm --prefix`: native npm on Windows
+      # ignores an msys-style absolute prefix.
       - name: Typecheck plugin
         run: |
           cd plugins
@@ -171,6 +178,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Cache npm
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('plugins/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
       # Compiles the plugin, loads it against a fake gh-app dir (fake
       # app.env overlaid), and asserts the shell.env contract (GIT_CONFIG
       # identity + alias.vc) and the git-commit redirect.
@@ -187,11 +202,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # Pinned version: unpinned lookup hits api.github.com without auth
-      # and gets rate-limited on shared runners. Verified locally with 1.18.31.
       - name: Install opencode
         run: |
-          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.31
+          curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
