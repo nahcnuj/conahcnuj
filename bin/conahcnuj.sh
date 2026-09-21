@@ -138,11 +138,45 @@ issue_branch_name() {
   printf 'conahcnuj/%s-%s\n' "${num}" "${slug}"
 }
 
+# Pick a non-colliding branch name: if any PR (even a closed one) already uses
+# <branch> as its head, return the first free "<branch>-N" (N>=2). An open PR is
+# left untouched so ensure_pr can reuse it. Without this, GitHub rejects
+# createPullRequest with "a pull request already exists for <branch>".
+next_free_branch() {
+  local owner="${1}" repo="${2}" branch="${3}" info state cand n
+  info="$(gh_api_find_pr_by_head_any "${owner}" "${repo}" "${branch}")"
+  [[ -n "${info}" ]] || {
+    printf '%s\n' "${branch}"
+    return 0
+  }
+  state="${info#*|}"
+  [[ "${state}" != "OPEN" ]] || {
+    printf '%s\n' "${branch}"
+    return 0
+  }
+  n=2
+  while [[ ${n} -lt 100 ]]; do
+    cand="${branch}-${n}"
+    if [[ -z "$(gh_api_find_pr_by_head_any "${owner}" "${repo}" "${cand}")" ]]; then
+      printf '%s\n' "${cand}"
+      return 0
+    fi
+    n=$((n + 1))
+  done
+  printf '%s\n' "${branch}"
+}
+
 # Create (or reuse) the feature branch off the default branch and check it out.
+# An explicit <branch_override> (7th arg) skips the derived name; callers use it
+# to pass a name already resolved by next_free_branch.
 ensure_issue_branch() {
-  local owner="${1}" repo="${2}" num="${3}" title="${4}" default_branch="${5}" default_oid="${6}"
+  local owner="${1}" repo="${2}" num="${3}" title="${4}" default_branch="${5}" default_oid="${6}" branch_override="${7:-}"
   local branch
-  branch="$(issue_branch_name "${num}" "${title}")"
+  if [[ -n "${branch_override}" ]]; then
+    branch="${branch_override}"
+  else
+    branch="$(issue_branch_name "${num}" "${title}")"
+  fi
   echo "Feature branch: ${branch} (from ${default_branch})" >&2
 
   if [[ "${TEST_MODE}" == "1" ]]; then
@@ -407,7 +441,14 @@ start_issue() {
   echo "Default branch: ${default_branch} (${default_oid:0:7})" >&2
 
   local branch
-  branch="$(ensure_issue_branch "${owner}" "${repo}" "${num}" "${title}" "${default_branch}" "${default_oid}")"
+  branch="$(issue_branch_name "${num}" "${title}")"
+  # GitHub allows only one PR per head branch, even when the earlier PR is
+  # closed, so a derived name that is already taken must be suffixed before we
+  # check the branch out and later try to open the PR.
+  if [[ "${TEST_MODE}" != "1" ]]; then
+    branch="$(next_free_branch "${owner}" "${repo}" "${branch}")"
+  fi
+  branch="$(ensure_issue_branch "${owner}" "${repo}" "${num}" "${title}" "${default_branch}" "${default_oid}" "${branch}")"
 
   # An earlier run may have already committed the implementation to this
   # branch. In that case there is nothing left to implement, so skip the

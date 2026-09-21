@@ -332,6 +332,25 @@ gh_api_find_pr_by_head() {
   gh_api_json_num "${json}" "number"
 }
 
+# Find any PR (open, closed or merged) whose head is <branch>.
+# Output: "<number>|<state>" (empty if none). Used to avoid createPullRequest
+# collisions: GitHub refuses a new PR while any PR, even a closed one, already
+# uses the same head branch.
+gh_api_find_pr_by_head_any() {
+  local owner="${1}" repo="${2}" branch="${3}" json
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequests(headRefName: \"${branch}\", states: [OPEN, CLOSED, MERGED], first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { number state } } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+  local num state
+  num="$(gh_api_json_num "${json}" "number")"
+  [[ -n "${num}" ]] || return 0
+  state="$(gh_api_json_str "${json}" "state")"
+  printf '%s|%s\n' "${num}" "${state}"
+}
+
 # Create a branch ref from a base OID. Args: owner repo branch base_oid
 gh_api_create_branch() {
   local owner="${1}" repo="${2}" branch="${3}" base_oid="${4}"

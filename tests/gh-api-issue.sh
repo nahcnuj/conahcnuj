@@ -32,6 +32,10 @@ MOCK_PR_BY_HEAD_EMPTY='{"data":{"repository":{"pullRequests":{"nodes":[]}}}}'
 
 MOCK_PR_BY_HEAD_FOUND='{"data":{"repository":{"pullRequests":{"nodes":[{"number":42}]}}}}'
 
+MOCK_PR_BY_HEAD_ANY_EMPTY='{"data":{"repository":{"pullRequests":{"nodes":[]}}}}'
+
+MOCK_PR_BY_HEAD_ANY_CLOSED='{"data":{"repository":{"pullRequests":{"nodes":[{"number":13,"state":"CLOSED"}]}}}}'
+
 MOCK_REPO_ID='{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}'
 
 MOCK_CREATE_PR='{"data":{"createPullRequest":{"pullRequest":{"number":123}}}}'
@@ -145,6 +149,15 @@ test_find_pr_by_head() {
   echo "gh_api_find_pr_by_head passed"
 }
 
+test_find_pr_by_head_any() {
+  local out
+  out="$(printf '%s\n' "${MOCK_PR_BY_HEAD_ANY_EMPTY}" | gh_api_find_pr_by_head_any "nahcnuj" "conahcnuj" "conahcnuj/10-issue")"
+  [[ -z "${out}" ]]
+  out="$(printf '%s\n' "${MOCK_PR_BY_HEAD_ANY_CLOSED}" | gh_api_find_pr_by_head_any "nahcnuj" "conahcnuj" "conahcnuj/10-issue")"
+  [[ "${out}" == "13|CLOSED" ]]
+  echo "gh_api_find_pr_by_head_any passed"
+}
+
 test_create_pr() {
   local out
   out="$(printf '%s\n' "${MOCK_REPO_ID}" "${MOCK_CREATE_PR}" | gh_api_create_pr "nahcnuj" "conahcnuj" "New PR" "Body" "branch" "main")"
@@ -191,6 +204,7 @@ test_fetch_pr_conditions
 test_fetch_reviews
 test_review_summary
 test_find_pr_by_head
+test_find_pr_by_head_any
 test_create_pr
 test_update_pr
 test_request_review
