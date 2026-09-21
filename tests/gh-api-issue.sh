@@ -32,6 +32,8 @@ MOCK_PR_BY_HEAD_EMPTY='{"data":{"repository":{"pullRequests":{"nodes":[]}}}}'
 
 MOCK_PR_BY_HEAD_FOUND='{"data":{"repository":{"pullRequests":{"nodes":[{"number":42}]}}}}'
 
+MOCK_REPO_ID='{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}'
+
 MOCK_CREATE_PR='{"data":{"createPullRequest":{"pullRequest":{"number":123}}}}'
 
 MOCK_COMMENT='{"id":777}'
@@ -145,7 +147,7 @@ test_find_pr_by_head() {
 
 test_create_pr() {
   local out
-  out="$(printf '%s\n' "${MOCK_CREATE_PR}" | gh_api_create_pr "nahcnuj" "conahcnuj" "New PR" "Body" "branch" "main")"
+  out="$(printf '%s\n' "${MOCK_REPO_ID}" "${MOCK_CREATE_PR}" | gh_api_create_pr "nahcnuj" "conahcnuj" "New PR" "Body" "branch" "main")"
   [[ "${out}" == "123" ]]
   echo "gh_api_create_pr passed"
 }

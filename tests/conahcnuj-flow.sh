@@ -33,8 +33,8 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape. One JSON document per GitHub API call, in call order:
-#   fetch_issue, get_repo, find_pr_by_head (empty), create_pr (123),
-#   conditions (SUCCESS|MERGEABLE), request_review, fetch_reviews
+#   fetch_issue, get_repo, find_pr_by_head (empty), repo id lookup, create_pr
+#   (123), conditions (SUCCESS|MERGEABLE), request_review, fetch_reviews
 #   (CHANGES_REQUESTED), conditions, request_review, post_comment,
 #   fetch_reviews (fingerprint refresh after the reply), conditions,
 #   fetch_reviews (APPROVED), conditions.
@@ -46,6 +46,7 @@ cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "issue駆動自律開発", "body": "# 背景\n動作確認用のダミー issue です。", "labels": [{"name": "enhancement"}], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
+{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":123}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}

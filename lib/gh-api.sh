@@ -341,10 +341,28 @@ gh_api_create_branch() {
 }
 
 # Create a PR. Output: PR number. Args: owner repo title body head base
+# The createPullRequest mutation requires the repository node id (it rejects
+# repositoryNameWithOwner), so this first resolves the id with one extra
+# GraphQL query. In test mode that consumes one extra mock line.
 gh_api_create_pr() {
   local owner="${1}" repo="${2}" title="${3}" body="${4}" head="${5}" base="${6}"
+
+  local id_query="query { repository(owner: \"${owner}\", name: \"${repo}\") { id } }"
+  local id_json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    id_json="$(gh_api_read_line)"
+  else
+    id_json="$(gh_api_graphql "${id_query}")"
+  fi
+  local repo_id
+  repo_id="$(gh_api_json_str "${id_json}" "id")"
+  if [[ -z "${repo_id}" ]]; then
+    echo "ERROR: could not resolve the repository id for ${owner}/${repo}." >&2
+    return 1
+  fi
+
   local query
-  query="mutation { createPullRequest(input: { repositoryNameWithOwner: \"${owner}/${repo}\", headRefName: \"$(gh_api_escape "${head}")\", baseRefName: \"$(gh_api_escape "${base}")\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\" }) { pullRequest { number } } }"
+  query="mutation { createPullRequest(input: { repositoryId: \"${repo_id}\", headRefName: \"$(gh_api_escape "${head}")\", baseRefName: \"$(gh_api_escape "${base}")\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\" }) { pullRequest { number } } }"
 
   local json
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then

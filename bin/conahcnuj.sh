@@ -192,6 +192,10 @@ ensure_pr() {
 ${body}"
   local num
   num="$(gh_api_create_pr "${owner}" "${repo}" "${title}" "${pr_body}" "${branch}" "${base}")"
+  if [[ -z "${num}" ]]; then
+    echo "ERROR: PR creation failed for ${branch} -> ${base}." >&2
+    return 1
+  fi
   echo "Created PR #${num} (${branch} -> ${base})." >&2
   printf '%s\n' "${num}"
 }
