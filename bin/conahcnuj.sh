@@ -125,7 +125,7 @@ commit_changes() {
   bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
   local branch
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  git fetch origin "${branch}" 2>/dev/null || true
+  git fetch origin "${branch}" >/dev/null 2>&1 || true
   git reset --hard "origin/${branch}" >/dev/null 2>&1 || true
 }
 
@@ -151,14 +151,19 @@ ensure_issue_branch() {
     return 0
   fi
 
-  git fetch origin "${branch}" 2>/dev/null || true
+  # This function's stdout is captured by the caller to obtain the branch
+  # name, so every git command must keep its own output off stdout (send it to
+  # stderr): `git checkout -B <branch> <remote>/<branch>` prints
+  # "branch '<b>' set up to track ..." to stdout, which would otherwise be
+  # captured as part of the branch name and break PR creation.
+  git fetch origin "${branch}" >/dev/null 2>&1 || true
   if git rev-parse --verify -q "origin/${branch}" >/dev/null 2>&1; then
-    git checkout -B "${branch}" "origin/${branch}"
+    git checkout -B "${branch}" "origin/${branch}" 1>&2
     echo "Using existing feature branch ${branch} (resume)." >&2
   else
     gh_api_create_branch "${owner}" "${repo}" "${branch}" "${default_oid}" >/dev/null 2>&1 || echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
-    git fetch origin "${branch}"
-    git checkout -B "${branch}" "origin/${branch}"
+    git fetch origin "${branch}" 1>&2
+    git checkout -B "${branch}" "origin/${branch}" 1>&2
     echo "Created feature branch ${branch}." >&2
   fi
   printf '%s\n' "${branch}"
@@ -172,8 +177,9 @@ ensure_pr_branch_head() {
     git checkout -B "${head}" >/dev/null 2>&1 || git checkout -b "${head}"
     return 0
   fi
-  git fetch origin "${head}"
-  git checkout -B "${head}" "origin/${head}"
+  # Keep git's own output off stdout; callers capture this function's stdout.
+  git fetch origin "${head}" 1>&2
+  git checkout -B "${head}" "origin/${head}" 1>&2
 }
 
 # --- implementation ---------------------------------------------------------
