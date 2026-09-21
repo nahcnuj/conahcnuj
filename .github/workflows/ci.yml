@@ -118,7 +118,7 @@ jobs:
           # bin-side deployment: the conahcnuj driver resolves gh-app/lib
           # relative to itself, so they must mirror the repo sources.
           $binDir = Join-Path $HOME ".local/bin"
-          $binSide = Join-Path (Split-Path $binDir -Parent)
+          $binSide = Split-Path $binDir -Parent
           $pairs = @(
             @($dest, "gh-app/get-token.sh", "gh-app/get-token.sh"),
             @($dest, "gh-app/git-credential-helper.sh", "gh-app/git-credential-helper.sh"),
