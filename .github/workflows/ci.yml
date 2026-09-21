@@ -133,7 +133,7 @@ jobs:
             @($binSide, "lib/gh-api.sh", "lib/gh-api.sh"),
             @($binSide, "lib/opencode.sh", "lib/opencode.sh"),
             @($binSide, "lib/rate-limit.sh", "lib/rate-limit.sh"),
-            @($binSide, "conahcnuj", "bin/conahcnuj.sh")
+            @($binDir, "conahcnuj", "bin/conahcnuj.sh")
           )
           foreach ($p in $pairs) {
             $deployed = Join-Path $p[0] $p[1]
