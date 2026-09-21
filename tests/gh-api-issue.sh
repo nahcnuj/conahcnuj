@@ -140,6 +140,17 @@ test_review_summary() {
   echo "gh_api_review_summary passed"
 }
 
+test_escape() {
+  local out
+  out="$(gh_api_escape "conahcnuj/10-issue-2")"
+  [[ "${out}" == "conahcnuj/10-issue-2" ]] || { echo "FAIL: single line changed: '${out}'" >&2; exit 1; }
+  out="$(gh_api_escape "$(printf 'a\nb')")"
+  [[ "${out}" == 'a\nb' ]] || { echo "FAIL: multiline: '${out}'" >&2; exit 1; }
+  out="$(gh_api_escape 'q"uote\slash')"
+  [[ "${out}" == 'q\"uote\\slash' ]] || { echo "FAIL: quotes/backslash: '${out}'" >&2; exit 1; }
+  echo "gh_api_escape passed"
+}
+
 test_find_pr_by_head() {
   local out
   out="$(printf '%s\n' "${MOCK_PR_BY_HEAD_EMPTY}" | gh_api_find_pr_by_head "nahcnuj" "conahcnuj" "conahcnuj/10-x")"
@@ -205,6 +216,7 @@ test_fetch_reviews
 test_review_summary
 test_find_pr_by_head
 test_find_pr_by_head_any
+test_escape
 test_create_pr
 test_update_pr
 test_request_review

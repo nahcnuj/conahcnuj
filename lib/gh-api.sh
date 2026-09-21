@@ -40,11 +40,13 @@ gh_api_unb64() {
 # JSON-escape a string for embedding inside a GraphQL query string or a JSON
 # body. Escapes backslashes and quotes; converts literal line breaks into \n
 # sequences (raw newlines are invalid inside GraphQL string literals, and
-# multi-line title/body/comment text is the norm).
+# multi-line title/body/comment text is the norm). No trailing \n is appended:
+# a value such as a head ref must stay byte-identical, and "\n" inside a
+# headRefName makes GitHub report "Head ref must be a branch".
 gh_api_escape() {
   printf '%s' "${1}" |
     sed 's/\\/\\\\/g; s/"/\\"/g' |
-    awk 'BEGIN { ORS = "\\n" } { print }'
+    awk '{ if (NR > 1) printf "\\n"; printf "%s", $0 }'
 }
 
 # Read a single line from stdin (used by every test-mode function so that a
