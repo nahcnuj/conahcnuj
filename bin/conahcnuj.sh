@@ -323,6 +323,9 @@ drive() {
     # Commit leftovers from a previously interrupted run.
     if workdir_changed "$(pwd)"; then
       commit_changes "conahcnuj: ${title}"
+      # After committing our own fix, wait for CI to re-run instead of
+      # immediately trying to implement (which would fail if nothing changed).
+      continue
     fi
 
     pr="$(ensure_pr "${owner}" "${repo}" "${pr}" "${branch}" "${base}" "${title}" "${body}" "${closes}")"
