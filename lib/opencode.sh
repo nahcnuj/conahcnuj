@@ -11,7 +11,10 @@ opencode_get_models() {
     printf '%s\n' "${MOCK_OPENCODE_MODELS:-}"
     return 0
   fi
-  opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+  local models
+  models="$(opencode models 2>&1)"
+  echo "DEBUG opencode_get_models: models=[$models]" >&2
+  printf '%s\n' "${models}" | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 }
 
 # Build the implementation prompt for a single model run.
