@@ -38,10 +38,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Syntax check
-        run: bash -n gh-app/*.sh
+        run: bash -n gh-app/*.sh gh-app/tests/*.sh
 
       - name: ShellCheck
-        run: shellcheck -x gh-app/*.sh
+        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh
 
   lint-ps:
     name: Check install.ps1 syntax
@@ -84,6 +84,8 @@ jobs:
             "gh-app/get-token.sh",
             "gh-app/git-credential-helper.sh",
             "gh-app/setup-git.sh",
+            "gh-app/api-commit.sh",
+            "gh-app/bot-user-id.sh",
             "gh-app/app.env.example",
             "plugins/gh-app-token.ts"
           )
@@ -93,9 +95,24 @@ jobs:
               Write-Error "missing: $rel"
               exit 1
             }
+            $srcHash = (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $rel)).Hash
+            if ((Get-FileHash -LiteralPath $p).Hash -ne $srcHash) {
+              Write-Error "content mismatch: $rel"
+              exit 1
+            }
           }
           if (-not (Test-Path -LiteralPath (Join-Path $dest "gh-app/app.env"))) {
             Write-Error "app.env was not created from example"
+            exit 1
+          }
+          # Only gh-app-token.ts may live in the deployed plugins dir:
+          # package.json/lock, tsconfig, node_modules are local typecheck
+          # tooling and must never be deployed. @( ) because a single
+          # result has no .Count.
+          $deployedPlugins = @(Get-ChildItem -LiteralPath (Join-Path $dest "plugins") -File |
+            Select-Object -ExpandProperty Name)
+          if ($deployedPlugins.Count -ne 1 -or $deployedPlugins[0] -ne "gh-app-token.ts") {
+            Write-Error "unexpected plugins payload: $($deployedPlugins -join ', ')"
             exit 1
           }
           Write-Host "all files deployed OK"
@@ -113,39 +130,144 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Cache-hit path returns token without key/network
-        run: |
-          T="$(mktemp -d)"
-          cp gh-app/*.sh "$T/"
-          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
-          EXPIRES="$(( $(date +%s) + 3600 ))"
-          printf '%s|%s' "$EXPIRES" "ghs_mock_token_abc" > "$T/token.cache"
-          OUT="$(bash "$T/get-token.sh")"
-          test "$OUT" = "ghs_mock_token_abc"
-          echo "cache-hit returns cached token OK"
+      # Full offline suite: token cache, credential helper, api-commit.sh
+      # arg validation and --dry-run worktree collection (gh-app/tests/).
+      - name: Run tests/run.sh suite
+        run: bash gh-app/tests/run.sh
 
-      - name: Expired cache is not reused
-        run: |
-          T="$(mktemp -d)"
-          cp gh-app/*.sh "$T/"
-          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
-          EXPIRES="$(( $(date +%s) - 3600 ))"
-          printf '%s|%s' "$EXPIRES" "ghs_expired_token" > "$T/token.cache"
-          OUT="$(bash "$T/get-token.sh" 2>&1 || true)"
-          case "$OUT" in
-            *ghs_expired_token*) echo "ERROR: expired cache reused" >&2; exit 1 ;;
-            *) echo "expired cache rejected OK" ;;
-          esac
+  lint-ts:
+    name: Typecheck opencode plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Credential helper emits username/password (cached token)
+      - name: Cache npm
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('plugins/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      # @types/node + @opencode-ai/plugin from npm (pinned lockfile).
+      # NOTE: plain `cd`, not `npm --prefix`: native npm on Windows
+      # ignores an msys-style absolute prefix.
+      - name: Typecheck plugin
         run: |
-          T="$(mktemp -d)"
-          cp gh-app/*.sh "$T/"
-          printf 'APP_ID=00000\nINSTALLATION_ID=00000\nAPP_SLUG=conahcnuj\nPRIVATE_KEY_PATH=/tmp/nonexistent.pem\nBASH_EXE="C:/Program Files/Git/bin/bash.exe"\n' > "$T/app.env"
-          EXPIRES="$(( $(date +%s) + 3600 ))"
-          printf '%s|%s' "$EXPIRES" "ghs_mock_token_abc" > "$T/token.cache"
-          OUT="$(printf 'protocol=https\nhost=github.com\n\n' | bash "$T/git-credential-helper.sh" get)"
-          echo "$OUT" | grep -q '^username=x-access-token$'
-          echo "$OUT" | grep -q '^password=ghs_mock_token_abc$'
-          test "$(echo "$OUT" | wc -l)" -eq 2
-          echo "credential helper output OK"
+          cd plugins
+          npm ci --no-audit --no-fund
+          ./node_modules/.bin/tsc -p ../plugins --noEmit
+
+  plugin-smoke:
+    name: Plugin runtime smoke test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    # Real IDs when the repo defines them, else fakes. No private key needed.
+    env:
+      APP_ID: ${{ secrets.APP_ID }}
+      INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Cache npm
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('plugins/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      # Compiles the plugin, loads it against a fake gh-app dir (fake
+      # app.env overlaid), and asserts the shell.env contract (GIT_CONFIG
+      # identity + alias.vc) and the git-commit redirect.
+      # Needs node/npm from the runner; no secrets, no GitHub network.
+      - name: Run plugin smoke test
+        run: bash test/smoke.sh
+
+  e2e-opencode:
+    name: E2E opencode run (opencode free model)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # No pinned version: resolve latest via the authenticated API
+      # (unauthenticated api.github.com calls get rate-limited on runners).
+      - name: Install opencode
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/anomalyco/opencode/releases/latest | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+          VER="${TAG#v}"
+          test -n "$VER"
+          curl -fsSL https://opencode.ai/install | bash -s -- --version "$VER"
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Install exactly like a user would, into a temp dir.
+      - name: Install plugin via install.ps1
+        run: |
+          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File ./install.ps1 -Destination "$RUNNER_TEMP/e2e-inst"
+
+      # app.env over the installed copy: IDs come straight from repo
+      # secrets; no private key is ever needed (no token is issued here).
+      # The bot ID itself is auto-resolved from the public API.
+      # No provider config needed: opencode's own free models need no key.
+      - name: Stage app.env and model config
+        run: |
+          cat > "$RUNNER_TEMP/e2e-inst/gh-app/app.env" <<EOF
+          APP_ID=${{ secrets.APP_ID }}
+          INSTALLATION_ID=${{ secrets.INSTALLATION_ID }}
+          APP_SLUG=conahcnuj
+          PRIVATE_KEY_PATH=/tmp/nonexistent.pem
+          EOF
+          # Seed the bot-ID cache: the public lookup shares runner IPs and
+          # gets rate-limited; the ID itself is immutable public info.
+          printf '331119074' > "$RUNNER_TEMP/e2e-inst/gh-app/bot-id.cache"
+          cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<'EOF'
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "model": "opencode/mimo-v2.5-free"
+          }
+          EOF
+
+      # Fixture repo (no AGENTS.md, no remote): the agent can only discover
+      # `git vc` through the plugin hook, not repo docs. A repo without a
+      # remote also keeps every git operation strictly local.
+      - name: Stage fixture repo with a staged change
+        run: |
+          pushd "$RUNNER_TEMP" >/dev/null || exit 1
+          mkdir -p e2e-fixture
+          pushd e2e-fixture >/dev/null || exit 1
+          git init -q
+          git config user.email "e2e@test"
+          git config user.name "e2e"
+          printf 'hello\n' > file.txt
+          git add -A
+          git commit -qm init
+          printf 'change\n' >> file.txt
+          git add file.txt
+          popd >/dev/null || exit 1
+          popd >/dev/null || exit 1
+
+      # Real `opencode run`: use the first model from `opencode models` as
+      # the primary/default (explicit --model), then try the rest.
+      # JSON events let us assert both halves: `git vc` surfaced AND no
+      # tool call died abnormally. Exit 2 is the sandbox norm
+      # (api-commit.sh cannot auto-detect owner/repo in a fixture with
+      # no remote); anything else fails the run.
+      - name: Run opencode and assert git vc surfaces
+        run: |
+          bash test/e2e-opencode.sh

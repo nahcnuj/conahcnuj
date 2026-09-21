@@ -17,8 +17,10 @@ set -a
 . "${ENV_FILE}"
 set +a
 
+# Bot user ID: app.env value wins, otherwise auto-resolved from the API.
+BOT_USER_ID="$(bash "${HERE}/bot-user-id.sh")"
 BOT_NAME="${APP_SLUG}[bot]"
-BOT_EMAIL="${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+BOT_EMAIL="${BOT_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
 HELPER="${HERE}/git-credential-helper.sh"
 BASH_EXE="${BASH_EXE:-C:/Program Files/Git/bin/bash.exe}"
