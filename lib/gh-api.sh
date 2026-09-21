@@ -113,15 +113,21 @@ gh_api_call() {
 gh_api_graphql() {
   local query="${1}"
   shift
-  local vars="{}"
+  local vars_json="{}"
   while [[ $# -gt 0 ]]; do
     case "${1}" in
-      -F) vars="$(printf '%s' "${vars}" | sed 's/}$//')"","\"${2%%=*}\"":"\"${2#*=}\""}" ; shift 2 ;;
+      -F)
+        local key="${2%%=*}"
+        local value="${2#*=}"
+        vars_json="$(printf '%s' "${vars_json}" | sed 's/}$//')"
+        vars_json="${vars_json},\"${key}\":\"${value}\"}"
+        shift 2
+        ;;
       *) break ;;
     esac
   done
   local payload
-  payload="$(printf '{"query":%s,"variables":%s}' "$(gh_api_escape "${query}")" "${vars}")"
+  payload="$(printf '{"query":%s,"variables":%s}' "$(gh_api_escape "${query}")" "${vars_json}")"
   local json
   json="$(gh_api_call POST "${GH_APP_API_BASE:-https://api.github.com}/graphql" "${payload}")"
   # Check for GraphQL errors (returned with HTTP 200 but have errors field)
