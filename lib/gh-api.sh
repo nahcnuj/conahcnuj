@@ -301,6 +301,25 @@ gh_api_review_summary() {
   done < <(printf '%s' "${threads_part}" | grep -oE '\{"isResolved":false,"comments":\{"nodes":\[[^]]*\]' || true)
 }
 
+# Fingerprint of the actionable review feedback in a raw reviews payload.
+# Returns empty when there is no reviewer feedback to act on, so a poll of the
+# initial "waiting for review" state (reviewDecision=REVIEW_REQUIRED or empty,
+# no reviews/comments/threads) is never mistaken for fresh feedback.
+gh_api_review_fingerprint() {
+  local raw="${1}" matches="" decision=""
+  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' || true)"
+  if [[ -z "${matches}" ]]; then
+    # Only a decision that means "do work now" counts as feedback on its own;
+    # REVIEW_REQUIRED / empty just mean "waiting for reviewers".
+    decision="$(gh_api_json_str "${raw}" "reviewDecision")"
+    if [[ "${decision}" != "CHANGES_REQUESTED" && "${decision}" != "COMMENTED" ]]; then
+      printf '%s\n' ""
+      return 0
+    fi
+  fi
+  printf '%s%s' "${matches}" "${decision}" | sort -u | cksum | cut -d' ' -f1
+}
+
 # Find the open PR whose head is <branch>. Output: PR number (empty if none).
 gh_api_find_pr_by_head() {
   local owner="${1}" repo="${2}" branch="${3}" json

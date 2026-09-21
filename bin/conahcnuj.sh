@@ -220,12 +220,7 @@ poll_conditions() {
   done
 }
 
-# Fingerprint of the actionable review feedback in a raw reviews payload.
-review_fingerprint() {
-  local raw="${1}" matches
-  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' || true)"
-  printf '%s' "${matches}" | sort -u | cksum | cut -d' ' -f1
-}
+# --- review fingerprint -----------------------------------------------------
 
 # Main state machine. Handles both the fresh-issue path and the resume path;
 # never exits until the PR is approved and every non-reviewer constraint
@@ -269,7 +264,7 @@ drive() {
     payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
     raw="$(gh_api_unb64 "${payload}")"
     summary="$(printf '%s' "${raw}" | gh_api_review_summary)"
-    sig="$(review_fingerprint "${raw}")"
+    sig="$(gh_api_review_fingerprint "${raw}")"
     echo "reviewDecision: ${decision:-NONE}" >&2
 
     if [[ "${decision}" == "APPROVED" ]]; then
@@ -315,7 +310,7 @@ ${summary}"
       # and loop forever addressing the same thread.
       rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
       payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
-      sig="$(review_fingerprint "$(gh_api_unb64 "${payload}")")"
+      sig="$(gh_api_review_fingerprint "$(gh_api_unb64 "${payload}")")"
       last_sig="${sig}"
       continue
     fi
