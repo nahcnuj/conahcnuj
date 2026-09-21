@@ -449,6 +449,9 @@ start_issue() {
   # that is already done.
   if branch_has_commits "${default_branch}"; then
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
+  elif workdir_changed "$(pwd)"; then
+    echo "Working tree has uncommitted changes; committing them as the implementation." >&2
+    commit_changes "conahcnuj: implement issue #${num}: ${title}"
   else
     if ! implement "${title}" "${body}"; then
       echo "ERROR: could not implement issue #${num} with any available model." >&2
