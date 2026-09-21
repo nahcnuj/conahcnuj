@@ -97,14 +97,25 @@ done
 
 # Mount opencode config/auth when present, so the container sees the same
 # providers and logged-in models as the host.
+#
+# The data dir is NOT mounted wholesale: opencode keeps its state in a SQLite
+# database there (opencode.db + WAL), and SQLite over a Docker Desktop bind
+# mount fails with "disk I/O error". Only the auth file is needed; the rest of
+# the (container-local) data dir is created on the fly.
 oc_args=()
 OC_CONFIG="${OPENCODE_CONFIG_DIR:-${HOME}/.config/opencode}"
 OC_DATA="${OPENCODE_DATA_DIR:-${HOME}/.local/share/opencode}"
 if [[ -d "${OC_CONFIG}" ]]; then
   oc_args+=(-v "$(host_path "${OC_CONFIG}"):/root/.config/opencode")
+  # Point the gh-app-token plugin at the container-friendly app.env (container
+  # bash + the mounted private key) instead of the host one sitting in the
+  # mounted config dir.
+  if [[ -d "${OC_CONFIG}/gh-app" ]]; then
+    oc_args+=(-v "$(host_path "${RUN_DIR}/app.env"):/root/.config/opencode/gh-app/app.env:ro")
+  fi
 fi
-if [[ -d "${OC_DATA}" ]]; then
-  oc_args+=(-v "$(host_path "${OC_DATA}"):/root/.local/share/opencode")
+if [[ -f "${OC_DATA}/auth.json" ]]; then
+  oc_args+=(-v "$(host_path "${OC_DATA}/auth.json"):/root/.local/share/opencode/auth.json")
 fi
 
 # Attach a TTY only when one is present, so the wrapper also works from
