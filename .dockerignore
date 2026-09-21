@@ -1,0 +1,6 @@
+.git
+plugins/node_modules
+gh-app/app.env
+gh-app/token.cache
+gh-app/bot-id.cache
+gh-app/tests

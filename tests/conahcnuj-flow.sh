@@ -89,6 +89,7 @@ grep -q "Replied on PR #123 after addressing review feedback" "${LOG}" || { echo
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }
+# Fresh branch (no commits yet): the driver implements and commits.
 git -C "${WORK}" log --oneline | grep -q "conahcnuj: implement issue #10" || { echo "FAIL: implement commit missing"; exit 1; }
 git -C "${WORK}" log --oneline | grep -q "address review feedback" || { echo "FAIL: feedback commit missing"; exit 1; }
 

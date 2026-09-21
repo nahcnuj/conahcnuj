@@ -25,6 +25,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
 ├── tests/                     # ドライバの offline モックテスト
 ├── test.sh                    # tests/ のランナー
+├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
+├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
 ├── .github/workflows/ci.yml   # GitHub Actions (Ubuntu / Windows)
 ├── .gitignore
@@ -84,6 +86,31 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
 すべて省略可能です。
+
+## 隔離環境で実行する（Docker）
+
+自律実行（opencode が作業ツリーを自由に編集する）をホストから隔離したい場合は、
+`Dockerfile` でビルドしたイメージ内でドライバを動かせます。opencode・git・
+curl・openssl・ドライバ本体はイメージに同梱し、**秘密鍵と `app.env` は
+イメージへ焼き込まず**実行時に読み取り専用でマウントします。
+
+```sh
+cd <対象リポジトリ>
+bash <このリポジトリ>/docker-run.sh <issue番号> [--pr]
+```
+
+- 対象リポジトリは `/work` にバインドマウントされ、コンテナ内のドライバが
+  そこを操作する（ホストのリポジトリは直接汚さない）。
+- `gh-app/app.env` から `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /
+  `PRIVATE_KEY_PATH` を読み、コンテナ用の `app.env`（`BASH_EXE=/usr/bin/bash`、
+  鍵はマウント先）を生成して渡す。秘密鍵は `/run/secrets/app.pem` に読み取り
+  専用でマウントする。
+- opencode の設定・認証（`~/.config/opencode` / `~/.local/share/opencode`）が
+  あれば読み込み、ホストと同じモデルを使える。
+- 上書き用の環境変数（`CONAHCNUJ_IMAGE` / `CONAHCNUJ_TARGET` /
+  `CONAHCNUJ_APP_ENV` / `CONAHCNUJ_BUILD` / `OPENCODE_CONFIG_DIR` /
+  `OPENCODE_DATA_DIR`、および `CONAHCNUJ_REPO` 等のドライバ設定）は
+  `docker-run.sh` のヘッダーコメントを参照。
 
 ## インストール
 

@@ -96,6 +96,20 @@ workdir_changed() {
   [[ -n "$(git -C "${dir}" status --porcelain 2>/dev/null || true)" ]]
 }
 
+# True when the current branch already carries commits on top of the default
+# branch, i.e. an earlier run already implemented the issue. Used to skip the
+# model fall-through (which would otherwise keep asking every model to do work
+# that is already committed) and go straight to opening the PR.
+branch_has_commits() {
+  local default_branch="${1}" ref count
+  ref="${default_branch}"
+  if git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
+    ref="origin/${default_branch}"
+  fi
+  count="$(git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0')"
+  [[ "${count}" -gt 0 ]]
+}
+
 # Commit every working-tree change as a Verified commit, then sync the local
 # branch to the remote head api-commit.sh created. Test mode: plain local
 # commit (no network / no secret) so flows can be exercised offline.
@@ -281,12 +295,21 @@ drive() {
 
     if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
       # CI failed or the branch conflicts: implement again with that context.
+      # When no model produces a change there is nothing new to push, so back
+      # off before re-checking instead of hammering every model in a tight loop
+      # (poll_conditions returns immediately on FAILURE).
       echo "PR #${pr}: constraints failing; fixing with a new implementation round." >&2
-      if ! implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
-        echo "ERROR: could not produce changes to satisfy constraints; will re-poll." >&2
+      local produced_change="false"
+      if implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
+        produced_change="true"
       fi
       if workdir_changed "$(pwd)"; then
         commit_changes "conahcnuj: ${title} (fix constraints)"
+        produced_change="true"
+      fi
+      if [[ "${produced_change}" != "true" ]]; then
+        echo "No model produced changes for the failing constraints; backing off before re-checking." >&2
+        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
       fi
       continue
     fi
@@ -380,11 +403,20 @@ start_issue() {
   local branch
   branch="$(ensure_issue_branch "${owner}" "${repo}" "${num}" "${title}" "${default_branch}" "${default_oid}")"
 
-  if ! implement "${title}" "${body}"; then
-    echo "ERROR: could not implement issue #${num} with any available model." >&2
-    exit 1
+  # An earlier run may have already committed the implementation to this
+  # branch. In that case there is nothing left to implement, so skip the
+  # model fall-through and go straight to opening the PR for review. This is
+  # what keeps the driver from spinning through every model asking for work
+  # that is already done.
+  if branch_has_commits "${default_branch}"; then
+    echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
+  else
+    if ! implement "${title}" "${body}"; then
+      echo "ERROR: could not implement issue #${num} with any available model." >&2
+      exit 1
+    fi
+    commit_changes "conahcnuj: implement issue #${num}: ${title}"
   fi
-  commit_changes "conahcnuj: implement issue #${num}: ${title}"
 
   drive "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}"
 }
