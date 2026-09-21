@@ -114,7 +114,16 @@ gh_api_graphql() {
   local query="${1}"
   local payload
   payload="{\"query\":\"$(gh_api_escape "${query}")\"}"
-  gh_api_call POST "${GH_APP_API_BASE:-https://api.github.com}/graphql" "${payload}"
+  local json
+  json="$(gh_api_call POST "${GH_APP_API_BASE:-https://api.github.com}/graphql" "${payload}")"
+  # Check for GraphQL errors (returned with HTTP 200 but have errors field)
+  local errors
+  errors="$(printf '%s' "${json}" | sed -n 's/.*"errors"[[:space:]]*:[[:space:]]*\(\[[^]]*\]\).*/\1/p')"
+  if [[ -n "${errors}" && "${errors}" != "[]" ]]; then
+    echo "GraphQL error: ${errors}" >&2
+    return 1
+  fi
+  printf '%s\n' "${json}"
 }
 
 # --- JSON field extraction (single-line, compact JSON best) ----------------
@@ -262,7 +271,7 @@ gh_api_review_summary() {
     au="$(gh_api_json_str "${rn}" "login")"
     [[ -z "${bd}" ]] && bd="(no body)"
     printf -- '- [review %s] %s: %s\n' "${st}" "${au}" "${bd}"
-  done < <(printf '%s' "${reviews_part}" | grep -oE '\{"state":"[^"]*","body":"[^"]*"' || true)
+  done < <(printf '%s' "${reviews_part}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}' || true)
 
   # Issue-level comments.
   local comments_part bn

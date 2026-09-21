@@ -13,6 +13,7 @@ pushd "${FIXEMPTY}" >/dev/null || exit 1
 git init -q
 git config user.email "mock@test"
 git config user.name "mock"
+git config commit.gpgsign false
 printf 'x\n' > x.txt
 git add -A
 git commit -qm init

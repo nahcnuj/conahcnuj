@@ -88,6 +88,7 @@ commit_changes() {
   echo "Creating commit: ${message}" >&2
   git add -A
   if [[ "${TEST_MODE}" == "1" ]]; then
+    git config commit.gpgsign false
     git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
     return 0
   fi
@@ -222,7 +223,7 @@ poll_conditions() {
 # Fingerprint of the actionable review feedback in a raw reviews payload.
 review_fingerprint() {
   local raw="${1}" matches
-  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*"|\{"body":"[^"]*"|"isResolved":(true|false)' || true)"
+  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' || true)"
   printf '%s' "${matches}" | sort -u | cksum | cut -d' ' -f1
 }
 

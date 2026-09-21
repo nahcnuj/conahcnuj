@@ -24,6 +24,7 @@ mkdir -p "${WORK}"
 git -C "${WORK}" init -q
 git -C "${WORK}" config user.email "test@example.com"
 git -C "${WORK}" config user.name "test"
+git -C "${WORK}" config commit.gpgsign false
 printf 'base\n' > "${WORK}/file.txt"
 git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
