@@ -42,4 +42,8 @@ check "conahcnuj/10-issue-2" "${got}" "closed PR"
 got="$(printf '%s\n' "${CLOSED}" "${CLOSED}" "${EMPTY}" | next_free_branch nahcnuj conahcnuj "conahcnuj/10-issue")"
 check "conahcnuj/10-issue-3" "${got}" "closed PR twice"
 
+# base closed but -2 has an open PR: resume -2 instead of forking -3.
+got="$(printf '%s\n' "${CLOSED}" "${OPEN}" | next_free_branch nahcnuj conahcnuj "conahcnuj/10-issue")"
+check "conahcnuj/10-issue-2" "${got}" "resume open suffixed PR"
+
 echo "next_free_branch passed"

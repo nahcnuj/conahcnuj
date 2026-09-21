@@ -138,30 +138,26 @@ issue_branch_name() {
   printf 'conahcnuj/%s-%s\n' "${num}" "${slug}"
 }
 
-# Pick a non-colliding branch name: if any PR (even a closed one) already uses
-# <branch> as its head, return the first free "<branch>-N" (N>=2). An open PR is
-# left untouched so ensure_pr can reuse it. Without this, GitHub rejects
-# createPullRequest with "a pull request already exists for <branch>".
+# Pick the branch name to work on. GitHub only allows one PR per head branch
+# (even a closed one), so a derived name that is already spent cannot host a new
+# PR. Walk "<branch>", "<branch>-2", "<branch>-3", ... and take the first name
+# that either has no PR at all (fresh branch) or has an OPEN PR (resume it).
 next_free_branch() {
-  local owner="${1}" repo="${2}" branch="${3}" info state cand n
-  info="$(gh_api_find_pr_by_head_any "${owner}" "${repo}" "${branch}")"
-  [[ -n "${info}" ]] || {
-    printf '%s\n' "${branch}"
-    return 0
-  }
-  state="${info#*|}"
-  [[ "${state}" != "OPEN" ]] || {
-    printf '%s\n' "${branch}"
-    return 0
-  }
-  n=2
-  while [[ ${n} -lt 100 ]]; do
-    cand="${branch}-${n}"
-    if [[ -z "$(gh_api_find_pr_by_head_any "${owner}" "${repo}" "${cand}")" ]]; then
+  local owner="${1}" repo="${2}" branch="${3}" cands cand info state i
+  cands=("${branch}")
+  for ((i = 2; i < 100; i++)); do
+    cands+=("${branch}-${i}")
+  done
+  for cand in "${cands[@]}"; do
+    info="$(gh_api_find_pr_by_head_any "${owner}" "${repo}" "${cand}")"
+    if [[ -z "${info}" ]]; then
       printf '%s\n' "${cand}"
       return 0
     fi
-    n=$((n + 1))
+    if [[ "${info#*|}" == "OPEN" ]]; then
+      printf '%s\n' "${cand}"
+      return 0
+    fi
   done
   printf '%s\n' "${branch}"
 }
