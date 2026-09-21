@@ -120,7 +120,9 @@ gh_api_graphql() {
   local errors
   errors="$(printf '%s' "${json}" | sed -n 's/.*"errors"[[:space:]]*:[[:space:]]*\(\[[^]]*\]\).*/\1/p')"
   if [[ -n "${errors}" && "${errors}" != "[]" ]]; then
-    echo "GraphQL error: ${errors}" >&2
+    # Print the whole response: GraphQL puts the human-readable "message" after
+    # the "path" array, and a partial extract of "errors" hides the real cause.
+    echo "GraphQL error: ${json}" >&2
     return 1
   fi
   printf '%s\n' "${json}"
