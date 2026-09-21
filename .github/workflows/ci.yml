@@ -262,38 +262,54 @@ jobs:
           popd >/dev/null || exit 1
           popd >/dev/null || exit 1
 
-      # Real `opencode run`, trying every model `opencode models` lists
-      # (first success wins; the pinned free model is the fallback when the
-      # list is empty). JSON events let us assert both halves: `git vc`
-      # surfaced AND no tool call died abnormally. Exit 2 is the sandbox
-      # norm (api-commit.sh cannot auto-detect owner/repo in a fixture
-      # with no remote); anything else fails the run.
+      # Real `opencode run`: first try the default model (no --model flag),
+      # then fall back to every model from `opencode models` (no limit).
+      # JSON events let us assert both halves: `git vc` surfaced AND no
+      # tool call died abnormally. Exit 2 is the sandbox norm
+      # (api-commit.sh cannot auto-detect owner/repo in a fixture with
+      # no remote); anything else fails the run.
       - name: Run opencode and assert git vc surfaces
         run: |
           MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
           if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
-          echo "${MODELS}" | head -12
+          echo "Available models:"
+          echo "${MODELS}"
           OK=0
-          for m in $(echo "${MODELS}" | head -12); do
-            echo "E2E trying model: ${m}"
-            OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
-              OPENCODE_DISABLE_AUTOUPDATE=true \
-              OPENCODE_DISABLE_MODELS_FETCH=true \
-              timeout 150 opencode run --format json --model "${m}" --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
-              "Commit the staged changes with message e2e test. Execute the necessary commands." \
-              > "${RUNNER_TEMP}/e2e-out.jsonl" 2>"${RUNNER_TEMP}/e2e-err.log" || true
-            JSONL="$(grep -h '^{' "${RUNNER_TEMP}/e2e-out.jsonl" || true)"
-            TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
-            echo "${TEXT}" | tail -5
-            echo "=== tool diagnostics ==="
-            echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
-            # Bad: a bash call that neither succeeded (0), nor failed the
-            # sandbox way (2: no remote), nor was hook-blocked (git commit
-            # never executes: no exit at all).
-            BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != 0 and .exit != 2 and (.exit != null or ((.cmd // "") | contains("git commit") | not))) | [.cmd, .exit] | @tsv' || true)"
-            if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then OK=1; break; fi
-            echo "E2E model ${m} unsuitable (missing git vc or bad exit: ${BAD})"
-          done
+          # Try default model first (no --model flag)
+          echo "E2E trying default model (no --model flag)"
+          OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
+            OPENCODE_DISABLE_AUTOUPDATE=true \
+            OPENCODE_DISABLE_MODELS_FETCH=true \
+            timeout 150 opencode run --format json --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
+            "Commit the staged changes with message e2e test. Execute the necessary commands." \
+            > "${RUNNER_TEMP}/e2e-out.jsonl" 2>"${RUNNER_TEMP}/e2e-err.log" || true
+          JSONL="$(grep -h '^{' "${RUNNER_TEMP}/e2e-out.jsonl" || true)"
+          TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
+          echo "${TEXT}" | tail -5
+          echo "=== tool diagnostics ==="
+          echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
+          BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != 0 and .exit != 2 and (.exit != null or ((.cmd // "") | contains("git commit") | not))) | [.cmd, .exit] | @tsv' || true)"
+          if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then OK=1; fi
+          # Fall back to explicit models if default failed
+          if [ "${OK}" != "1" ]; then
+            for m in $(echo "${MODELS}"); do
+              echo "E2E trying model: ${m}"
+              OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
+                OPENCODE_DISABLE_AUTOUPDATE=true \
+                OPENCODE_DISABLE_MODELS_FETCH=true \
+                timeout 150 opencode run --format json --model "${m}" --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
+                "Commit the staged changes with message e2e test. Execute the necessary commands." \
+                > "${RUNNER_TEMP}/e2e-out.jsonl" 2>"${RUNNER_TEMP}/e2e-err.log" || true
+              JSONL="$(grep -h '^{' "${RUNNER_TEMP}/e2e-out.jsonl" || true)"
+              TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
+              echo "${TEXT}" | tail -5
+              echo "=== tool diagnostics ==="
+              echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
+              BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != 0 and .exit != 2 and (.exit != null or ((.cmd // "") | contains("git commit") | not))) | [.cmd, .exit] | @tsv' || true)"
+              if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then OK=1; break; fi
+              echo "E2E model ${m} unsuitable (missing git vc or bad exit: ${BAD})"
+            done
+          fi
           if [ "${OK}" != "1" ]; then
             echo "E2E FAIL: no model surfaced 'git vc' with clean exits" >&2
             exit 1
