@@ -323,11 +323,11 @@ gh_api_review_fingerprint() {
 # Find the open PR whose head is <branch>. Output: PR number (empty if none).
 gh_api_find_pr_by_head() {
   local owner="${1}" repo="${2}" branch="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequests(headRefName: \"${branch}\", states: [OPEN], first: 1) { nodes { number } } } }"
+  local query='query($owner: String!, $repo: String!, $branch: String!) { repository(owner: $owner, name: $repo) { pullRequests(headRefName: $branch, states: [OPEN], first: 1) { nodes { number } } } }'
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}")"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F branch="${branch}")"
   fi
   gh_api_json_num "${json}" "number"
 }
@@ -336,11 +336,11 @@ gh_api_find_pr_by_head() {
 # Output: "<number>|<state>" (empty if none). Used to avoid head-branch collisions.
 gh_api_find_pr_by_head_any() {
   local owner="${1}" repo="${2}" branch="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequests(headRefName: \"${branch}\", states: [OPEN, CLOSED, MERGED], first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { number state } } } }"
+  local query='query($owner: String!, $repo: String!, $branch: String!) { repository(owner: $owner, name: $repo) { pullRequests(headRefName: $branch, states: [OPEN, CLOSED, MERGED], first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { number state } } } }'
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}")"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F branch="${branch}")"
   fi
   local num state
   num="$(gh_api_json_num "${json}" "number")"
