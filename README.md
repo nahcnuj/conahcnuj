@@ -19,9 +19,13 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── tests/                 #   offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
+├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
+├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
-├── install.ps1                # グローバル設定（~/.config/opencode）へ配置
+├── tests/                     # ドライバの offline モックテスト
+├── test.sh                    # tests/ のランナー
+├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
 ├── .github/workflows/ci.yml   # GitHub Actions (Ubuntu / Windows)
 ├── .gitignore
 └── AGENTS.md
@@ -46,6 +50,39 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 `true` に変えても鍵が無いため `git commit` 自体が失敗する。
 bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
 GitHub 自身にコミットを作成させるしかない。
+
+## issue駆動自律開発（conahcnuj）
+
+`bin/conahcnuj.sh`（`install.ps1` により `conahcnuj` コマンドとして配備）は、
+指定した GitHub issue の解決を最後まで自律的に行うドライバです。
+
+```
+conahcnuj <issue番号>        # issue から開始
+conahcnuj <PR番号> --pr      # 既存 PR を引き継いで再開
+conahcnuj <PR番号>           # 入力が PR なら自動で再開に切り替わる
+```
+
+流れ:
+
+0. issue の内容を読み、最新のデフォルトブランチから `conahcnuj/<番号>-<スラッグ>`
+   ブランチを作成して実装する。実装は使用可能な全モデルを順に試し、最初に
+   作業ツリーへ変更を生んだモデルを採用する。
+1. PR を作成し、レビュアー以外の制約（status checks・mergeable）が通るまで
+   待ってからレビューを依頼する。
+2. レビューステータスをポーリングし、Comment / Request changes / 未解決の
+   レビュースレッド（セキュリティレビューの指摘を含む）を検出したらモデルを
+   使って対応し、api-commit.sh で Verified コミットを push して制約を再確認し、
+   PR へ返信する。
+3. PR が「Approved かつ全制約通過（ready to merge）」になるまで終了しない。
+
+ポーリング・リトライは GitHub のレートリミット（Retry-After /
+X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
+自動マージは行わない。環境変数の上書き（時間予算・ポーリング幅）や
+offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
+`bin/conahcnuj.sh` のヘッダーコメントを参照。
+
+`CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
+すべて省略可能です。
 
 ## インストール
 
