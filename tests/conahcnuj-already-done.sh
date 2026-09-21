@@ -41,12 +41,14 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm "existing implementation"
 
 # Mocked response tape, in call order:
-#   fetch_issue, get_repo, find_pr_by_head (empty), repo id, create_pr (124),
-#   conditions (SUCCESS), request_review, fetch_reviews (APPROVED), conditions.
+#   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
+#   repo id, create_pr (124), conditions (SUCCESS), request_review,
+#   fetch_reviews (APPROVED), conditions.
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "issue駆動自律開発", "body": "# 背景\n動作確認用のダミー issue です。", "labels": [{"name": "enhancement"}], "state": "open"}
-{"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
+{"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}
+{"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":124}}}}
