@@ -3,31 +3,6 @@
 # Runs opencode with various models and asserts git vc surfaces with clean exits
 set -euo pipefail
 
-MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
-if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
-echo "Available models:"
-echo "${MODELS}"
-
-# First model is the "default" - try it explicitly
-DEFAULT_MODEL="$(echo "${MODELS}" | head -1)"
-echo "E2E trying default model: ${DEFAULT_MODEL}"
-if run_e2e_model "${DEFAULT_MODEL}"; then
-  echo "E2E OK: 'git vc' surfaced naturally in a real opencode session"
-  exit 0
-fi
-
-# Fall back to remaining models if default failed
-for m in $(echo "${MODELS}" | tail -n +2); do
-  echo "E2E trying fallback model: ${m}"
-  if run_e2e_model "${m}"; then
-    echo "E2E OK: 'git vc' surfaced naturally in a real opencode session"
-    exit 0
-  fi
-done
-
-echo "E2E FAIL: no model surfaced 'git vc' with clean exits" >&2
-exit 1
-
 run_e2e_model() {
   local model="$1"
   OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
@@ -54,3 +29,28 @@ run_e2e_model() {
   echo "E2E model ${model} unsuitable (missing git vc or bad exit: ${BAD})"
   return 1
 }
+
+MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
+if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+echo "Available models:"
+echo "${MODELS}"
+
+# First model is the "default" - try it explicitly
+DEFAULT_MODEL="$(echo "${MODELS}" | head -1)"
+echo "E2E trying default model: ${DEFAULT_MODEL}"
+if run_e2e_model "${DEFAULT_MODEL}"; then
+  echo "E2E OK: 'git vc' surfaced naturally in a real opencode session"
+  exit 0
+fi
+
+# Fall back to remaining models if default failed
+for m in $(echo "${MODELS}" | tail -n +2); do
+  echo "E2E trying fallback model: ${m}"
+  if run_e2e_model "${m}"; then
+    echo "E2E OK: 'git vc' surfaced naturally in a real opencode session"
+    exit 0
+  fi
+done
+
+echo "E2E FAIL: no model surfaced 'git vc' with clean exits" >&2
+exit 1
