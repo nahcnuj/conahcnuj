@@ -373,6 +373,15 @@ gh_api_create_pr() {
   gh_api_json_num "${json}" "number"
 }
 
+# Update a PR's body so it stays in sync with the linked issue. Args: owner repo pr body
+# (Discards the updated PR JSON; the response must not leak into the caller's stdout.)
+gh_api_update_pr() {
+  local owner="${1}" repo="${2}" number="${3}" body="${4}"
+  local payload
+  payload="{\"body\":\"$(gh_api_escape "${body}")\"}"
+  gh_api_call PATCH "https://api.github.com/repos/${owner}/${repo}/pulls/${number}" "${payload}" >/dev/null
+}
+
 # Request reviewers on a PR (empty list = ask for review). Args: owner repo pr
 gh_api_request_review() {
   local owner="${1}" repo="${2}" number="${3}"

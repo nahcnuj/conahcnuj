@@ -30,7 +30,8 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
-#   fetch_pr_state, conditions, request_review, fetch_reviews
+#   fetch_pr_state, fetch_issue (stub body -> real issue body), update_pr
+#   (body sync on the reuse path), conditions, request_review, fetch_reviews
 #   (CHANGES_REQUESTED), conditions, request_review, post_comment,
 #   fetch_reviews (fingerprint refresh after the reply), conditions,
 #   fetch_reviews (APPROVED), conditions.
@@ -39,6 +40,8 @@ git -C "${WORK}" commit -qm init
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"Closes #10","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"CHANGES_REQUESTED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}
+{"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
+{}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}

@@ -49,6 +49,22 @@ if [[ "${TEST_MODE}" == "1" ]]; then
   rate_limit_poll_sleep() { :; }
 fi
 
+# Marker file so the PR body sync below runs at most once per driver process.
+# A file (not a shell variable) because ensure_pr runs in a command-substitution
+# subshell whose variable assignments would not survive back to the caller.
+# Lazy existence is not enough (mktemp creates an empty file), so the marker is
+# a "1" written into the file. Lives outside the work tree so it is never picked
+# up by `git add -A`.
+PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
+
+# True once the per-process PR body sync has already run.
+pr_body_synced() {
+  [[ "$(cat "${PR_BODY_SYNCED_FILE}" 2>/dev/null || true)" == "1" ]]
+}
+pr_body_mark_synced() {
+  printf '1\n' > "${PR_BODY_SYNCED_FILE}"
+}
+
 # --- helpers ----------------------------------------------------------------
 
 repo_detect() {
@@ -172,10 +188,23 @@ implement() {
 
 # --- PR lifecycle -----------------------------------------------------------
 
-# Reuse the open PR for this head branch, else create one. Outputs PR number.
+# Reuse the open PR for this head branch, else create one. Both reuse paths keep
+# the PR body derived from the linked issue ("Closes #<n>\n\n<issue body>"), so a
+# PR that was created without a written body (or with a stale one) gets it set.
+# The update runs at most once per driver process (PR_BODY_SYNCED_FILE) to avoid
+# a PATCH on every poll iteration. Outputs PR number.
 ensure_pr() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
+  local pr_body
+  pr_body="Closes #${closes}
+
+${body}"
   if [[ -n "${pr}" ]]; then
+    if ! pr_body_synced; then
+      echo "Syncing body of PR #${pr} with issue #${closes}." >&2
+      gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}"
+      pr_body_mark_synced
+    fi
     printf '%s\n' "${pr}"
     return 0
   fi
@@ -183,13 +212,14 @@ ensure_pr() {
   existing="$(gh_api_find_pr_by_head "${owner}" "${repo}" "${branch}")"
   if [[ -n "${existing}" ]]; then
     echo "Reusing open PR #${existing} for ${branch}." >&2
+    if ! pr_body_synced; then
+      echo "Syncing body of PR #${existing} with issue #${closes}." >&2
+      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}"
+      pr_body_mark_synced
+    fi
     printf '%s\n' "${existing}"
     return 0
   fi
-  local pr_body
-  pr_body="Closes #${closes}
-
-${body}"
   local num
   num="$(gh_api_create_pr "${owner}" "${repo}" "${title}" "${pr_body}" "${branch}" "${base}")"
   if [[ -z "${num}" ]]; then
@@ -366,6 +396,18 @@ resume_pr() {
   title="$(gh_api_unb64 "${title_b64}")"
   body="$(gh_api_unb64 "${body_b64}")"
   echo "PR #${pr}: state=${state} head=${head} base=${base}" >&2
+
+  # When the PR body is still just the auto-generated "Closes #<n>" stub, derive
+  # a real description from the linked issue so the resumed PR gets a written body.
+  if [[ -n "${closes}" ]] && [[ "${body}" == "Closes #${closes}" || "${body}" == "Closes #${closes}"$'\n' ]]; then
+    local iss_body
+    iss="$(gh_api_fetch_issue "${owner}" "${repo}" "${closes}")"
+    iss_body="$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)"
+    if [[ -n "${iss_body}" ]]; then
+      echo "PR body is just the closing stub; reusing issue #${closes} as the PR body." >&2
+      body="${iss_body}"
+    fi
+  fi
 
   case "${state}" in
     MERGED)

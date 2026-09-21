@@ -36,8 +36,8 @@ git -C "${WORK}" commit -qm init
 #   fetch_issue, get_repo, find_pr_by_head (empty), repo id lookup, create_pr
 #   (123), conditions (SUCCESS|MERGEABLE), request_review, fetch_reviews
 #   (CHANGES_REQUESTED), conditions, request_review, post_comment,
-#   fetch_reviews (fingerprint refresh after the reply), conditions,
-#   fetch_reviews (APPROVED), conditions.
+#   fetch_reviews (fingerprint refresh after the reply), update_pr (body sync on
+#   the reuse path), conditions, fetch_reviews (APPROVED), conditions.
 # Keep the tape and the run log OUTSIDE the repo: the driver's test-mode
 # commit path does `git add -A`, and a file living in the worktree would be
 # re-staged as it grows.
@@ -55,6 +55,7 @@ cat > "${TAPE}" <<'EOF'
 {}
 {"id":777}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Nice work so far!","author":{"login":"reviewer"}},{"body":"Addressed the review feedback:\n\nreviewDecision: CHANGES_REQUESTED\nREVIEWS:","author":{"login":"conahcnuj[bot]"}}]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Inline note on line 10"}]}}]}}}}}
+{}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}

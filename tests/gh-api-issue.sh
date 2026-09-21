@@ -152,6 +152,17 @@ test_create_pr() {
   echo "gh_api_create_pr passed"
 }
 
+test_update_pr() {
+  local out
+  out="$(printf '%s\n' '{}' | gh_api_update_pr "nahcnuj" "conahcnuj" 15 "Closes #10
+
+# 背景
+
+書き換え済みの本文です。")"
+  [[ "${out}" == '{}' ]]
+  echo "gh_api_update_pr passed"
+}
+
 test_request_review() {
   local out
   out="$(printf '%s\n' '{}' | gh_api_request_review "nahcnuj" "conahcnuj" 15)"
@@ -180,6 +191,7 @@ test_fetch_reviews
 test_review_summary
 test_find_pr_by_head
 test_create_pr
+test_update_pr
 test_request_review
 test_post_comment
 test_merge_pr
