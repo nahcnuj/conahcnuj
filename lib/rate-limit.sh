@@ -9,27 +9,34 @@ set -euo pipefail
 # Args: $1 = headers string (newline-separated)
 rate_limit_check() {
   local headers="${1:-}"
+  local lower=""
   local remaining=5000
   local reset=0
   local retry_after=""
 
   while IFS= read -r line; do
-    case "${line}" in
-      X-RateLimit-Remaining:*)
+    # Header names arrive lowercased over HTTP/2 (ALPN negotiated by curl on
+    # Linux), so fold each line for comparison instead of relying on the exact
+    # case. Values are still read from the original line.
+    lower="${line,,}"
+    case "${lower}" in
+      x-ratelimit-remaining:*)
         remaining="${line#*: }"
         remaining="${remaining//[^0-9]/}"
         ;;
-      X-RateLimit-Reset:*)
+      x-ratelimit-reset:*)
         reset="${line#*: }"
         reset="${reset//[^0-9]/}"
         ;;
-      Retry-After:*)
+      retry-after:*)
         retry_after="${line#*: }"
         retry_after="${retry_after//[^0-9]/}"
         ;;
     esac
   done <<< "${headers}"
 
+  # Reset, never leak a value from a previous header set (e.g. a Retry-After
+  # seen on an earlier call must not make the next call sleep spuriously).
   RATE_LIMIT_REMAINING="${remaining}"
   RATE_LIMIT_RESET="${reset}"
   RATE_LIMIT_RETRY_AFTER="${retry_after}"

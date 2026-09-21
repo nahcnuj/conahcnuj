@@ -33,6 +33,23 @@ Retry-After: 60"
   [[ "${RATE_LIMIT_REMAINING}" -eq 5000 ]]  # default assumption
   [[ -z "${RATE_LIMIT_RETRY_AFTER:-}" ]]
 
+  # Lowercased header names (as sent over HTTP/2) must parse too
+  headers="x-ratelimit-limit: 5000
+x-ratelimit-remaining: 123
+x-ratelimit-reset: $(($(date +%s) + 3600))
+retry-after: 45"
+  rate_limit_check "${headers}"
+  [[ "${RATE_LIMIT_REMAINING}" -eq 123 ]]
+  [[ "${RATE_LIMIT_RETRY_AFTER}" -eq 45 ]]
+
+  # A value from a previous call must never leak into the next one: a header
+  # set without Retry-After must clear the stale Retry-After from above.
+  headers="X-RateLimit-Remaining: 77"
+  rate_limit_check "${headers}"
+  [[ "${RATE_LIMIT_REMAINING}" -eq 77 ]]
+  [[ -z "${RATE_LIMIT_RETRY_AFTER:-}" ]]
+  [[ "${RATE_LIMIT_RESET}" -eq 0 ]]
+
   echo "rate_limit_check tests passed"
 }
 
