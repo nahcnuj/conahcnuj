@@ -58,7 +58,7 @@ Write-Host "Binary path: $DstBinDir"
 # endings to LF (Git Bash rejects CRLF shebangs under Windows).
 function Get-NormalizedText {
     param([string]$Path)
-    $bytes = Get-Content $Path -Encoding Byte
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
     if ($bytes.Count -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
         $bytes = $bytes[3..($bytes.Count - 1)]
     }
