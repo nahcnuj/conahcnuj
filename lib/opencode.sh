@@ -57,5 +57,5 @@ opencode_run() {
     return 0
   fi
 
-  opencode run --format json --model "${model}" --dir "${workdir}" --title conahcnuj "${prompt}" || return 1
+  opencode run -y --format json --model "${model}" --dir "${workdir}" --title conahcnuj "${prompt}" || return 1
 }
