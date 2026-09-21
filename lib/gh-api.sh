@@ -173,11 +173,11 @@ gh_api_fetch_issue() {
 # Repo default branch info. Output: default_branch|default_oid
 gh_api_get_repo() {
   local owner="${1}" repo="${2}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { defaultBranchRef { name, target { oid } } } }"
+  local query='query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { defaultBranchRef { name, target { oid } } } }'
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}")"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}")"
   fi
 
   local branch oid
@@ -190,11 +190,11 @@ gh_api_get_repo() {
 # Output: number|state|title_b64|body_b64|isDraft|mergeable|mergeStateStatus|reviewDecision|head|base|headRefOid|linkedIssue
 gh_api_fetch_pr_state() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { number, state, title, body, isDraft, mergeable, mergeStateStatus, reviewDecision, headRefName, baseRefName, headRefOid, closingIssuesReferences(first: 5) { nodes { number } } } } }"
+  local query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { number, state, title, body, isDraft, mergeable, mergeStateStatus, reviewDecision, headRefName, baseRefName, headRefOid, closingIssuesReferences(first: 5) { nodes { number } } } } }'
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}")"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F number="${number}")"
   fi
 
   local state title body is_draft mergeable mss decision head base head_oid linked
@@ -222,11 +222,11 @@ gh_api_fetch_pr_state() {
 # checks_state is SUCCESS when there is no status check on the head commit.
 gh_api_fetch_pr_conditions() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }"
+  local query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }'
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}")"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F number="${number}")"
   fi
 
   local state mergeable mss
@@ -244,11 +244,11 @@ gh_api_fetch_pr_conditions() {
 # gh_api_review_summary to turn it into readable feedback text).
 gh_api_fetch_reviews() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { reviewDecision, reviews(last: 25) { nodes { state, body, author { login } } }, comments(last: 25) { nodes { body, author { login } } }, reviewThreads(first: 50) { nodes { isResolved, comments(first: 10) { nodes { body } } } } } } }"
+  local query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewDecision, reviews(last: 25) { nodes { state, body, author { login } } }, comments(last: 25) { nodes { body, author { login } } }, reviewThreads(first: 50) { nodes { isResolved, comments(first: 10) { nodes { body } } } } } } }'
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}")"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F number="${number}")"
   fi
 
   local decision
@@ -373,12 +373,12 @@ gh_api_create_branch() {
 gh_api_create_pr() {
   local owner="${1}" repo="${2}" title="${3}" body="${4}" head="${5}" base="${6}"
 
-  local id_query="query { repository(owner: \"${owner}\", name: \"${repo}\") { id } }"
+  local id_query='query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }'
   local id_json
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     id_json="$(gh_api_read_line)"
   else
-    id_json="$(gh_api_graphql "${id_query}")"
+    id_json="$(gh_api_graphql "${id_query}" -F owner="${owner}" -F repo="${repo}")"
   fi
   local repo_id
   repo_id="$(gh_api_json_str "${id_json}" "id")"
@@ -428,14 +428,14 @@ gh_api_post_comment() {
 # Merge a PR (SQUASH). Args: owner repo pr  (output: true/false)
 gh_api_merge_pr() {
   local owner="${1}" repo="${2}" pr_number="${3}"
-  local id_query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${pr_number}) { id } } }"
+  local id_query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id } } }'
   local pr_id
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     pr_id="PR_ID_PLACEHOLDER"
     gh_api_read_line >/dev/null || true
   else
     local id_json
-    id_json="$(gh_api_graphql "${id_query}")"
+    id_json="$(gh_api_graphql "${id_query}" -F owner="${owner}" -F repo="${repo}" -F number="${pr_number}")"
     pr_id="$(gh_api_json_str "${id_json}" "id")"
   fi
 
