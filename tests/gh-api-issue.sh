@@ -159,7 +159,8 @@ test_update_pr() {
 # 背景
 
 書き換え済みの本文です。")"
-  [[ "${out}" == '{}' ]]
+  # gh_api_update_pr discards the response (must not leak into stdout).
+  [[ -z "${out}" ]]
   echo "gh_api_update_pr passed"
 }
 

@@ -196,11 +196,17 @@ implement() {
 ensure_pr() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
   local pr_body
-  pr_body="Closes #${closes}
+  # A resumed PR that is not linked to any issue must keep its body verbatim;
+  # prefixing it with a bare "Closes #" would produce a malformed description.
+  if [[ -n "${closes}" ]]; then
+    pr_body="Closes #${closes}
 
 ${body}"
+  else
+    pr_body="${body}"
+  fi
   if [[ -n "${pr}" ]]; then
-    if ! pr_body_synced; then
+    if [[ -n "${closes}" ]] && ! pr_body_synced; then
       echo "Syncing body of PR #${pr} with issue #${closes}." >&2
       gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}"
       pr_body_mark_synced
@@ -212,7 +218,7 @@ ${body}"
   existing="$(gh_api_find_pr_by_head "${owner}" "${repo}" "${branch}")"
   if [[ -n "${existing}" ]]; then
     echo "Reusing open PR #${existing} for ${branch}." >&2
-    if ! pr_body_synced; then
+    if [[ -n "${closes}" ]] && ! pr_body_synced; then
       echo "Syncing body of PR #${existing} with issue #${closes}." >&2
       gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}"
       pr_body_mark_synced
@@ -336,7 +342,7 @@ ${summary}"; then
       review_requested="true"
       gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
 
-${summary}"
+${summary}" >/dev/null
       echo "Replied on PR #${pr} after addressing review feedback." >&2
       # The reply is itself a new comment and would change the review payload,
       # so re-fingerprint the payload as it appears AFTER the reply. Otherwise
@@ -400,7 +406,7 @@ resume_pr() {
   # When the PR body is still just the auto-generated "Closes #<n>" stub, derive
   # a real description from the linked issue so the resumed PR gets a written body.
   if [[ -n "${closes}" ]] && [[ "${body}" == "Closes #${closes}" || "${body}" == "Closes #${closes}"$'\n' ]]; then
-    local iss_body
+    local iss iss_body
     iss="$(gh_api_fetch_issue "${owner}" "${repo}" "${closes}")"
     iss_body="$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)"
     if [[ -n "${iss_body}" ]]; then
@@ -465,4 +471,8 @@ main() {
   fi
 }
 
-main "$@"
+# SOURCEABLE: tests set CONAHCNUJ_IMPORT=1 to source this file (instead of
+# invoking main) so driver internals such as ensure_pr can be unit-tested.
+if [[ "${CONAHCNUJ_IMPORT:-0}" != "1" ]]; then
+  main "$@"
+fi
