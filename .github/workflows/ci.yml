@@ -262,8 +262,8 @@ jobs:
           popd >/dev/null || exit 1
           popd >/dev/null || exit 1
 
-      # Real `opencode run`: first try the default model (no --model flag),
-      # then fall back to every model from `opencode models` (no limit).
+      # Real `opencode run`: use the first model from `opencode models` as
+      # the primary/default (explicit --model), then try the rest.
       # JSON events let us assert both halves: `git vc` surfaced AND no
       # tool call died abnormally. Exit 2 is the sandbox norm
       # (api-commit.sh cannot auto-detect owner/repo in a fixture with
@@ -274,13 +274,13 @@ jobs:
           if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
           echo "Available models:"
           echo "${MODELS}"
-          OK=0
-          # Try default model first (no --model flag)
-          echo "E2E trying default model (no --model flag)"
+          # First model is the "default" - try it explicitly
+          DEFAULT_MODEL="$(echo "${MODELS}" | head -1)"
+          echo "E2E trying default model: ${DEFAULT_MODEL}"
           OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
             OPENCODE_DISABLE_AUTOUPDATE=true \
             OPENCODE_DISABLE_MODELS_FETCH=true \
-            timeout 150 opencode run --format json --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
+            timeout 150 opencode run --format json --model "${DEFAULT_MODEL}" --dir "${RUNNER_TEMP}/e2e-fixture" --title e2e \
             "Commit the staged changes with message e2e test. Execute the necessary commands." \
             > "${RUNNER_TEMP}/e2e-out.jsonl" 2>"${RUNNER_TEMP}/e2e-err.log" || true
           JSONL="$(grep -h '^{' "${RUNNER_TEMP}/e2e-out.jsonl" || true)"
@@ -289,11 +289,12 @@ jobs:
           echo "=== tool diagnostics ==="
           echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
           BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != 0 and .exit != 2 and (.exit != null or ((.cmd // "") | contains("git commit") | not))) | [.cmd, .exit] | @tsv' || true)"
+          OK=0
           if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then OK=1; fi
-          # Fall back to explicit models if default failed
+          # Fall back to remaining models if default failed
           if [ "${OK}" != "1" ]; then
-            for m in $(echo "${MODELS}"); do
-              echo "E2E trying model: ${m}"
+            for m in $(echo "${MODELS}" | tail -n +2); do
+              echo "E2E trying fallback model: ${m}"
               OPENCODE_CONFIG_DIR="${RUNNER_TEMP}/e2e-inst" \
                 OPENCODE_DISABLE_AUTOUPDATE=true \
                 OPENCODE_DISABLE_MODELS_FETCH=true \
