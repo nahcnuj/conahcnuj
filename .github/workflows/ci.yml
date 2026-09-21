@@ -270,4 +270,4 @@ jobs:
       # no remote); anything else fails the run.
       - name: Run opencode and assert git vc surfaces
         run: |
-          bash .github/workflows/e2e-opencode.sh
+          bash test/e2e-opencode.sh

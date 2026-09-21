@@ -35,7 +35,7 @@ if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
 echo "Available models:"
 echo "${MODELS}"
 
-# First model is the "default" - try it explicitly
+# First model is the explicit default (not "all models")
 DEFAULT_MODEL="$(echo "${MODELS}" | head -1)"
 echo "E2E trying default model: ${DEFAULT_MODEL}"
 if run_e2e_model "${DEFAULT_MODEL}"; then
@@ -43,8 +43,8 @@ if run_e2e_model "${DEFAULT_MODEL}"; then
   exit 0
 fi
 
-# Fall back to remaining models if default failed
-for m in $(echo "${MODELS}" | tail -n +2); do
+# Fall back to remaining models (exclude the default we already tried)
+for m in $(echo "${MODELS}" | grep -v "^${DEFAULT_MODEL}$"); do
   echo "E2E trying fallback model: ${m}"
   if run_e2e_model "${m}"; then
     echo "E2E OK: 'git vc' surfaced naturally in a real opencode session"
