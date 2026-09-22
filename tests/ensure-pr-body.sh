@@ -47,6 +47,7 @@ echo "ensure_pr links issue -> Closes #n body: passed"
 # Reuse path over an existing PR also derives the body.
 reset_body_marker
 # shellcheck disable=SC2329
+# shellcheck disable=SC2317
 gh_api_find_pr_by_head() { printf '%s\n' "42"; }
 out="$(ensure_pr "nahcnuj" "conahcnuj" "" "conahcnuj/10-x" "main" "Fix something" "issue body" "10")"
 [[ "${out}" == "42" ]] || { echo "FAIL: reuse output was '${out}' (expected 42)"; exit 1; }
@@ -57,6 +58,7 @@ echo "ensure_pr reuses existing PR and syncs body: passed"
 # No linked issue: body must stay verbatim and NO PATCH may be issued.
 reset_body_marker
 # shellcheck disable=SC2329
+# shellcheck disable=SC2317
 gh_api_find_pr_by_head() { printf '%s\n' ""; }
 # shellcheck disable=SC2329
 gh_api_create_pr() { printf '%s\n' "77"; }

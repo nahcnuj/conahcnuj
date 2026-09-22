@@ -212,7 +212,7 @@ gh_api_fetch_issue() {
 # Repo default branch info. Output: default_branch|default_oid
 gh_api_get_repo() {
   local owner="${1}" repo="${2}" json
-  local query='query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { defaultBranchRef { name, target { oid } } } }'
+  local query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { defaultBranchRef { name, target { oid } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
@@ -370,7 +370,7 @@ gh_api_review_fingerprint() {
 # Find the open PR whose head is <branch>. Output: PR number (empty if none).
 gh_api_find_pr_by_head() {
   local owner="${1}" repo="${2}" branch="${3}" json
-  local query='query($owner: String!, $repo: String!, $branch: String!) { repository(owner: $owner, name: $repo) { pullRequests(headRefName: $branch, states: [OPEN], first: 1) { nodes { number } } } }'
+  local query="query(\$owner: String!, \$repo: String!, \$branch: String!) { repository(owner: \$owner, name: \$repo) { pullRequests(headRefName: \$branch, states: [OPEN], first: 1) { nodes { number } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
@@ -383,7 +383,7 @@ gh_api_find_pr_by_head() {
 # Output: "<number>|<state>" (empty if none). Used to avoid head-branch collisions.
 gh_api_find_pr_by_head_any() {
   local owner="${1}" repo="${2}" branch="${3}" json
-  local query='query($owner: String!, $repo: String!, $branch: String!) { repository(owner: $owner, name: $repo) { pullRequests(headRefName: $branch, first: 10) { nodes { number state } } } }'
+  local query="query(\$owner: String!, \$repo: String!, \$branch: String!) { repository(owner: \$owner, name: \$repo) { pullRequests(headRefName: \$branch, first: 10) { nodes { number state } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
@@ -412,7 +412,7 @@ gh_api_create_branch() {
 gh_api_create_pr() {
   local owner="${1}" repo="${2}" title="${3}" body="${4}" head="${5}" base="${6}"
 
-  local id_query='query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }'
+  local id_query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { id } }"
   local id_json
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     id_json="$(gh_api_read_line)"
@@ -467,7 +467,7 @@ gh_api_post_comment() {
 # Merge a PR (SQUASH). Args: owner repo pr  (output: true/false)
 gh_api_merge_pr() {
   local owner="${1}" repo="${2}" pr_number="${3}"
-  local id_query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id } } }'
+  local id_query="query(\$owner: String!, \$repo: String!, \$number: Int!) { repository(owner: \$owner, name: \$repo) { pullRequest(number: \$number) { id } } }"
   local pr_id
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     pr_id="PR_ID_PLACEHOLDER"
