@@ -113,19 +113,25 @@ gh_api_call() {
 gh_api_graphql() {
   local query="${1}"
   shift
-  local vars_json="{}"
+  local -a var_keys=() var_vals=()
   while [[ $# -gt 0 ]]; do
     case "${1}" in
       -F)
-        local key="${2%%=*}"
-        local value="${2#*=}"
-        vars_json="$(printf '%s' "${vars_json}" | sed 's/}$//')"
-        vars_json="${vars_json},\"${key}\":\"${value}\"}"
+        var_keys+=("${2%%=*}")
+        var_vals+=("${2#*=}")
         shift 2
         ;;
       *) break ;;
     esac
   done
+  local vars_json="{}"
+  if [[ ${#var_keys[@]} -gt 0 ]]; then
+    local i
+    for i in "${!var_keys[@]}"; do
+      vars_json="$(printf '%s' "${vars_json}" | sed 's/}$//')"
+      vars_json="${vars_json},\"${var_keys[i]}\":\"${var_vals[i]}\"}"
+    done
+  fi
   local payload
   payload="$(printf '{"query":"%s","variables":%s}' "$(gh_api_escape "${query}")" "${vars_json}")"
   local json
