@@ -247,6 +247,8 @@ ensure_pr() {
   # A resumed PR that is not linked to any issue must keep its body verbatim;
   # prefixing it with a bare "Closes #" would produce a malformed description.
   if [[ -n "${closes}" ]]; then
+    # Trim trailing whitespace from issue body to avoid extra blank lines
+    body="$(printf '%s' "${body}" | sed 's/[[:space:]]*$//')"
     pr_body="Closes #${closes}
 
 ${body}"
