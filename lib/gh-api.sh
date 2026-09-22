@@ -229,11 +229,11 @@ gh_api_get_repo() {
 # Output: number|state|title_b64|body_b64|isDraft|mergeable|mergeStateStatus|reviewDecision|head|base|headRefOid|linkedIssue
 gh_api_fetch_pr_state() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { number, state, title, body, isDraft, mergeable, mergeStateStatus, reviewDecision, headRefName, baseRefName, headRefOid, closingIssuesReferences(first: 5) { nodes { number } } } } }'
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { number, state, title, body, isDraft, mergeable, mergeStateStatus, reviewDecision, headRefName, baseRefName, headRefOid, closingIssuesReferences(first: 5) { nodes { number } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F number="${number}")"
+    json="$(gh_api_graphql "${query}")"
   fi
 
   local state title body is_draft mergeable mss decision head base head_oid linked
@@ -261,11 +261,11 @@ gh_api_fetch_pr_state() {
 # checks_state is SUCCESS when there is no status check on the head commit.
 gh_api_fetch_pr_conditions() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }'
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F number="${number}")"
+    json="$(gh_api_graphql "${query}")"
   fi
 
   local state mergeable mss
@@ -283,11 +283,11 @@ gh_api_fetch_pr_conditions() {
 # gh_api_review_summary to turn it into readable feedback text).
 gh_api_fetch_reviews() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewDecision, reviews(last: 25) { nodes { state, body, author { login } } }, comments(last: 25) { nodes { body, author { login } } }, reviewThreads(first: 50) { nodes { isResolved, comments(first: 10) { nodes { body } } } } } } }'
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { reviewDecision, reviews(last: 25) { nodes { state, body, author { login } } }, comments(last: 25) { nodes { body, author { login } } }, reviewThreads(first: 50) { nodes { isResolved, comments(first: 10) { nodes { body } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
-    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F number="${number}")"
+    json="$(gh_api_graphql "${query}")"
   fi
 
   local decision
