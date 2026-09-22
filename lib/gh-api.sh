@@ -37,6 +37,19 @@ gh_api_unb64() {
   fi
 }
 
+# Unescape literal escape sequences (\\n, \\t, \\r, \\") in a string.
+# GitHub API returns issue/PR bodies with literal \n in JSON strings.
+gh_api_unescape() {
+  local s="${1}"
+  # Replace literal \n with actual newline, \t with tab, \\ with \, \" with "
+  s="${s//\\n/$'\n'}"
+  s="${s//\\t/$'\t'}"
+  s="${s//\\r/$'\r'}"
+  s="${s//\\\\/\\}"
+  s="${s//\\\"/\"}"
+  printf '%s' "${s}"
+}
+
 # JSON-escape a string for embedding inside a GraphQL query string or a JSON
 # body. Escapes backslashes and quotes; converts literal line breaks into \n
 # sequences (raw newlines are invalid inside GraphQL string literals, and

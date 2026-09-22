@@ -436,7 +436,7 @@ start_issue() {
   title_b64="$(printf '%s' "${issue}" | cut -d'|' -f1)"
   body_b64="$(printf '%s' "${issue}" | cut -d'|' -f2)"
   title="$(gh_api_unb64 "${title_b64}")"
-  body="$(gh_api_unb64 "${body_b64}")"
+  body="$(gh_api_unescape "$(gh_api_unb64 "${body_b64}")")"
   echo "Issue #${num}: ${title}" >&2
 
   local repo_info default_branch default_oid
@@ -482,7 +482,7 @@ resume_pr() {
   base="$(printf '%s' "${ps}" | cut -d'|' -f10)"
   closes="$(printf '%s' "${ps}" | cut -d'|' -f12)"
   title="$(gh_api_unb64 "${title_b64}")"
-  body="$(gh_api_unb64 "${body_b64}")"
+  body="$(gh_api_unescape "$(gh_api_unb64 "${body_b64}")")"
   echo "PR #${pr}: state=${state} head=${head} base=${base}" >&2
 
   # When the PR body is still just the auto-generated "Closes #<n>" stub, derive
@@ -490,7 +490,7 @@ resume_pr() {
   if [[ -n "${closes}" ]] && [[ "${body}" == "Closes #${closes}" || "${body}" == "Closes #${closes}"$'\n' ]]; then
     local iss iss_body
     iss="$(gh_api_fetch_issue "${owner}" "${repo}" "${closes}")"
-    iss_body="$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)"
+    iss_body="$(gh_api_unescape "$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)")"
     if [[ -n "${iss_body}" ]]; then
       echo "PR body is just the closing stub; reusing issue #${closes} as the PR body." >&2
       body="${iss_body}"
