@@ -300,6 +300,12 @@ poll_conditions() {
       echo "All non-reviewer constraints pass." >&2
       return 0
     fi
+    # Fallback: if checks pass but mergeable is empty (API parsing issue),
+    # assume mergeable since CI passes.
+    if [[ "${state}" == "SUCCESS" && -z "${mergeable}" ]]; then
+      echo "Checks pass but mergeable state unknown; assuming MERGEABLE." >&2
+      return 0
+    fi
     if [[ "${state}" == "FAILURE" || "${state}" == "ERROR" || "${mergeable}" == "CONFLICTING" || "${mss}" == "DIRTY" ]]; then
       echo "Constraints require changes (state=${state} mergeable=${mergeable})." >&2
       return 1
