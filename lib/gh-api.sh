@@ -127,11 +127,13 @@ gh_api_graphql() {
   done
   local vars_json="{}"
   if [[ ${#var_keys[@]} -gt 0 ]]; then
+    local parts=()
     local i
     for i in "${!var_keys[@]}"; do
-      vars_json="$(printf '%s' "${vars_json}" | sed 's/}$//')"
-      vars_json="${vars_json},\"${var_keys[i]}\":\"${var_vals[i]}\"}"
+      parts+=("$(printf '"%s":"%s"' "${var_keys[i]}" "${var_vals[i]}")")
     done
+    local IFS=,
+    vars_json="{${parts[*]}}"
   fi
   local payload
   payload="$(printf '{"query":"%s","variables":%s}' "$(gh_api_escape "${query}")" "${vars_json}")"
