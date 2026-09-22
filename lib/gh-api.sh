@@ -44,7 +44,7 @@ gh_api_unb64() {
 gh_api_escape() {
   printf '%s' "${1}" |
     sed 's/\\/\\\\/g; s/"/\\"/g' |
-    awk 'BEGIN { ORS = "\\n" } { print }'
+    awk '{ if (NR > 1) printf "\\n"; printf "%s", $0 }'
 }
 
 # Read a single line from stdin (used by every test-mode function so that a
