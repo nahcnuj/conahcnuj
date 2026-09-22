@@ -101,6 +101,7 @@ gh_api_call() {
     fi
     break
   done
+  GH_API_LAST_HTTP_CODE="${code}"
   rm -f "${headers}"
   cat "${body}"
   rm -f "${body}"
@@ -134,13 +135,26 @@ gh_api_graphql() {
   fi
   local payload
   payload="$(printf '{"query":"%s","variables":%s}' "$(gh_api_escape "${query}")" "${vars_json}")"
-  local json
+  local json http_code
   json="$(gh_api_call POST "${GH_APP_API_BASE:-https://api.github.com}/graphql" "${payload}")"
+  http_code="${GH_API_LAST_HTTP_CODE:-}"
+  # Check for HTTP-level errors (401, 403, etc.) that gh_api_call doesn't retry
+  if [[ -n "${http_code}" && "${http_code}" != "200" ]]; then
+    echo "GraphQL HTTP error ${http_code}: ${json}" >&2
+    return 1
+  fi
   # Check for GraphQL errors (returned with HTTP 200 but have errors field)
   local errors
   errors="$(printf '%s' "${json}" | sed -n 's/.*"errors"[[:space:]]*:[[:space:]]*\(\[[^]]*\]\).*/\1/p')"
   if [[ -n "${errors}" && "${errors}" != "[]" ]]; then
     echo "GraphQL error: ${errors}" >&2
+    return 1
+  fi
+  # Check for GitHub API error responses (e.g., {"message":"Bad credentials"})
+  local message
+  message="$(printf '%s' "${json}" | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if [[ -n "${message}" ]]; then
+    echo "GitHub API error: ${message}" >&2
     return 1
   fi
   printf '%s\n' "${json}"
