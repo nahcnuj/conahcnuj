@@ -127,7 +127,7 @@ gh_api_graphql() {
     esac
   done
   local payload
-  payload="$(printf '{"query":%s,"variables":%s}' "$(gh_api_escape "${query}")" "${vars_json}")"
+  payload="$(printf '{"query":"%s","variables":%s}' "$(gh_api_escape "${query}")" "${vars_json}")"
   local json
   json="$(gh_api_call POST "${GH_APP_API_BASE:-https://api.github.com}/graphql" "${payload}")"
   # Check for GraphQL errors (returned with HTTP 200 but have errors field)
