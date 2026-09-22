@@ -164,10 +164,21 @@ gh_api_graphql() {
 
 # --- JSON field extraction (single-line, compact JSON best) ----------------
 
-# String field value.
+# String field value. Also handles unquoted values (bool, null, number, enum).
 gh_api_json_str() {
   local json="${1}" key="${2}"
-  printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1
+  local val
+  # Try quoted string first
+  val="$(printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1)"
+  if [[ -n "${val}" ]]; then
+    printf '%s\n' "${val}"
+    return 0
+  fi
+  # Try unquoted value (bool, null, number, bare enum)
+  val="$(printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p" | head -1)"
+  # Trim whitespace
+  val="$(printf '%s' "${val}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  printf '%s\n' "${val}"
 }
 
 # Numeric field value.
@@ -372,7 +383,7 @@ gh_api_find_pr_by_head() {
 # Output: "<number>|<state>" (empty if none). Used to avoid head-branch collisions.
 gh_api_find_pr_by_head_any() {
   local owner="${1}" repo="${2}" branch="${3}" json
-  local query='query($owner: String!, $repo: String!, $branch: String!) { repository(owner: $owner, name: $repo) { pullRequests(headRefName: $branch, states: [OPEN, CLOSED, MERGED], first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { number state } } } }'
+  local query='query($owner: String!, $repo: String!, $branch: String!) { repository(owner: $owner, name: $repo) { pullRequests(headRefName: $branch, first: 10) { nodes { number state } } } }'
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
