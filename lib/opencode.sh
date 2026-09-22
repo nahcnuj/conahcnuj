@@ -30,7 +30,9 @@ ${extra_context}"
   fi
   prompt="${prompt}
 
-Implement the changes needed to resolve this issue. Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you."
+Implement the changes needed to resolve this issue. Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
+
+When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. This message should summarize the changes you made."
   printf '%s\n' "${prompt}"
 }
 

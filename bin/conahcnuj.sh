@@ -114,7 +114,20 @@ branch_has_commits() {
 # branch to the remote head api-commit.sh created. Test mode: plain local
 # commit (no network / no secret) so flows can be exercised offline.
 commit_changes() {
-  local message="${1}"
+  local default_message="${1}"
+  local message
+  # Use the coding agent's suggested commit message if available.
+  if [[ -f ".commit-msg" ]]; then
+    message="$(head -1 .commit-msg)"
+    rm -f .commit-msg
+    if [[ -n "${message}" ]]; then
+      echo "Using coding agent's commit message: ${message}" >&2
+    else
+      message="${default_message}"
+    fi
+  else
+    message="${default_message}"
+  fi
   echo "Creating commit: ${message}" >&2
   git add -A
   if [[ "${TEST_MODE}" == "1" ]]; then
