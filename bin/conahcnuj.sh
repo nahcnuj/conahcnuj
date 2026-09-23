@@ -73,6 +73,76 @@ pr_body_mark_synced() {
   printf '1\n' > "${PR_BODY_SYNCED_FILE}"
 }
 
+# --- Windows relaunch -------------------------------------------------------
+
+# The configured Git Bash: environment override > gh-app/app.env > the
+# committed app.env.example. A placeholder means "not configured", so fall
+# back to the standard Git for Windows location, like setup-git.sh does.
+driver_bash_exe() {
+  local env_file line
+  if [[ -n "${BASH_EXE:-}" ]]; then
+    printf '%s\n' "${BASH_EXE}"
+    return 0
+  fi
+  env_file="${GH_APP_DIR:-${HERE}/../gh-app}/app.env"
+  if [[ ! -f "${env_file}" ]]; then
+    env_file="${HERE}/../gh-app/app.env.example"
+  fi
+  if [[ -f "${env_file}" ]]; then
+    line="$(sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${env_file}" | head -1)"
+    if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
+      printf '%s\n' "${line}"
+      return 0
+    fi
+  fi
+  printf '%s\n' "C:/Program Files/Git/bin/bash.exe"
+}
+
+# True when the driver must re-launch itself under the configured Git Bash.
+# On Windows, `bash conahcnuj <n>` from PowerShell can resolve to WSL bash,
+# where the MSYS-style PRIVATE_KEY_PATH (/c/Users/...) and the Windows git
+# credential helper do not exist, so the driver cannot load the private key
+# (issue #31). Skipped when already running Git Bash (MSYSTEM), when not under
+# WSL, or when the configured bash cannot be reached from WSL.
+driver_needs_relaunch() {
+  [[ -z "${MSYSTEM:-}" ]] || return 1
+  [[ -n "${WSL_DISTRO_NAME:-}" ]] || return 1
+  command -v wslpath >/dev/null 2>&1 || return 1
+  local bash_exe bash_mnt
+  bash_exe="$(driver_bash_exe)"
+  bash_mnt="$(wslpath -u "${bash_exe}" 2>/dev/null || true)"
+  if [[ -z "${bash_mnt}" || ! -x "${bash_mnt}" ]]; then
+    echo "WARNING: BASH_EXE ${bash_exe} is not reachable from WSL; continuing (paths may not resolve)." >&2
+    return 1
+  fi
+  return 0
+}
+
+# Re-run the driver under the configured Git Bash so every helper (the
+# /c/... private key path, the Windows credential helper, opencode) sees the
+# path space it was written for. Passes the script back to Git Bash as a
+# Windows path (wslpath -m) and keeps the original arguments.
+driver_relaunch() {
+  local bash_exe bash_mnt self self_win
+  bash_exe="$(driver_bash_exe)"
+  bash_mnt="$(wslpath -u "${bash_exe}")"
+  self="${0}"
+  if [[ "${self}" != /* && "${self}" != */* ]]; then
+    self="$(command -v "${self}" 2>/dev/null || true)"
+  fi
+  if [[ -z "${self}" ]]; then
+    echo "WARNING: could not resolve \$0 (${0}) to relaunch; continuing under WSL." >&2
+    return 1
+  fi
+  self_win="$(wslpath -m "${self}" 2>/dev/null || true)"
+  if [[ -z "${self_win}" ]]; then
+    echo "WARNING: could not convert \${0} (${self}) to a Windows path; continuing under WSL." >&2
+    return 1
+  fi
+  echo "Re-launching under ${bash_exe} so the GitHub App paths resolve." >&2
+  exec "${bash_mnt}" "${self_win}" "$@"
+}
+
 # --- helpers ----------------------------------------------------------------
 
 repo_detect() {
@@ -752,6 +822,12 @@ resume_pr() {
 }
 
 main() {
+  # On Windows, re-run under the configured Git Bash when this shell is WSL
+  # (see driver_relaunch) so every helper shares the same path space.
+  if driver_needs_relaunch; then
+    driver_relaunch "$@" || true
+  fi
+
   if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <issue-or-pr-number>" >&2
     exit 1
