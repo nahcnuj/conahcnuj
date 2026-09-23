@@ -240,14 +240,16 @@ report_bug_title() {
 }
 
 report_bug_body() {
-  local code="${1}" input="${2:-}" branch="${3:-}" oid="${4:-}"
+  local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}"
   local ended label log_tail log_block
   ended="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)"
   label=""
   if [[ -n "${input}" ]]; then
-    label=" #${input} (invoked as \`conahcnuj ${input}\`)"
+    # Fully-qualified so a report filed in one repository still points
+    # unambiguously at the item being worked on in another one.
+    label=" ${owner}/${repo}#${input} (invoked as \`conahcnuj ${input}\`)"
   else
-    label=" (unknown: no issue/PR number was given)"
+    label=" unknown (no issue/PR number was given; repository: ${owner}/${repo})"
   fi
   log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
   if [[ -n "${log_tail}" ]]; then
@@ -300,7 +302,7 @@ report_bug_on_exit() {
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
   title="$(report_bug_title "${code}" "${input}")"
-  body="$(report_bug_body "${code}" "${input}" "${branch}" "${oid}")"
+  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
   echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
   if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
     if [[ -n "${num}" ]]; then
