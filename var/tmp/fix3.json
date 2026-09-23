@@ -1,0 +1,1 @@
+{"body":"ご指摘ありがとうございます。コミットメッセージは固定をやめ、コーディングエージェントが会話内で `.commit-msg` に書いた内容をそのまま使うようにしました（未記載ならコミットを拒否します）。今回の変更は「driver: let agent pick commit msg and branch name; drop --pr」です。"}

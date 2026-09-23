@@ -1,0 +1,70 @@
+{
+  "url": "https://api.github.com/repos/nahcnuj/conahcnuj/pulls/comments/4078274690",
+  "pull_request_review_id": 5285954836,
+  "id": 4078274690,
+  "node_id": "PRRC_kwDOUg6jO87zFYiC",
+  "diff_hunk": "@@ -47,6 +53,65 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ\n bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で\n GitHub 自身にコミットを作成させるしかない。\n \n+## issue駆動自律開発（conahcnuj）\n+\n+`bin/conahcnuj.sh`（`install.ps1` により `conahcnuj` コマンドとして配備）は、\n+指定した GitHub issue の解決を最後まで自律的に行うドライバです。\n+\n+```\n+conahcnuj <issue番号>        # issue から開始\n+conahcnuj <PR番号> --pr      # 既存 PR を引き継いで再開\n+conahcnuj <PR番号>           # 入力が PR なら自動で再開に切り替わる\n+```\n+\n+流れ:\n+\n+0. issue の内容を読み、最新のデフォルトブランチから `conahcnuj/<番号>-<スラッグ>`",
+  "path": "README.md",
+  "commit_id": "d5d8b5c236a2f29b765ad49e57177ce43fcc0020",
+  "original_commit_id": "1aa84ea5bd909178974e4a29e841d3d86165cc8d",
+  "user": {
+    "login": "conahcnuj[bot]",
+    "id": 331119074,
+    "node_id": "BOT_kgDOE7x54g",
+    "avatar_url": "https://avatars.githubusercontent.com/in/4997044?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/conahcnuj%5Bbot%5D",
+    "html_url": "https://github.com/apps/conahcnuj",
+    "followers_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/followers",
+    "following_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/following{/other_user}",
+    "gists_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/subscriptions",
+    "organizations_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/orgs",
+    "repos_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/repos",
+    "events_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/conahcnuj%5Bbot%5D/received_events",
+    "type": "Bot",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "body": "承知しました。ブランチ名はコーディングエージェントが `.branch-name` で決められるようにし、未指定の場合のみドライバが `conahcnuj/<番号>-<スラグ>` を付けます。",
+  "created_at": "2026-09-23T01:45:32Z",
+  "updated_at": "2026-09-23T01:52:21Z",
+  "html_url": "https://github.com/nahcnuj/conahcnuj/pull/18#discussion_r4078274690",
+  "pull_request_url": "https://api.github.com/repos/nahcnuj/conahcnuj/pulls/18",
+  "_links": {
+    "self": {
+      "href": "https://api.github.com/repos/nahcnuj/conahcnuj/pulls/comments/4078274690"
+    },
+    "html": {
+      "href": "https://github.com/nahcnuj/conahcnuj/pull/18#discussion_r4078274690"
+    },
+    "pull_request": {
+      "href": "https://api.github.com/repos/nahcnuj/conahcnuj/pulls/18"
+    }
+  },
+  "reactions": {
+    "url": "https://api.github.com/repos/nahcnuj/conahcnuj/pulls/comments/4078274690/reactions",
+    "total_count": 0,
+    "+1": 0,
+    "-1": 0,
+    "laugh": 0,
+    "hooray": 0,
+    "confused": 0,
+    "heart": 0,
+    "rocket": 0,
+    "eyes": 0
+  },
+  "start_line": null,
+  "original_start_line": null,
+  "start_side": null,
+  "line": null,
+  "original_line": 69,
+  "side": "RIGHT",
+  "in_reply_to_id": 4067977367,
+  "author_association": "CONTRIBUTOR",
+  "original_position": 34,
+  "position": 1,
+  "subject_type": "line"
+}
