@@ -213,7 +213,7 @@ branch_has_commits() {
 }
 
 # Pick the Model trailer label. An explicit CONAHCNUJ_COMMIT_MODEL wins.
-# Otherwise use the display name the OpenCode plugin wrote for this run, and
+# Otherwise use the display name the OpenCode plugin wrote under os.tmpdir(), and
 # fall back to the provider/model id that produced the working-tree change.
 apply_driver_commit_model() {
   if [[ -n "${USER_COMMIT_MODEL}" ]]; then

@@ -65,9 +65,9 @@ async function main() {
   const fs = require("node:fs")
   const os = require("node:os")
   const path = require("node:path")
-  const labelFile = path.join(os.tmpdir(), `conahcnuj-model-${process.pid}.txt`)
+  const labelFile = path.join(os.tmpdir(), "conahcnuj-commit-model.txt")
   process.env.CONAHCNUJ_SESSION_MODEL = "xai/grok-4.7"
-  process.env.CONAHCNUJ_MODEL_LABEL_FILE = labelFile
+  delete process.env.CONAHCNUJ_MODEL_LABEL_FILE
   await plugin["chat.message"](
     {
       sessionID: "s1",
@@ -100,7 +100,6 @@ async function main() {
   await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, explicit)
   assert.strictEqual(explicit.env.CONAHCNUJ_COMMIT_MODEL, "custom")
   delete process.env.CONAHCNUJ_SESSION_MODEL
-  delete process.env.CONAHCNUJ_MODEL_LABEL_FILE
   fs.rmSync(labelFile, { force: true })
 
   console.log("PLUGIN SMOKE OK")

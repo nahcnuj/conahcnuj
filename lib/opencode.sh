@@ -69,16 +69,17 @@ opencode_run() {
     return 0
   fi
 
-  # The plugin writes the display name (plus variant) here. A side model
-  # is ignored when CONAHCNUJ_SESSION_MODEL is the model this run selected.
-  # Truncate first so a previous model's label cannot leak into this run.
-  local label_file="${CONAHCNUJ_MODEL_LABEL_FILE:-}"
-  if [[ -z "${label_file}" ]]; then
-    label_file="$(mktemp)"
+  # The plugin writes the display name (plus variant) to a fixed file
+  # under Node's os.tmpdir(). A side model is ignored when
+  # CONAHCNUJ_SESSION_MODEL is the model this run selected. Truncate first
+  # so a previous model's label cannot leak into this run.
+  local label_file
+  label_file="$(node -e 'const path=require("path");const os=require("os");process.stdout.write(path.join(os.tmpdir(),"conahcnuj-commit-model.txt"))' 2>/dev/null || true)"
+  if [[ -n "${label_file}" ]]; then
+    : > "${label_file}"
     CONAHCNUJ_MODEL_LABEL_FILE="${label_file}"
     export CONAHCNUJ_MODEL_LABEL_FILE
   fi
-  : > "${label_file}"
   CONAHCNUJ_SESSION_MODEL="${model}"
   export CONAHCNUJ_SESSION_MODEL
   opencode run --print-logs --format json --model "${model}" --dir "${workdir}" --title conahcnuj "${prompt}" || return 1
