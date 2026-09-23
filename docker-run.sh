@@ -10,11 +10,18 @@
 #   cd <target-repo>
 #   bash <path-to>/docker-run.sh <issue-or-pr-number> [--pr]
 #
+# By default the container runs in the foreground and stops as soon as the
+# driver exits. Set CONAHCNUJ_DAEMON=1 (with an optional CONAHCNUJ_NAME) to
+# run detached instead; the container is then kept (not --rm) so the run can be
+# followed and inspected afterwards with `docker logs -f <name>`.
+#
 # Environment overrides:
 #   CONAHCNUJ_IMAGE        image tag (default: conahcnuj-runner)
 #   CONAHCNUJ_TARGET       target repo path (default: current directory)
 #   CONAHCNUJ_APP_ENV      host app.env path (default: <this repo>/gh-app/app.env)
 #   CONAHCNUJ_BUILD=1      force a rebuild of the image
+#   CONAHCNUJ_DAEMON=1     run detached (container name below), poll via `docker logs`
+#   CONAHCNUJ_NAME         container name to use in daemon mode (default: conahcnuj-<epoch>)
 #   OPENCODE_CONFIG_DIR    host opencode config dir (default: ~/.config/opencode)
 #   OPENCODE_DATA_DIR      host opencode data/auth dir (default: ~/.local/share/opencode)
 #   CONAHCNUJ_REPO, CONAHCNUJ_MAX_SECONDS, CONAHCNUJ_POLL_* are passed through.
@@ -125,12 +132,37 @@ if [[ -t 0 && -t 1 ]]; then
   tty_args+=(-it)
 fi
 
+# Common run arguments: all mounts, driver overrides and the positional
+# driver arguments. Shared by foreground and daemon modes.
+run_args=(
+  -v "$(host_path "${TARGET}"):/work"
+  -v "$(host_path "${RUN_DIR}/app.env"):/opt/conahcnuj/gh-app/app.env:ro"
+  -v "$(host_path "${PEM_HOST}"):/run/secrets/app.pem:ro"
+  "${oc_args[@]}"
+  "${env_args[@]}"
+  -w /work
+  "${IMAGE}" "$@"
+)
+
+# Daemon mode: run detached with a stable name so the caller (or an agent) can
+# follow progress with `docker logs -f <name>`. The container is intentionally
+# NOT --rm in this mode, so its logs survive the driver exiting (or crashing)
+# and can be inspected afterwards; remove it with `docker rm <name>`.
+if [[ "${CONAHCNUJ_DAEMON:-0}" == "1" ]]; then
+  NAME="${CONAHCNUJ_NAME:-conahcnuj-$(date +%s)}"
+  # The EXIT trap must NOT remove RUN_DIR here: the detached container still
+  # bind-mounts RUN_DIR/app.env, so clearing the trap (not just leaving the
+  # dir) keeps the mount valid for the whole lifetime of the run.
+  trap - EXIT
+  # docker run -d prints the container ID to stdout; keep the wrapper's own
+  # diagnostics on stderr so the caller can parse stdout if needed.
+  docker_ run -d --name "${NAME}" \
+    "${run_args[@]}" 1>&2
+  echo "Detached container ${NAME} started; follow with: docker logs -f ${NAME}" >&2
+  echo "${NAME}"
+  exit 0
+fi
+
 exec env MSYS_NO_PATHCONV=1 docker run --rm \
   "${tty_args[@]}" \
-  -v "$(host_path "${TARGET}"):/work" \
-  -v "$(host_path "${RUN_DIR}/app.env"):/opt/conahcnuj/gh-app/app.env:ro" \
-  -v "$(host_path "${PEM_HOST}"):/run/secrets/app.pem:ro" \
-  "${oc_args[@]}" \
-  "${env_args[@]}" \
-  -w /work \
-  "${IMAGE}" "$@"
+  "${run_args[@]}"

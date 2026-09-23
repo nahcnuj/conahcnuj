@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # conahcnuj - issue-driven autonomous development driver.
 #
-# Resolves a GitHub issue (or resumes a pull request) end-to-end:
-#   1. reads the issue, creates a feature branch off the latest default
-#      branch and implements it with opencode (falling through every
-#      available model until one produces changes)
+# Resolves a GitHub issue (or resumes a pull request) end-to-end. The coding
+# agent, not the driver, decides how the work is presented: it creates the
+# feature branch (any name it likes) off the latest default branch, and it
+# writes the commit message (.commit-msg). The driver only fills in a branch
+# name / message when the agent leaves none out:
+#   1. checks out the latest default branch and implements the issue with
+#      opencode (falling through every available model until one produces
+#      changes), committing with the agent's chosen message
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
 #      mergeability) passes, then requests review
 #   3. polls the review status; addresses comments / requested changes /
@@ -12,7 +16,7 @@
 #      constraints, then replies on the PR
 #   4. exits only when the PR is ready to merge
 #
-# Usage: conahcnuj <issue-or-pr-number> [--pr]
+# Usage: conahcnuj <issue-or-pr-number>
 #
 # Environment overrides (all optional):
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
@@ -91,9 +95,13 @@ check_timeout() {
   fi
 }
 
+# True when the working tree holds real changes. The coding agent's
+# .commit-msg is metadata, not a code change, so it is ignored: a model that
+# writes nothing but a commit message must not count as having produced work.
 workdir_changed() {
-  local dir="${1}"
-  [[ -n "$(git -C "${dir}" status --porcelain 2>/dev/null || true)" ]]
+  local dir="${1}" changes
+  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' || true)"
+  [[ -n "${changes}" ]]
 }
 
 # True when the current branch already carries commits on top of the default
