@@ -95,6 +95,16 @@ gh_api_call() {
   token="$(gh_api_get_token)"
   headers="$(mktemp)"
   body="$(mktemp)"
+  # The payload goes to a file and is sent with --data-binary. Passing it as
+  # `-d "${data}"` routes it through the command-line argument encoding, which
+  # on Windows Git Bash converts non-ASCII bytes (UTF-8) to the system codepage
+  # and corrupts them, making GitHub reject the request ("Problems parsing
+  # JSON"). Reading from a file keeps the bytes intact on every platform.
+  local datafile=""
+  if [[ -n "${data}" ]]; then
+    datafile="$(mktemp)"
+    printf '%s' "${data}" > "${datafile}"
+  fi
   attempt=0
   while [[ ${attempt} -lt 5 ]]; do
     attempt=$((attempt + 1))
@@ -104,7 +114,7 @@ gh_api_call() {
       -H "Accept: application/vnd.github+json"
     )
     if [[ -n "${data}" ]]; then
-      args+=(-H "Content-Type: application/json" -d "${data}")
+      args+=(-H "Content-Type: application/json" --data-binary "@${datafile}")
     fi
     curl "${args[@]}" "${url}" || true
     code="$(tr -d '\r' < "${headers}" | sed -n '1s/.* \([0-9][0-9][0-9]\)$/\1/p')"
@@ -115,7 +125,7 @@ gh_api_call() {
     break
   done
   GH_API_LAST_HTTP_CODE="${code}"
-  rm -f "${headers}"
+  rm -f "${headers}" "${datafile}"
   cat "${body}"
   rm -f "${body}"
   case "${code}" in
