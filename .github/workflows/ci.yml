@@ -48,7 +48,6 @@ jobs:
             gh-app/get-token.sh \
             gh-app/git-credential-helper.sh \
             gh-app/setup-git.sh \
-            plugins/gh-app-token.ts \
             bin/conahcnuj.sh \
             lib/gh-api.sh \
             lib/opencode.sh \
