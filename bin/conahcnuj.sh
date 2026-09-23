@@ -165,12 +165,6 @@ commit_changes() {
 # Best-effort only: the report must never change the exit code, never trigger
 # an extra API call on a successful run, and must not recurse into another
 # report (a failed report files nothing further).
-BUG_REPORT_OWNER=""
-BUG_REPORT_REPO=""
-if [[ -n "${CONAHCNUJ_REPO:-}" ]]; then
-  BUG_REPORT_OWNER="${CONAHCNUJ_REPO%%/*}"
-  BUG_REPORT_REPO="${CONAHCNUJ_REPO#*/}"
-fi
 BUG_REPORT_INPUT=""
 BUG_REPORTED="0"
 # Exit code captured by the EXIT trap at runtime ($? is not preserved across a
@@ -645,7 +639,7 @@ ${summary}"; then
       review_requested="true"
       gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
 
-${summary}" >/dev/null
+${summary}" >/dev/null || echo "WARNING: could not post the review-feedback reply on PR #${pr}." >&2
       echo "Replied on PR #${pr} after addressing review feedback." >&2
       # The reply is itself a new comment and would change the review payload,
       # so re-fingerprint the payload as it appears AFTER the reply. Otherwise
