@@ -94,6 +94,7 @@ grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback
 # from a fixed driver-side fallback.
 git -C "${WORK}" log --oneline | grep -q "conahcnuj: implement issue #10" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
 git -C "${WORK}" log --oneline | grep -q "mock commit from opencode/first" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
+git -C "${WORK}" log --format=%B | grep -q "Model: opencode/first" || { echo "FAIL: model trailer missing"; exit 1; }
 # init + implement + review-feedback fix = 3 commits from the branch tip.
 [[ "$(git -C "${WORK}" log --oneline | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement + review commits"; exit 1; }
 

@@ -83,6 +83,7 @@ grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo 
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "feature/fix-10" ]] || { echo "FAIL: wrong current branch"; exit 1; }
 git -C "${WORK}" log --oneline | grep -q "mock commit from opencode/first" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
+git -C "${WORK}" log --format=%B | grep -q "Model: opencode/first" || { echo "FAIL: model trailer missing"; exit 1; }
 # The fixed driver-side message must not reappear.
 git -C "${WORK}" log --oneline | grep -q "conahcnuj:.*address review feedback" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
 
