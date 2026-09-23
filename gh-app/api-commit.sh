@@ -154,8 +154,9 @@ commit_model_label() {
   printf '%s' "${model}"
 }
 
-# Split MESSAGE into HEADLINE (first line) and BODY (the rest). Append a
-# Model trailer when a label is available and the message does not have one.
+# Split MESSAGE into HEADLINE (first line) and COMMIT_BODY (the rest). Append
+# a Model trailer when a label is available and the message does not have one.
+# COMMIT_BODY, not BODY: this script already uses BODY for the refs API payload.
 prepare_commit_message() {
   local message="${MESSAGE}"
   local model rest
@@ -166,9 +167,9 @@ prepare_commit_message() {
   HEADLINE="${message%%$'\n'*}"
   if [[ "${message}" == *$'\n'* ]]; then
     rest="${message#*$'\n'}"
-    BODY="${rest#$'\n'}"
+    COMMIT_BODY="${rest#$'\n'}"
   else
-    BODY=""
+    COMMIT_BODY=""
   fi
 }
 # 1) Collect added/modified file contents (exact bytes, no newline mangling) and
@@ -272,8 +273,8 @@ if [[ "${DRY_RUN}" == true ]]; then
   echo "Owner/Repo: ${REPO}"
   echo "Branch:     ${BRANCH}"
   echo "Message:    ${HEADLINE}"
-  if [[ -n "${BODY}" ]]; then
-    echo "Body:       ${BODY}"
+  if [[ -n "${COMMIT_BODY}" ]]; then
+    echo "Body:       ${COMMIT_BODY}"
   fi
   echo "Additions:  ${#ADDITIONS[@]} file(s)"
   if [[ ${#ADD_FILES[@]} -gt 0 ]]; then
@@ -327,11 +328,11 @@ done
 DEL_LIST="$(IFS=,; echo "${DEL_LIST_ARR[*]}")"
 EB="$(json_escape "${BRANCH}")"
 EM="$(json_escape "${HEADLINE}")"
-EBODY="$(json_escape "${BODY}")"
+EBODY="$(json_escape "${COMMIT_BODY}")"
 
 # 3) Create the single verified commit with createCommitOnBranch.
 #    GitHub commits it (committer: GitHub <noreply@github.com>) and signs it.
-if [[ -n "${BODY}" ]]; then
+if [[ -n "${COMMIT_BODY}" ]]; then
   MESSAGE_FIELD="message:{headline:\"${EM}\",body:\"${EBODY}\"}"
 else
   MESSAGE_FIELD="message:{headline:\"${EM}\"}"
