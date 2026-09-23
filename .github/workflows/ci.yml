@@ -41,20 +41,7 @@ jobs:
         run: bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
 
       - name: ShellCheck
-        run: |
-          shellcheck -x \
-            gh-app/api-commit.sh \
-            gh-app/bot-user-id.sh \
-            gh-app/get-token.sh \
-            gh-app/git-credential-helper.sh \
-            gh-app/setup-git.sh \
-            bin/conahcnuj.sh \
-            lib/gh-api.sh \
-            lib/opencode.sh \
-            lib/rate-limit.sh \
-            tests/conahcnuj-bugreport.sh \
-            tests/conahcnuj-pr-create-retry.sh \
-            test.sh
+        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
 
   lint-ps:
     name: Check install.ps1 syntax
