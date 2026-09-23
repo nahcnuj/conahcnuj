@@ -178,6 +178,13 @@ test_post_comment() {
   echo "gh_api_post_comment passed"
 }
 
+test_create_issue() {
+  local out
+  out="$(printf '%s\n' '{"number":25}' | gh_api_create_issue "nahcnuj" "conahcnuj" "Bug report" "details")"
+  [[ "${out}" == "25" ]]
+  echo "gh_api_create_issue passed"
+}
+
 test_merge_pr() {
   gh_api_merge_pr "nahcnuj" "conahcnuj" 15 < <(printf '%s\n' '{}' '{}')
   echo "gh_api_merge_pr passed"
@@ -195,6 +202,7 @@ test_create_pr
 test_update_pr
 test_request_review
 test_post_comment
+test_create_issue
 test_merge_pr
 
 echo "All gh-api tests passed"

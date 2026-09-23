@@ -15,6 +15,9 @@
 #      security-review threads, pushes and re-verifies non-reviewer
 #      constraints, then replies on the PR
 #   4. exits only when the PR is ready to merge
+#   5. on an abnormal exit (timeout, no model produced changes, unexpected
+#      errors) automatically files a bug report issue in the repository so a
+#      run the driver could not resolve is never silently lost
 #
 # Usage: conahcnuj <issue-or-pr-number>
 #
@@ -151,6 +154,92 @@ commit_changes() {
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git fetch origin "${branch}" >/dev/null 2>&1 || true
   git reset --hard "origin/${branch}" >/dev/null 2>&1 || true
+}
+
+# --- bug reporting ----------------------------------------------------------
+
+# When the driver terminates abnormally it files a bug report issue in the
+# repository it was working on, so a failed run is never silently lost and the
+# next driver invocation can pick the report up (the driver resolves issues).
+# Best-effort only: the report must never change the exit code, never trigger
+# an extra API call on a successful run, and must not recurse into another
+# report (a failed report files nothing further).
+BUG_REPORT_OWNER=""
+BUG_REPORT_REPO=""
+if [[ -n "${CONAHCNUJ_REPO:-}" ]]; then
+  BUG_REPORT_OWNER="${CONAHCNUJ_REPO%%/*}"
+  BUG_REPORT_REPO="${CONAHCNUJ_REPO#*/}"
+fi
+BUG_REPORT_INPUT=""
+BUG_REPORTED="0"
+# Exit code captured by the EXIT trap at runtime ($? is not preserved across a
+# function call). Pre-declared so the trap string's reference is valid.
+bug_exit_code=""
+
+report_bug_title() {
+  local code="${1}" input="${2:-}"
+  if [[ -n "${input}" ]]; then
+    printf 'conahcnuj: failed to resolve #%s (exit %s)\n' "${input}" "${code}"
+  else
+    printf 'conahcnuj: driver terminated abnormally (exit %s)\n' "${code}"
+  fi
+}
+
+report_bug_body() {
+  local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}"
+  local ended label
+  ended="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)"
+  label=""
+  if [[ -n "${input}" ]]; then
+    label=" #${input}"
+  fi
+  cat <<EOF
+The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This issue was filed automatically so the driver bug can be fixed (re-run: conahcnuj ${input}).
+
+## Context
+
+- Repository: ${owner}/${repo}
+- Input:${label}
+- Branch: ${branch:-unknown}
+- HEAD: ${oid:-unknown}
+- Exit code: ${code}
+- Ended at: ${ended:-unknown}
+
+The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick this report up.
+EOF
+}
+
+# EXIT trap. The exit code is captured in the trap string ($? is not preserved
+# inside a function call), so the report always knows why the run died; on a
+# successful run (code 0) the report does nothing, so the happy-path flow tests
+# need no extra tape entry. The trap must never change the exit code.
+report_bug_on_exit() {
+  local code="${1:-}"
+  local owner="${BUG_REPORT_OWNER:-}" repo="${BUG_REPORT_REPO:-}" input="${BUG_REPORT_INPUT:-}"
+  local branch oid title body num
+  if [[ -z "${code}" || "${code}" == "0" || "${BUG_REPORTED}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -z "${owner}" || -z "${repo}" ]]; then
+    echo "WARNING: abnormal exit (${code}) but no owner/repo is known; skipping the bug report." >&2
+    BUG_REPORTED="1"
+    return 0
+  fi
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  title="$(report_bug_title "${code}" "${input}")"
+  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
+  echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
+  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
+    if [[ -n "${num}" ]]; then
+      echo "Bug report issue #${num} created: https://github.com/${owner}/${repo}/issues/${num}" >&2
+      BUG_REPORTED="1"
+      return 0
+    fi
+  fi
+  echo "WARNING: could not file a bug report issue (exit code ${code})." >&2
+  BUG_REPORTED="1"
+  return 0
 }
 
 # --- branches ---------------------------------------------------------------
@@ -601,6 +690,14 @@ main() {
   owner="${repo_info%%/*}"
   repo="${repo_info#*/}"
   echo "Repository: ${owner}/${repo}" >&2
+
+  # File a bug report issue when the run terminates abnormally. Registered only
+  # once owner/repo and the input are known: a usage error or a failed repo
+  # detection has no target to report to and stays quiet.
+  BUG_REPORT_OWNER="${owner}"
+  BUG_REPORT_REPO="${repo}"
+  BUG_REPORT_INPUT="${input}"
+  trap 'bug_exit_code=$?; report_bug_on_exit "${bug_exit_code}"' EXIT
 
   if [[ "${TEST_MODE}" != "1" ]]; then
     bash "${HERE}/../gh-app/setup-git.sh"

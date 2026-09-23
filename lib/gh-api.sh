@@ -477,6 +477,16 @@ gh_api_post_comment() {
   gh_api_json_num "${json}" "id"
 }
 
+# Create an issue. Args: owner repo title body. Output: issue number.
+gh_api_create_issue() {
+  local owner="${1}" repo="${2}" title="${3}" body="${4}"
+  local payload
+  payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\"}"
+  local json
+  json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")"
+  gh_api_json_num "${json}" "number"
+}
+
 # Merge a PR (SQUASH). Args: owner repo pr  (output: true/false)
 gh_api_merge_pr() {
   local owner="${1}" repo="${2}" pr_number="${3}"
