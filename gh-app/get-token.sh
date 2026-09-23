@@ -15,8 +15,36 @@ set -a
 . "${ENV_FILE}"
 set +a
 
-PEM_PATH="${PRIVATE_KEY_PATH/#\~/${HOME}}"
+# Expand ~, then accept a WSL /mnt/<drive>/ path when this bash is Git Bash.
+# Git Bash has no /mnt/<drive> mount, so openssl looks under its install
+# directory (C:/Program Files/Git/mnt/...). /<drive>/... is the same file.
+resolve_pem_path() {
+  local path="${1}"
+  local drive rest alt
+  path="${path/#\~/${HOME}}"
+  if [[ -e "${path}" ]]; then
+    printf '%s' "${path}"
+    return 0
+  fi
+  if [[ "${path}" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
+    drive="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    rest="${BASH_REMATCH[2]}"
+    alt="/${drive}/${rest}"
+    if [[ -e "${alt}" ]]; then
+      printf '%s' "${alt}"
+      return 0
+    fi
+  fi
+  printf '%s' "${path}"
+}
+
+PEM_PATH="$(resolve_pem_path "${PRIVATE_KEY_PATH}")"
 API_BASE="${GH_APP_API_BASE:-https://api.github.com}"
+
+if [[ "${1:-}" == "--print-pem-path" ]]; then
+  printf '%s\n' "${PEM_PATH}"
+  exit 0
+fi
 
 # Return cached token if still valid (installation tokens live ~1h).
 if [[ -f "${CACHE_FILE}" ]]; then
