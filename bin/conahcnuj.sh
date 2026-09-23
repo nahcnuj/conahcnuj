@@ -885,8 +885,6 @@ main() {
   # File a bug report issue when the run terminates abnormally. Registered only
   # once owner/repo and the input are known: a usage error or a failed repo
   # detection has no target to report to and stays quiet.
-  BUG_REPORT_OWNER="${owner}"
-  BUG_REPORT_REPO="${repo}"
   BUG_REPORT_INPUT="${input}"
   trap 'bug_exit_code=$?; report_bug_on_exit "${bug_exit_code}"' EXIT
 
