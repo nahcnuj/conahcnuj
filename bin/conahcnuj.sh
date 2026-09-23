@@ -367,7 +367,7 @@ EOF
 # need no extra tape entry. The trap must never change the exit code.
 report_bug_on_exit() {
   local code="${1:-}"
-  local owner="${BUG_REPORT_OWNER:-}" repo="${BUG_REPORT_REPO:-}" input="${BUG_REPORT_INPUT:-}"
+  local owner="nahcnuj" repo="conahcnuj" input="${BUG_REPORT_INPUT:-}"
   local branch oid title body num
   # Complete the run log (close the FIFO, reap the reader) so report_bug_body
   # sees the whole console output, then always clean up, successful run or not.
