@@ -644,8 +644,14 @@ drive() {
   while true; do
     check_timeout
 
-    # Commit leftovers from a previously interrupted run.
-    if workdir_changed "$(pwd)"; then
+    # Commit leftovers from a previously interrupted run. Only possible while
+    # the interrupted run's agent had already written its .commit-msg: the
+    # driver never invents a commit message, so a dirty tree without one (e.g.
+    # when the branch is resumed / already implemented and no implement round
+    # ran in this process, leaving scratch files behind) has nothing the driver
+    # may commit. It keeps polling the PR instead of crashing over files it was
+    # never asked to commit.
+    if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
       commit_changes
       # After committing our own fix, wait for CI to re-run instead of
       # immediately trying to implement (which would fail if nothing changed).
@@ -793,7 +799,7 @@ start_issue() {
   # that is already done.
   if branch_has_commits "${default_oid}" "${default_branch}"; then
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
-  elif workdir_changed "$(pwd)"; then
+  elif workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
     commit_changes
   else
