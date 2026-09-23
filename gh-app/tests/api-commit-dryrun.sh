@@ -15,6 +15,7 @@ pushd "${FIX}" >/dev/null || exit 1
 git init -q
 git config user.email "mock@test"
 git config user.name "mock"
+git config commit.gpgsign false
 printf 'base\n' > base.txt
 printf 'del\n' > del.txt
 printf 'mv\n' > old.txt
@@ -76,6 +77,7 @@ pushd "${FIX2}" >/dev/null || exit 1
 git init -q
 git config user.email "mock@test"
 git config user.name "mock"
+git config commit.gpgsign false
 printf 'keep\n' > keep.txt
 git add -A
 git commit -qm init

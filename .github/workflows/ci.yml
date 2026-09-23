@@ -38,10 +38,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Syntax check
-        run: bash -n gh-app/*.sh gh-app/tests/*.sh
+        run: bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
 
       - name: ShellCheck
-        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh
+        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
 
   lint-ps:
     name: Check install.ps1 syntax
@@ -115,6 +115,38 @@ jobs:
             Write-Error "unexpected plugins payload: $($deployedPlugins -join ', ')"
             exit 1
           }
+          # bin-side deployment: the conahcnuj driver resolves gh-app/lib
+          # relative to itself, so they must mirror the repo sources.
+          $binDir = Join-Path $HOME ".local/bin"
+          $binSide = Split-Path $binDir -Parent
+          $pairs = @(
+            @($dest, "gh-app/get-token.sh", "gh-app/get-token.sh"),
+            @($dest, "gh-app/git-credential-helper.sh", "gh-app/git-credential-helper.sh"),
+            @($dest, "gh-app/setup-git.sh", "gh-app/setup-git.sh"),
+            @($dest, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),
+            @($dest, "gh-app/bot-user-id.sh", "gh-app/bot-user-id.sh"),
+            @($dest, "gh-app/app.env.example", "gh-app/app.env.example"),
+            @($dest, "plugins/gh-app-token.ts", "plugins/gh-app-token.ts"),
+            @($binSide, "gh-app/get-token.sh", "gh-app/get-token.sh"),
+            @($binSide, "gh-app/setup-git.sh", "gh-app/setup-git.sh"),
+            @($binSide, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),
+            @($binSide, "lib/gh-api.sh", "lib/gh-api.sh"),
+            @($binSide, "lib/opencode.sh", "lib/opencode.sh"),
+            @($binSide, "lib/rate-limit.sh", "lib/rate-limit.sh"),
+            @($binDir, "conahcnuj", "bin/conahcnuj.sh")
+          )
+          foreach ($p in $pairs) {
+            $deployed = Join-Path $p[0] $p[1]
+            if (-not (Test-Path -LiteralPath $deployed)) {
+              Write-Error "missing deployment: $($p[1]) under $($p[0])"
+              exit 1
+            }
+            $srcHash = (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $p[2])).Hash
+            if ((Get-FileHash -LiteralPath $deployed).Hash -ne $srcHash) {
+              Write-Error "content mismatch: $deployed (source $($p[2]))"
+              exit 1
+            }
+          }
           Write-Host "all files deployed OK"
 
   mock-test:
@@ -134,6 +166,12 @@ jobs:
       # arg validation and --dry-run worktree collection (gh-app/tests/).
       - name: Run tests/run.sh suite
         run: bash gh-app/tests/run.sh
+
+      # Driver suite: conahcnuj end-to-end flow tests driven by a mocked
+      # API tape + mocked opencode (bin/, lib/, tests/, no secrets,
+      # no network).
+      - name: Run driver test suite
+        run: bash test.sh
 
   lint-ts:
     name: Typecheck opencode plugin
