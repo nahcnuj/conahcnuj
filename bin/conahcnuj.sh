@@ -2,13 +2,13 @@
 # conahcnuj - issue-driven autonomous development driver.
 #
 # Resolves a GitHub issue (or resumes a pull request) end-to-end. The coding
-# agent, not the driver, decides how the work is presented: it creates the
-# feature branch (any name it likes) off the latest default branch, and it
-# writes the commit message (.commit-msg). The driver only fills in a branch
-# name / message when the agent leaves none out:
+# agent, not the driver, decides how the work is presented: it writes the
+# commit message (.commit-msg) and may choose the feature branch name
+# (.branch-name; when the agent leaves none out, the driver picks one). A PR
+# number given on the command line is detected and resumed automatically:
 #   1. checks out the latest default branch and implements the issue with
 #      opencode (falling through every available model until one produces
-#      changes), committing with the agent's chosen message
+#      changes), committing only with the agent's .commit-msg
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
 #      mergeability) passes, then requests review
 #   3. polls the review status; addresses comments / requested changes /
@@ -96,11 +96,12 @@ check_timeout() {
 }
 
 # True when the working tree holds real changes. The coding agent's
-# .commit-msg is metadata, not a code change, so it is ignored: a model that
-# writes nothing but a commit message must not count as having produced work.
+# .commit-msg and .branch-name are metadata, not code changes, so they are
+# ignored: a model that writes nothing but a commit message or a branch name
+# must not count as having produced work.
 workdir_changed() {
   local dir="${1}" changes
-  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' || true)"
+  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' || true)"
   [[ -n "${changes}" ]]
 }
 
@@ -119,24 +120,26 @@ branch_has_commits() {
 }
 
 # Commit every working-tree change as a Verified commit, then sync the local
-# branch to the remote head api-commit.sh created. Test mode: plain local
-# commit (no network / no secret) so flows can be exercised offline.
+# branch to the remote head api-commit.sh created. The commit message always
+# comes from the coding agent (.commit-msg); the driver never invents a fixed
+# message, so when the agent left none out it refuses to commit. Test mode:
+# plain local commit (no network / no secret) so flows can be exercised
+# offline.
 commit_changes() {
-  local default_message="${1}"
   local message
-  # Use the coding agent's suggested commit message if available.
-  if [[ -f ".commit-msg" ]]; then
-    message="$(head -1 .commit-msg)"
-    rm -f .commit-msg
-    if [[ -n "${message}" ]]; then
-      echo "Using coding agent's commit message: ${message}" >&2
-    else
-      message="${default_message}"
-    fi
-  else
-    message="${default_message}"
+  # .branch-name is metadata, never part of the implementation.
+  rm -f .branch-name
+  if [[ ! -f ".commit-msg" ]]; then
+    echo "ERROR: the coding agent left no .commit-msg; refusing to commit with a fixed message." >&2
+    return 1
   fi
-  echo "Creating commit: ${message}" >&2
+  message="$(head -1 .commit-msg)"
+  rm -f .commit-msg
+  if [[ -z "${message}" ]]; then
+    echo "ERROR: .commit-msg is empty; the coding agent must write a commit message." >&2
+    return 1
+  fi
+  echo "Using coding agent's commit message: ${message}" >&2
   git add -A
   if [[ "${TEST_MODE}" == "1" ]]; then
     git config commit.gpgsign false
@@ -229,6 +232,50 @@ ensure_pr_branch_head() {
   # Keep git's own output off stdout; callers capture this function's stdout.
   git fetch origin "${head}" 1>&2
   git checkout -B "${head}" "origin/${head}" 1>&2
+}
+
+# Let the coding agent choose the feature branch. If the implementation round
+# wrote .branch-name, use that name (renaming the local branch and, in real
+# mode, creating the remote branch under it); otherwise keep the driver-derived
+# name. A blank / malformed / already-in-use name falls back to ${current}.
+# Prints the final branch name.
+resolve_agent_branch_name() {
+  local owner="${1}" repo="${2}" default_oid="${3}" current="${4}" want
+  if [[ ! -f ".branch-name" ]]; then
+    printf '%s\n' "${current}"
+    return 0
+  fi
+  # Trim leading/trailing whitespace only; internal spaces stay and are then
+  # rejected by git check-ref-format rather than silently altered.
+  want="$(head -1 .branch-name | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  rm -f .branch-name
+  if [[ -z "${want}" ]]; then
+    echo "WARNING: .branch-name is empty; keeping the driver-derived branch ${current}." >&2
+    printf '%s\n' "${current}"
+    return 0
+  fi
+  if ! git check-ref-format --branch "${want}" >/dev/null 2>&1; then
+    echo "WARNING: invalid branch name '${want}' in .branch-name; keeping ${current}." >&2
+    printf '%s\n' "${current}"
+    return 0
+  fi
+  if [[ "${want}" == "${current}" ]]; then
+    printf '%s\n' "${current}"
+    return 0
+  fi
+  if [[ "${TEST_MODE}" != "1" ]]; then
+    if ! gh_api_create_branch "${owner}" "${repo}" "${want}" "${default_oid}" >/dev/null 2>&1; then
+      echo "WARNING: could not create the remote branch ${want} (name in use?); keeping ${current}." >&2
+      printf '%s\n' "${current}"
+      return 0
+    fi
+    git fetch origin "${want}" 1>&2
+    git checkout -B "${want}" "origin/${want}" 1>&2
+  else
+    git checkout -B "${want}" >/dev/null 2>&1
+  fi
+  echo "Using the coding agent's feature branch: ${want}" >&2
+  printf '%s\n' "${want}"
 }
 
 # --- implementation ---------------------------------------------------------
@@ -351,7 +398,7 @@ drive() {
 
     # Commit leftovers from a previously interrupted run.
     if workdir_changed "$(pwd)"; then
-      commit_changes "conahcnuj: ${title}"
+      commit_changes
       # After committing our own fix, wait for CI to re-run instead of
       # immediately trying to implement (which would fail if nothing changed).
       continue
@@ -370,7 +417,7 @@ drive() {
         produced_change="true"
       fi
       if workdir_changed "$(pwd)"; then
-        commit_changes "conahcnuj: ${title} (fix constraints)"
+        commit_changes
         produced_change="true"
       fi
       if [[ "${produced_change}" != "true" ]]; then
@@ -422,7 +469,7 @@ ${summary}"; then
           continue
         fi
       fi
-      commit_changes "conahcnuj: ${title} (address review feedback)"
+      commit_changes
       if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
         echo "Constraints failing after addressing feedback; fixing next cycle." >&2
         continue
@@ -480,13 +527,14 @@ start_issue() {
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
   elif workdir_changed "$(pwd)"; then
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
-    commit_changes "conahcnuj: implement issue #${num}: ${title}"
+    commit_changes
   else
     if ! implement "${title}" "${body}"; then
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi
-    commit_changes "conahcnuj: implement issue #${num}: ${title}"
+    branch="$(resolve_agent_branch_name "${owner}" "${repo}" "${default_oid}" "${branch}")"
+    commit_changes
   fi
 
   drive "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}"
@@ -540,12 +588,12 @@ resume_pr() {
 
 main() {
   if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <issue-or-pr-number> [--pr]" >&2
+    echo "Usage: $0 <issue-or-pr-number>" >&2
     exit 1
   fi
-  local input="${1}" as_pr="${2:-}" repo_info owner repo
-  if [[ "${as_pr}" != "--pr" && ${#as_pr} -gt 0 ]]; then
-    echo "Unknown option: ${as_pr} (use --pr to resume a pull request)" >&2
+  local input="${1}" repo_info owner repo
+  if [[ "${input}" == -* ]]; then
+    echo "Unknown option: ${input}" >&2
     exit 1
   fi
 
@@ -556,11 +604,6 @@ main() {
 
   if [[ "${TEST_MODE}" != "1" ]]; then
     bash "${HERE}/../gh-app/setup-git.sh"
-  fi
-
-  if [[ "${as_pr}" == "--pr" ]]; then
-    resume_pr "${owner}" "${repo}" "${input}"
-    return 0
   fi
 
   local issue is_pr

@@ -29,7 +29,18 @@ test_opencode_build_prompt() {
   [[ "${prompt}" == *"Issue body"* ]]
   [[ "${prompt}" == *"extra ctx"* ]]
   [[ "${prompt}" == *"Do NOT create any commits"* ]]
+  [[ "${prompt}" == *".commit-msg"* ]]
+  # Follow-up rounds keep the existing branch: no branch-name instruction.
+  [[ "${prompt}" != *".branch-name"* ]]
   echo "opencode_build_prompt passed"
+}
+
+test_opencode_build_prompt_fresh() {
+  local prompt
+  prompt="$(opencode_build_prompt "Issue title" "Issue body")"
+  # A fresh implementation round lets the agent choose the feature branch.
+  [[ "${prompt}" == *".branch-name"* ]]
+  echo "opencode_build_prompt (fresh round, branch-name offered) passed"
 }
 
 test_opencode_run() {
@@ -42,8 +53,10 @@ test_opencode_run() {
   [[ "${out}" == *"--dir ${tmp}"* ]]
   [[ "${out}" == *"Test Issue"* ]]
   [[ "${out}" == *"more ctx"* ]]
-  # A mock change file is written (the driver relies on working-tree changes).
+  # A mock change file is written (the driver relies on working-tree changes),
+  # and the mock honours the .commit-msg contract.
   [[ -f "${tmp}/conahcnuj.mock" ]]
+  [[ -f "${tmp}/.commit-msg" ]]
   rm -rf "${tmp}"
   unset OPENCODE_TEST_MODE
   echo "opencode_run passed"
@@ -56,8 +69,10 @@ test_opencode_run_noop_models() {
   tmp="$(mktemp -d)"
   opencode_run "Issue" "Body" "${tmp}" "opencode/dead-model" >/dev/null
   [[ ! -f "${tmp}/conahcnuj.mock" ]]
+  [[ ! -f "${tmp}/.commit-msg" ]]
   opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" >/dev/null
   [[ -f "${tmp}/conahcnuj.mock" ]]
+  [[ -f "${tmp}/.commit-msg" ]]
   rm -rf "${tmp}"
   unset OPENCODE_TEST_MODE MOCK_OPENCODE_NOOP
   echo "opencode_run (no-op model) passed"
@@ -65,6 +80,7 @@ test_opencode_run_noop_models() {
 
 test_opencode_get_models
 test_opencode_build_prompt
+test_opencode_build_prompt_fresh
 test_opencode_run
 test_opencode_run_noop_models
 

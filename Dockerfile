@@ -10,7 +10,7 @@
 # Build:
 #   docker build -t conahcnuj-runner .
 # Run (prefer the wrapper, which handles the mounts):
-#   bash docker-run.sh <issue-or-pr-number> [--pr]
+#   bash docker-run.sh <issue-or-pr-number>
 
 FROM ubuntu:24.04
 

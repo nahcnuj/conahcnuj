@@ -8,7 +8,7 @@
 #
 # Usage:
 #   cd <target-repo>
-#   bash <path-to>/docker-run.sh <issue-or-pr-number> [--pr]
+#   bash <path-to>/docker-run.sh <issue-or-pr-number>
 #
 # By default the container runs in the foreground and stops as soon as the
 # driver exits. Set CONAHCNUJ_DAEMON=1 (with an optional CONAHCNUJ_NAME) to

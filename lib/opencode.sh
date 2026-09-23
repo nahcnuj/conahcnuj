@@ -16,6 +16,9 @@ opencode_get_models() {
 
 # Build the implementation prompt for a single model run.
 # Args: issue_title issue_body [extra_context]
+# A fresh implementation round (no extra_context) also lets the agent choose
+# the feature branch via .branch-name; follow-up rounds (fix constraints,
+# review feedback) keep the existing branch, so the instruction is omitted.
 opencode_build_prompt() {
   local issue_title="${1}" issue_body="${2}" extra_context="${3:-}"
   local prompt
@@ -33,6 +36,11 @@ ${extra_context}"
 Implement the changes needed to resolve this issue. Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
 
 When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. This message should summarize the changes you made."
+  if [[ -z "${extra_context}" ]]; then
+    prompt="${prompt}
+
+If you want to choose the feature branch name, write your preferred branch name (one line, e.g. feature/my-work) to the file .branch-name in the repository root; if you leave the file absent, the driver picks a name for you."
+  fi
   printf '%s\n' "${prompt}"
 }
 
@@ -52,6 +60,8 @@ opencode_run() {
     if [[ -z "${MOCK_OPENCODE_NOOP:-}" || "${MOCK_OPENCODE_NOOP}" != "${model}" ]]; then
       if [[ -d "${workdir}" && -w "${workdir}" ]]; then
         printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
+        # Simulate the agent honouring the .commit-msg contract.
+        printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
       fi
     else
       echo "opencode: mock no-op for ${model} (produces no changes)" >&2
