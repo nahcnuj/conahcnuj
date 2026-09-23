@@ -82,7 +82,8 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開など
    で PR を解決できずに終了コード非 0 で終わる場合）は、ドライバが対象
    リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
-   `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD を含む）。
+   `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
+   実行ログ末尾を含む）。
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。

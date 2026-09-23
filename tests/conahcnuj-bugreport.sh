@@ -67,4 +67,37 @@ grep -q "filing a bug report issue in nahcnuj/conahcnuj" "${LOG}" || { echo "FAI
 grep -q "Bug report issue #25 created" "${LOG}" || { echo "FAIL: bug report issue #25 was not created"; exit 1; }
 grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAIL: bug report URL is missing"; exit 1; }
 
+# --- unit: the bug report body carries a detailed error log -----------------
+# Source the driver (CONAHCNUJ_IMPORT=1, so main() is not run) and stub
+# gh_api_create_issue to capture the body it would send. Assert the report
+# includes the tail of the run log and no longer repeats the self-evident
+# repository name (reviewer: the report is filed in that very repository).
+(
+  export CONAHCNUJ_IMPORT=1
+  unset CONAHCNUJ_REPO
+  # Source the driver so its functions (plus our stub) run in one shell.
+  # shellcheck source=bin/conahcnuj.sh
+  source "${DRIVER}"
+  gh_api_create_issue() {
+    printf '%s\n' "${4}" > "${ROOT}/captured-body.txt"
+    printf '99\n'
+  }
+  RUN_LOG_FILE="$(mktemp)"
+  printf '%s\n' \
+    "Issue #14: test issue that cannot be implemented" \
+    "opencode: trying model opencode/first" \
+    "ERROR: could not implement issue #14 with any available model." \
+    > "${RUN_LOG_FILE}"
+  BUG_REPORT_OWNER="nahcnuj"
+  BUG_REPORT_REPO="conahcnuj"
+  BUG_REPORT_INPUT="14"
+  BUG_REPORTED="0"
+  report_bug_on_exit "1"
+)
+
+grep -q "## Error log" "${ROOT}/captured-body.txt" || { echo "FAIL: bug report has no error log section"; exit 1; }
+grep -q "ERROR: could not implement issue #14 with any available model." "${ROOT}/captured-body.txt" || { echo "FAIL: the error log does not carry the failing message"; exit 1; }
+grep -q "Exit code: 1" "${ROOT}/captured-body.txt" || { echo "FAIL: exit code is missing from the report"; exit 1; }
+grep -q "Repository:" "${ROOT}/captured-body.txt" && { echo "FAIL: self-evident repository line is still in the report"; exit 1; }
+
 echo "conahcnuj abnormal-exit bug report passed"
