@@ -355,13 +355,23 @@ interface SeenModel {
 const seenModels = new Map<string, SeenModel>()
 let latestSessionID = ""
 
-// Fixed name under os.tmpdir(). The path is not taken from the environment:
-// CodeQL treats an env path as user-controlled (js/path-injection). The
-// driver reads the same file via Node's os.tmpdir().
-const COMMIT_MODEL_LABEL_NAME = "conahcnuj-commit-model.txt"
-
-function commitModelLabelFile(): string {
-  return path.join(os.tmpdir(), COMMIT_MODEL_LABEL_NAME)
+/**
+ * The driver creates a private file with mkdtemp and passes its path in
+ * CONAHCNUJ_MODEL_LABEL_FILE. Only a path that path.resolve places inside
+ * the temp directory is written, so an env path cannot escape that directory.
+ */
+function writeModelLabel(label: string): void {
+  const requested = process.env.CONAHCNUJ_MODEL_LABEL_FILE
+  if (!requested) {
+    return
+  }
+  const root = path.resolve(os.tmpdir())
+  const resolved = path.resolve(requested)
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  if (!resolved.startsWith(prefix)) {
+    return
+  }
+  fs.writeFileSync(resolved, `${label}\n`, "utf8")
 }
 
 function oneLine(value: string): string {
@@ -420,7 +430,7 @@ function rememberModel(
     return
   }
   try {
-    fs.writeFileSync(commitModelLabelFile(), `${label}\n`, "utf8")
+    writeModelLabel(label)
   } catch {
     // The driver falls back to the model id when the file cannot be written.
   }

@@ -65,9 +65,11 @@ async function main() {
   const fs = require("node:fs")
   const os = require("node:os")
   const path = require("node:path")
-  const labelFile = path.join(os.tmpdir(), "conahcnuj-commit-model.txt")
+  const labelDir = fs.mkdtempSync(path.join(os.tmpdir(), "conahcnuj-smoke-"))
+  const labelFile = path.join(labelDir, "label.txt")
+  const outside = path.join(os.tmpdir(), "..", `conahcnuj-escape-${process.pid}.txt`)
   process.env.CONAHCNUJ_SESSION_MODEL = "xai/grok-4.7"
-  delete process.env.CONAHCNUJ_MODEL_LABEL_FILE
+  process.env.CONAHCNUJ_MODEL_LABEL_FILE = labelFile
   await plugin["chat.message"](
     {
       sessionID: "s1",
@@ -96,11 +98,22 @@ async function main() {
   await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, labeled)
   assert.strictEqual(labeled.env.CONAHCNUJ_COMMIT_MODEL, "Grok 4.7 (medium)")
   assert.strictEqual(fs.readFileSync(labelFile, "utf8").trim(), "Grok 4.7 (medium)")
+  process.env.CONAHCNUJ_MODEL_LABEL_FILE = outside
+  await plugin["chat.params"](
+    {
+      sessionID: "s1",
+      agent: "build",
+      model: { name: "Grok 4.7", providerID: "xai", id: "grok-4.7" },
+    },
+    {}
+  )
+  assert.strictEqual(fs.existsSync(path.resolve(outside)), false)
   const explicit = { env: { CONAHCNUJ_COMMIT_MODEL: "custom" } }
   await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, explicit)
   assert.strictEqual(explicit.env.CONAHCNUJ_COMMIT_MODEL, "custom")
   delete process.env.CONAHCNUJ_SESSION_MODEL
-  fs.rmSync(labelFile, { force: true })
+  delete process.env.CONAHCNUJ_MODEL_LABEL_FILE
+  fs.rmSync(labelDir, { recursive: true, force: true })
 
   console.log("PLUGIN SMOKE OK")
 }
