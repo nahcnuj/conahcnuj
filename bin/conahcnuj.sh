@@ -245,7 +245,9 @@ report_bug_body() {
   ended="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)"
   label=""
   if [[ -n "${input}" ]]; then
-    label=" #${input}"
+    label=" #${input} (issue/PR number given to \`conahcnuj ${input}\`)"
+  else
+    label=" (unknown: no issue/PR number was given)"
   fi
   log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
   if [[ -n "${log_tail}" ]]; then
@@ -260,10 +262,10 @@ The conahcnuj driver terminated abnormally and could not resolve the item it was
 
 ## Context
 
-- Input:${label}
+- Item:${label}
 - Branch: ${branch:-unknown}
 - HEAD: ${oid:-unknown}
-- Exit code: ${code}
+- Exit code: ${code} (how the conahcnuj driver process itself exited)
 - Ended at: ${ended:-unknown}
 
 ## Error log
