@@ -95,10 +95,15 @@ grep -q "left no .commit-msg" "${LOG}" && { echo "FAIL: the driver still crashed
 grep -q "Bug report issue" "${LOG}" && { echo "FAIL: the driver filed a bug report"; exit 1; }
 
 # The scratch files must be untouched and must not have been committed.
+# Capture command output first, then grep via here-string: `cmd | grep -q`
+# under `set -o pipefail` is flaky (grep -q exits on the first match, cmd
+# gets SIGPIPE, and pipefail turns that into a false failure).
 [[ "$(cat "${WORK}/scratch.txt")" == "scratch" ]] || { echo "FAIL: scratch.txt was modified"; exit 1; }
 [[ "$(cat "${WORK}/reply.json")" == '{"reply": 1}' ]] || { echo "FAIL: reply.json was modified"; exit 1; }
-git -C "${WORK}" status --porcelain | grep -q "scratch.txt" || { echo "FAIL: scratch.txt disappeared"; exit 1; }
-git -C "${WORK}" log --oneline | grep -q "existing implementation" || { echo "FAIL: pre-existing implementation commit lost"; exit 1; }
-[[ "$(git -C "${WORK}" log --oneline | wc -l)" -eq 2 ]] || { echo "FAIL: unexpected extra commit(s) were created"; exit 1; }
+STATUS_OUT="$(git -C "${WORK}" status --porcelain)"
+grep -q "scratch.txt" <<<"${STATUS_OUT}" || { echo "FAIL: scratch.txt disappeared"; exit 1; }
+ONELINE="$(git -C "${WORK}" log --oneline)"
+grep -q "existing implementation" <<<"${ONELINE}" || { echo "FAIL: pre-existing implementation commit lost"; exit 1; }
+[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" -eq 2 ]] || { echo "FAIL: unexpected extra commit(s) were created"; exit 1; }
 
 echo "conahcnuj already-implemented-with-dirty-workdir flow passed"

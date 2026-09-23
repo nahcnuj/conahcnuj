@@ -82,9 +82,14 @@ grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback
 grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "feature/fix-10" ]] || { echo "FAIL: wrong current branch"; exit 1; }
-git -C "${WORK}" log --oneline | grep -q "mock commit from opencode/first" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
-git -C "${WORK}" log --format=%B | grep -q "Model: opencode/first" || { echo "FAIL: model trailer missing"; exit 1; }
+# Capture first, then grep via here-string: `git log | grep -q` under
+# `set -o pipefail` is flaky (grep -q exits on the first match, git gets
+# SIGPIPE, and pipefail reports a false failure).
+ONELINE="$(git -C "${WORK}" log --oneline)"
+grep -q "mock commit from opencode/first" <<<"${ONELINE}" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
+FULL_LOG="$(git -C "${WORK}" log --format=%B)"
+grep -q "Model: opencode/first" <<<"${FULL_LOG}" || { echo "FAIL: model trailer missing"; exit 1; }
 # The fixed driver-side message must not reappear.
-git -C "${WORK}" log --oneline | grep -q "conahcnuj:.*address review feedback" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
+grep -q "conahcnuj:.*address review feedback" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
 
 echo "conahcnuj resume flow passed"

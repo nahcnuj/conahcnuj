@@ -83,7 +83,10 @@ grep -q "Created PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; ex
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }
-git -C "${WORK}" log --oneline | grep -q "existing implementation" || { echo "FAIL: pre-existing implementation commit lost"; exit 1; }
-git -C "${WORK}" log --oneline | grep -q "conahcnuj: implement issue #10" && { echo "FAIL: a new implement commit was created"; exit 1; }
+# Here-string, not `git log | grep -q`: under `set -o pipefail` an early
+# grep -q exit SIGPIPEs git and fails the pipeline even on a match.
+ONELINE="$(git -C "${WORK}" log --oneline)"
+grep -q "existing implementation" <<<"${ONELINE}" || { echo "FAIL: pre-existing implementation commit lost"; exit 1; }
+grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: a new implement commit was created"; exit 1; }
 
 echo "conahcnuj already-implemented flow passed"

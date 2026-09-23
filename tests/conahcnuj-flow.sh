@@ -90,12 +90,17 @@ grep -q "Replied on PR #123 after addressing review feedback" "${LOG}" || { echo
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }
+# Capture first, then grep via here-string: `git log | grep -q` under
+# `set -o pipefail` is flaky (grep -q exits on the first match, git gets
+# SIGPIPE, and pipefail reports a false failure).
 # The commit message always comes from the coding agent (.commit-msg), never
 # from a fixed driver-side fallback.
-git -C "${WORK}" log --oneline | grep -q "conahcnuj: implement issue #10" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
-git -C "${WORK}" log --oneline | grep -q "mock commit from opencode/first" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
-git -C "${WORK}" log --format=%B | grep -q "Model: opencode/first" || { echo "FAIL: model trailer missing"; exit 1; }
+ONELINE="$(git -C "${WORK}" log --oneline)"
+grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
+grep -q "mock commit from opencode/first" <<<"${ONELINE}" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
+FULL_LOG="$(git -C "${WORK}" log --format=%B)"
+grep -q "Model: opencode/first" <<<"${FULL_LOG}" || { echo "FAIL: model trailer missing"; exit 1; }
 # init + implement + review-feedback fix = 3 commits from the branch tip.
-[[ "$(git -C "${WORK}" log --oneline | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement + review commits"; exit 1; }
+[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement + review commits"; exit 1; }
 
 echo "conahcnuj flow passed"
