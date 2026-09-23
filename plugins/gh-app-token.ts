@@ -347,6 +347,104 @@ async function injectShellEnv(
  * shadow the `commit` builtin, so block it here and point at the Verified
  * path instead. Throws to block, returns silently to allow.
  */
+interface SeenModel {
+  name: string
+  variant: string
+}
+
+const seenModels = new Map<string, SeenModel>()
+let latestSessionID = ""
+
+/**
+ * The driver creates a private file with mkdtemp and passes its path in
+ * CONAHCNUJ_MODEL_LABEL_FILE. Only a path that path.resolve places inside
+ * the temp directory is written, so an env path cannot escape that directory.
+ */
+function writeModelLabel(label: string): void {
+  const requested = process.env.CONAHCNUJ_MODEL_LABEL_FILE
+  if (!requested) {
+    return
+  }
+  const root = path.resolve(os.tmpdir())
+  const resolved = path.resolve(requested)
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  if (!resolved.startsWith(prefix)) {
+    return
+  }
+  fs.writeFileSync(resolved, `${label}\n`, "utf8")
+}
+
+function oneLine(value: string): string {
+  return value.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim()
+}
+
+/**
+ * Display label for a commit trailer. Variant is the OpenCode effort
+ * ("medium", ...), appended only when the name does not already include it.
+ */
+function formatModelLabel(name: string, variant: string): string {
+  const base = oneLine(name)
+  const effort = oneLine(variant)
+  if (!base) {
+    return ""
+  }
+  if (!effort || base.endsWith(`(${effort})`)) {
+    return base
+  }
+  return `${base} (${effort})`
+}
+
+/**
+ * True when this model is the session's selected one. Without
+ * CONAHCNUJ_SESSION_MODEL every model is recorded (interactive OpenCode).
+ * The driver sets provider/model so a side model (title, compaction) does
+ * not replace the label of the model that did the work.
+ */
+function matchesSessionModel(providerID: string, modelID: string): boolean {
+  const want = oneLine(process.env.CONAHCNUJ_SESSION_MODEL ?? "")
+  if (!want) {
+    return true
+  }
+  const slash = want.indexOf("/")
+  if (slash < 0) {
+    return want === modelID || want === `${providerID}/${modelID}`
+  }
+  return want === `${providerID}/${modelID}`
+}
+
+function rememberModel(
+  sessionID: string,
+  patch: { name?: string; variant?: string }
+): void {
+  const prev = seenModels.get(sessionID) ?? { name: "", variant: "" }
+  const name =
+    patch.name !== undefined && oneLine(patch.name) ? oneLine(patch.name) : prev.name
+  const variant = patch.variant !== undefined ? oneLine(patch.variant) : prev.variant
+  if (!name && !variant) {
+    return
+  }
+  seenModels.set(sessionID, { name, variant })
+  latestSessionID = sessionID
+  const label = formatModelLabel(name, variant)
+  if (!label) {
+    return
+  }
+  try {
+    writeModelLabel(label)
+  } catch {
+    // The driver falls back to the model id when the file cannot be written.
+  }
+}
+
+function labelForSession(sessionID: string | undefined): string {
+  const id = sessionID || latestSessionID
+  const seen = id ? seenModels.get(id) : undefined
+  if (!seen) {
+    return ""
+  }
+  return formatModelLabel(seen.name, seen.variant)
+}
+
 function blockUnsignedCommit(
   tool: string,
   args: unknown,
@@ -378,8 +476,38 @@ export const GhAppTokenPlugin: Plugin = async () => {
   const vcUsage = `git vc -m "<message>" [-a] (or: bash "${apiCommitSh}" -m "<message>" [-a])`
 
   return {
-    "shell.env": async (_input, output) => {
+    "chat.message": async (input) => {
+      const model = input.model
+      if (model && !matchesSessionModel(model.providerID, model.modelID)) {
+        return
+      }
+      // Keep a display name from chat.params. The id is only a stand-in
+      // until that hook has supplied model.name.
+      const prev = seenModels.get(input.sessionID)
+      const name = model ? `${model.providerID}/${model.modelID}` : undefined
+      rememberModel(input.sessionID, {
+        ...(prev?.name ? {} : { name }),
+        variant: input.variant,
+      })
+    },
+    "chat.params": async (input) => {
+      const model = input.model
+      if (!matchesSessionModel(model.providerID, model.id)) {
+        return
+      }
+      rememberModel(input.sessionID, {
+        name: model.name || `${model.providerID}/${model.id}`,
+      })
+    },
+    "shell.env": async (input, output) => {
       await injectShellEnv(output.env, { botName, botEmail, vcCmd })
+      // An explicit label (the user, or a caller that already chose one) wins.
+      if (!output.env.CONAHCNUJ_COMMIT_MODEL) {
+        const label = labelForSession(input.sessionID)
+        if (label) {
+          output.env.CONAHCNUJ_COMMIT_MODEL = label
+        }
+      }
     },
     "tool.execute.before": async (input, output) => {
       blockUnsignedCommit(input.tool, output.args, botName, vcUsage)

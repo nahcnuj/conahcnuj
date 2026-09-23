@@ -30,6 +30,12 @@
 #   --dry-run         Print what would be committed without calling the API
 #                     (no token/network needed; usable for offline tests).
 #
+# Model trailer (optional): when CONAHCNUJ_COMMIT_MODEL is a non-empty
+# single-line label, the commit body gains a `Model: <label>` Git trailer.
+# Unset means no trailer. A message that already has a Model trailer is left
+# alone. OpenCode sessions set the variable from the live model; anything
+# else can export the same variable with whatever label it wants.
+#
 # The author identity is the App (conahcnuj[bot]) and the committer is GitHub.com.
 
 set -euo pipefail
@@ -125,8 +131,46 @@ if [[ "${TRACKED}" != true && ${#DELETE_PATHS[@]} -eq 0 ]]; then
 fi
 
 # JSON/GraphQL-escape a string (backslashes first, then double quotes).
+# Newlines become \n so a multi-line commit body survives the query string.
 json_escape() {
-  printf '%s' "${1}" | sed 's/\\/\\\\/g; s/"/\\"/g'
+  printf '%s' "${1}" | awk '
+    BEGIN { ORS = "" }
+    {
+      if (NR > 1) printf "\\n"
+      gsub(/\\/, "\\\\")
+      gsub(/"/, "\\\"")
+      printf "%s", $0
+    }
+  '
+}
+
+# Collapse CONAHCNUJ_COMMIT_MODEL into one trailer value, or empty when unset.
+commit_model_label() {
+  local model="${CONAHCNUJ_COMMIT_MODEL:-}"
+  model="$(printf '%s' "${model}" | tr '\r\n\t' ' ' | sed 's/  */ /g; s/^ //; s/ $//')"
+  model="${model#Model:}"
+  model="${model#model:}"
+  model="$(printf '%s' "${model}" | sed 's/^ //; s/ $//')"
+  printf '%s' "${model}"
+}
+
+# Split MESSAGE into HEADLINE (first line) and COMMIT_BODY (the rest). Append
+# a Model trailer when a label is available and the message does not have one.
+# COMMIT_BODY, not BODY: this script already uses BODY for the refs API payload.
+prepare_commit_message() {
+  local message="${MESSAGE}"
+  local model rest
+  model="$(commit_model_label)"
+  if [[ -n "${model}" ]] && ! printf '%s\n' "${message}" | grep -qE '^[[:space:]]*[Mm]odel:'; then
+    message="${message}"$'\n\n'"Model: ${model}"
+  fi
+  HEADLINE="${message%%$'\n'*}"
+  if [[ "${message}" == *$'\n'* ]]; then
+    rest="${message#*$'\n'}"
+    COMMIT_BODY="${rest#$'\n'}"
+  else
+    COMMIT_BODY=""
+  fi
 }
 # 1) Collect added/modified file contents (exact bytes, no newline mangling) and
 #    deletion paths. No network/token needed up to and including --dry-run.
@@ -223,10 +267,15 @@ if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
   exit 1
 fi
 
+prepare_commit_message
+
 if [[ "${DRY_RUN}" == true ]]; then
   echo "Owner/Repo: ${REPO}"
   echo "Branch:     ${BRANCH}"
-  echo "Message:    ${MESSAGE}"
+  echo "Message:    ${HEADLINE}"
+  if [[ -n "${COMMIT_BODY}" ]]; then
+    echo "Body:       ${COMMIT_BODY}"
+  fi
   echo "Additions:  ${#ADDITIONS[@]} file(s)"
   if [[ ${#ADD_FILES[@]} -gt 0 ]]; then
     printf '  %s\n' "${ADD_FILES[@]}"
@@ -278,11 +327,17 @@ for dp in "${DELETE_PATHS[@]}"; do
 done
 DEL_LIST="$(IFS=,; echo "${DEL_LIST_ARR[*]}")"
 EB="$(json_escape "${BRANCH}")"
-EM="$(json_escape "${MESSAGE}")"
+EM="$(json_escape "${HEADLINE}")"
+EBODY="$(json_escape "${COMMIT_BODY}")"
 
 # 3) Create the single verified commit with createCommitOnBranch.
 #    GitHub commits it (committer: GitHub <noreply@github.com>) and signs it.
-QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},message:{headline:\"${EM}\"},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[${ADD_LIST}],deletions:[${DEL_LIST}]}}){commit{oid}}}"
+if [[ -n "${COMMIT_BODY}" ]]; then
+  MESSAGE_FIELD="message:{headline:\"${EM}\",body:\"${EBODY}\"}"
+else
+  MESSAGE_FIELD="message:{headline:\"${EM}\"}"
+fi
+QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[${ADD_LIST}],deletions:[${DEL_LIST}]}}){commit{oid}}}"
 # Pass the body via file: inline -d breaks Windows' 32KB command-line limit
 # when committing large files.
 BODY_FILE="$(mktemp)"

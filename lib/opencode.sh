@@ -69,5 +69,16 @@ opencode_run() {
     return 0
   fi
 
+  # Private temp file (mkdtemp). The plugin writes the display name only
+  # when the path stays inside Node's temp directory. A side model is
+  # ignored when CONAHCNUJ_SESSION_MODEL is the model this run selected.
+  local label_file
+  label_file="$(node -e 'const fs=require("fs");const os=require("os");const path=require("path");const dir=fs.mkdtempSync(path.join(os.tmpdir(),"conahcnuj-"));const file=path.join(dir,"label.txt");fs.writeFileSync(file,"");process.stdout.write(file);' 2>/dev/null || true)"
+  if [[ -n "${label_file}" ]]; then
+    CONAHCNUJ_MODEL_LABEL_FILE="${label_file}"
+    export CONAHCNUJ_MODEL_LABEL_FILE
+  fi
+  CONAHCNUJ_SESSION_MODEL="${model}"
+  export CONAHCNUJ_SESSION_MODEL
   opencode run --print-logs --format json --model "${model}" --dir "${workdir}" --title conahcnuj "${prompt}" || return 1
 }

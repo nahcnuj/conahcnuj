@@ -85,6 +85,9 @@ grep -q "already has commits; skipping implement" "${LOG}" && { echo "FAIL: the 
 grep -q "Created PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 
-git -C "${WORK}" log --oneline | grep -q "mock commit from opencode/first" || { echo "FAIL: the agent's implementation commit is missing"; exit 1; }
+# Here-string, not `git log | grep -q`: under `set -o pipefail` an early
+# grep -q exit SIGPIPEs git and fails the pipeline even on a match.
+ONELINE="$(git -C "${WORK}" log --oneline)"
+grep -q "mock commit from opencode/first" <<<"${ONELINE}" || { echo "FAIL: the agent's implementation commit is missing"; exit 1; }
 
 echo "conahcnuj stale default-branch ref flow passed"

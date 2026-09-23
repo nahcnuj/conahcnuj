@@ -28,6 +28,8 @@
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
 #   CONAHCNUJ_POLL_REVIEWS_MIN/MAX     review poll window (default 30/3600 s)
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
+#   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
+#                            the OpenCode display name (plugin) or the model id
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
@@ -44,6 +46,10 @@ POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
 POLL_REVIEWS_MIN="${CONAHCNUJ_POLL_REVIEWS_MIN:-30}"
 POLL_REVIEWS_MAX="${CONAHCNUJ_POLL_REVIEWS_MAX:-3600}"
 START_TIME="$(date +%s)"
+# Snapshot a caller-supplied trailer label. apply_driver_commit_model exports
+# CONAHCNUJ_COMMIT_MODEL for api-commit.sh, so a later commit must not treat
+# that export as a new explicit override.
+USER_COMMIT_MODEL="${CONAHCNUJ_COMMIT_MODEL:-}"
 
 # shellcheck source=lib/rate-limit.sh
 . "${HERE}/../lib/rate-limit.sh"
@@ -206,12 +212,38 @@ branch_has_commits() {
   [[ "${count}" -gt 0 ]]
 }
 
+# Pick the Model trailer label. An explicit CONAHCNUJ_COMMIT_MODEL wins.
+# Otherwise use the display name the OpenCode plugin wrote under os.tmpdir(), and
+# fall back to the provider/model id that produced the working-tree change.
+apply_driver_commit_model() {
+  if [[ -n "${USER_COMMIT_MODEL}" ]]; then
+    CONAHCNUJ_COMMIT_MODEL="${USER_COMMIT_MODEL}"
+    export CONAHCNUJ_COMMIT_MODEL
+    return 0
+  fi
+  CONAHCNUJ_COMMIT_MODEL=""
+  if [[ -n "${CONAHCNUJ_MODEL_LABEL_FILE:-}" && -f "${CONAHCNUJ_MODEL_LABEL_FILE}" ]]; then
+    local label
+    label="$(head -n 1 "${CONAHCNUJ_MODEL_LABEL_FILE}" | tr -d '\r')"
+    if [[ -n "${label}" ]]; then
+      CONAHCNUJ_COMMIT_MODEL="${label}"
+      export CONAHCNUJ_COMMIT_MODEL
+      return 0
+    fi
+  fi
+  if [[ -n "${OPENCODE_LAST_MODEL:-}" ]]; then
+    CONAHCNUJ_COMMIT_MODEL="${OPENCODE_LAST_MODEL}"
+    export CONAHCNUJ_COMMIT_MODEL
+  fi
+}
+
 # Commit every working-tree change as a Verified commit, then sync the local
 # branch to the remote head api-commit.sh created. The commit message always
 # comes from the coding agent (.commit-msg); the driver never invents a fixed
 # message, so when the agent left none out it refuses to commit. Test mode:
 # plain local commit (no network / no secret) so flows can be exercised
-# offline.
+# offline. api-commit.sh appends the Model trailer from CONAHCNUJ_COMMIT_MODEL;
+# test mode adds the same trailer with a second -m paragraph.
 commit_changes() {
   local message
   # .branch-name is metadata, never part of the implementation.
@@ -228,9 +260,14 @@ commit_changes() {
   fi
   echo "Using coding agent's commit message: ${message}" >&2
   git add -A
+  apply_driver_commit_model
   if [[ "${TEST_MODE}" == "1" ]]; then
     git config commit.gpgsign false
-    git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+    if [[ -n "${CONAHCNUJ_COMMIT_MODEL:-}" ]] && ! printf '%s\n' "${message}" | grep -qE '^[[:space:]]*[Mm]odel:'; then
+      git commit -q -m "${message}" -m "Model: ${CONAHCNUJ_COMMIT_MODEL}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+    else
+      git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+    fi
     return 0
   fi
   bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
@@ -542,6 +579,7 @@ implement() {
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
     if workdir_changed "${workdir}"; then
       echo "Model ${model} produced changes." >&2
+      OPENCODE_LAST_MODEL="${model}"
       return 0
     fi
     echo "Model ${model} produced no changes; falling through to the next model." >&2
