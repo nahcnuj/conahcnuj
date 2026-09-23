@@ -15,6 +15,10 @@
 #      security-review threads, pushes and re-verifies non-reviewer
 #      constraints, then replies on the PR
 #   4. exits only when the PR is ready to merge
+#   5. on an abnormal exit (timeout, no model produced changes, unexpected
+#      errors) automatically files a bug report issue in the repository so a
+#      run the driver could not resolve is never silently lost. The report
+#      carries the tail of the run's console output as a detailed error log
 #
 # Usage: conahcnuj <issue-or-pr-number>
 #
@@ -151,6 +155,167 @@ commit_changes() {
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git fetch origin "${branch}" >/dev/null 2>&1 || true
   git reset --hard "origin/${branch}" >/dev/null 2>&1 || true
+}
+
+# --- bug reporting ----------------------------------------------------------
+
+# When the driver terminates abnormally it files a bug report issue in the
+# repository it was working on, so a failed run is never silently lost and the
+# next driver invocation can pick the report up (the driver resolves issues).
+# Best-effort only: the report must never change the exit code, never trigger
+# an extra API call on a successful run, and must not recurse into another
+# report (a failed report files nothing further).
+BUG_REPORT_INPUT=""
+BUG_REPORTED="0"
+# Exit code captured by the EXIT trap at runtime ($? is not preserved across a
+# function call). Pre-declared so the trap string's reference is valid.
+bug_exit_code=""
+# Run-log capture. RUN_LOG_FILE receives a copy of the driver's stderr during
+# the run so an abnormal exit can attach its tail to the bug report as a
+# detailed error log; see run_log_start(). RUN_TEE_PID holds the background
+# reader that copies the stream, so the EXIT trap can wait for a complete log.
+RUN_LOG_FILE=""
+RUN_TEE_PID=""
+
+# Capture the driver's stderr into RUN_LOG_FILE while keeping it visible on the
+# saved stderr (fd3). A FIFO feeds a background line-reader that appends each
+# line to the log file synchronously; a plain `exec 2> >(tee ...)` could not
+# guarantee the file is flushed by the time the EXIT trap reads it, because tee
+# buffers its file output. run_log_finalize() closes the FIFO write end and
+# waits for the reader so the report always sees a complete log;
+# run_log_cleanup() removes the scratch files. Best-effort only: if the FIFO
+# cannot be created the run continues without a capture.
+run_log_start() {
+  RUN_LOG_FILE="$(mktemp)"
+  RUN_TEE_PID=""
+  local pipe
+  pipe="${RUN_LOG_FILE}.pipe"
+  if ! mkfifo "${pipe}" 2>/dev/null; then
+    echo "WARNING: could not create the run log FIFO; the bug report will carry no error log." >&2
+    rm -f "${RUN_LOG_FILE}"
+    RUN_LOG_FILE=""
+    return 0
+  fi
+  exec 3>&2
+  (
+    exec 0<"${pipe}"
+    while IFS= read -r line; do
+      line="${line%$'\r'}"
+      printf '%s\n' "${line}" >> "${RUN_LOG_FILE}" || true
+      printf '%s\n' "${line}" >&3 || true
+    done
+  ) &
+  RUN_TEE_PID=$!
+  exec 2>"${pipe}"
+}
+
+# Make the captured log complete and reap the background reader: close the
+# FIFO write end (fd2) so the reader sees EOF, wait for it to drain and exit,
+# then restore fd2 from the saved fd3. Safe to call when no capture is active.
+run_log_finalize() {
+  if [[ -z "${RUN_TEE_PID:-}" ]]; then
+    return 0
+  fi
+  exec 2>&-
+  wait "${RUN_TEE_PID}" 2>/dev/null || true
+  RUN_TEE_PID=""
+  exec 2>&3
+}
+
+# Remove the run-log scratch files. Safe to call when no capture is active.
+run_log_cleanup() {
+  if [[ -n "${RUN_LOG_FILE:-}" ]]; then
+    rm -f "${RUN_LOG_FILE}" "${RUN_LOG_FILE}.pipe" 2>/dev/null || true
+    RUN_LOG_FILE=""
+  fi
+}
+
+report_bug_title() {
+  local code="${1}" input="${2:-}"
+  if [[ -n "${input}" ]]; then
+    printf 'conahcnuj: failed to resolve #%s (exit %s)\n' "${input}" "${code}"
+  else
+    printf 'conahcnuj: driver terminated abnormally (exit %s)\n' "${code}"
+  fi
+}
+
+report_bug_body() {
+  local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}"
+  local ended label log_tail log_block
+  ended="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)"
+  label=""
+  if [[ -n "${input}" ]]; then
+    # Fully-qualified so a report filed in one repository still points
+    # unambiguously at the item being worked on in another one.
+    label="${owner}/${repo}#${input} (invoked as \`conahcnuj ${input}\`)"
+  else
+    label="unknown (no issue/PR number was given; repository: ${owner}/${repo})"
+  fi
+  log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
+  if [[ -n "${log_tail}" ]]; then
+    log_block="\`\`\`text
+${log_tail}
+\`\`\`"
+  else
+    log_block="_No driver output was captured before the exit._"
+  fi
+  cat <<EOF
+The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This issue was filed automatically so the driver bug can be fixed (re-run: conahcnuj ${input}).
+
+## Context
+
+- Issue/PR: ${label}
+- Branch: ${branch:-unknown}
+- HEAD: ${oid:-unknown}
+- Exit code: ${code} (how the conahcnuj driver process itself exited)
+- Ended at: ${ended:-unknown}
+
+## Error log
+
+${log_block}
+
+The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick this report up.
+EOF
+}
+
+# EXIT trap. The exit code is captured in the trap string ($? is not preserved
+# inside a function call), so the report always knows why the run died; on a
+# successful run (code 0) the report does nothing, so the happy-path flow tests
+# need no extra tape entry. The trap must never change the exit code.
+report_bug_on_exit() {
+  local code="${1:-}"
+  local owner="${BUG_REPORT_OWNER:-}" repo="${BUG_REPORT_REPO:-}" input="${BUG_REPORT_INPUT:-}"
+  local branch oid title body num
+  # Complete the run log (close the FIFO, reap the reader) so report_bug_body
+  # sees the whole console output, then always clean up, successful run or not.
+  run_log_finalize
+  if [[ -z "${code}" || "${code}" == "0" || "${BUG_REPORTED}" == "1" ]]; then
+    run_log_cleanup
+    return 0
+  fi
+  if [[ -z "${owner}" || -z "${repo}" ]]; then
+    echo "WARNING: abnormal exit (${code}) but no owner/repo is known; skipping the bug report." >&2
+    BUG_REPORTED="1"
+    run_log_cleanup
+    return 0
+  fi
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  title="$(report_bug_title "${code}" "${input}")"
+  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
+  echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
+  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
+    if [[ -n "${num}" ]]; then
+      echo "Bug report issue #${num} created: https://github.com/${owner}/${repo}/issues/${num}" >&2
+      BUG_REPORTED="1"
+      run_log_cleanup
+      return 0
+    fi
+  fi
+  echo "WARNING: could not file a bug report issue (exit code ${code})." >&2
+  BUG_REPORTED="1"
+  run_log_cleanup
+  return 0
 }
 
 # --- branches ---------------------------------------------------------------
@@ -478,7 +643,7 @@ ${summary}"; then
       review_requested="true"
       gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
 
-${summary}" >/dev/null
+${summary}" >/dev/null || echo "WARNING: could not post the review-feedback reply on PR #${pr}." >&2
       echo "Replied on PR #${pr} after addressing review feedback." >&2
       # The reply is itself a new comment and would change the review payload,
       # so re-fingerprint the payload as it appears AFTER the reply. Otherwise
@@ -601,6 +766,18 @@ main() {
   owner="${repo_info%%/*}"
   repo="${repo_info#*/}"
   echo "Repository: ${owner}/${repo}" >&2
+
+  # File a bug report issue when the run terminates abnormally. Registered only
+  # once owner/repo and the input are known: a usage error or a failed repo
+  # detection has no target to report to and stays quiet.
+  BUG_REPORT_OWNER="${owner}"
+  BUG_REPORT_REPO="${repo}"
+  BUG_REPORT_INPUT="${input}"
+  trap 'bug_exit_code=$?; report_bug_on_exit "${bug_exit_code}"' EXIT
+
+  # Capture the run's stderr into a log so an abnormal exit can attach a
+  # detailed error log to the bug report (see run_log_start).
+  run_log_start
 
   if [[ "${TEST_MODE}" != "1" ]]; then
     bash "${HERE}/../gh-app/setup-git.sh"
