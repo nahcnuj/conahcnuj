@@ -184,10 +184,23 @@ workdir_changed() {
 # model fall-through (which would otherwise keep asking every model to do work
 # that is already committed) and go straight to opening the PR.
 branch_has_commits() {
-  local default_branch="${1}" ref count
-  ref="${default_branch}"
-  if git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
-    ref="origin/${default_branch}"
+  local default_oid="${1}" default_branch="${2}" ref count
+  # Compare against the default branch's tip as freshly read from the API, not
+  # the local origin/<default> ref: the driver never fetches the default
+  # branch, so that ref goes stale once main advances through merged PRs. A
+  # feature branch pinned at the real main tip would then look like it already
+  # "has commits", the driver would skip implementation, and GitHub would
+  # reject the PR (createPullRequest: UNPROCESSABLE, no commits between base
+  # and head). That is what crashed the driver into the bug-report chain of
+  # issues #33/#34.
+  ref="${default_oid}"
+  if ! git rev-parse --verify -q "${ref}^{commit}" >/dev/null 2>&1; then
+    # The OID is not in this clone (offline tests feed a placeholder oid);
+    # fall back to the local default-branch refs.
+    ref="${default_branch}"
+    if git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
+      ref="origin/${default_branch}"
+    fi
   fi
   count="$(git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0')"
   [[ "${count}" -gt 0 ]]
@@ -639,7 +652,27 @@ drive() {
       continue
     fi
 
-    pr="$(ensure_pr "${owner}" "${repo}" "${pr}" "${branch}" "${base}" "${title}" "${body}" "${closes}")"
+    if ! pr="$(ensure_pr "${owner}" "${repo}" "${pr}" "${branch}" "${base}" "${title}" "${body}" "${closes}")"; then
+      # PR creation failed (GitHub refuses a PR with no diff between base and
+      # head, a vanished head ref, ...). There is nothing to gain by retrying
+      # as-is, so run an implementation round to give the branch real work and
+      # loop back. Dying here would just file the recursive "failed to resolve
+      # #N" bug report chain (issues #33/#34).
+      echo "PR could not be created for ${branch} -> ${base}; running an implementation round." >&2
+      local produced_change="false"
+      if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created."; then
+        produced_change="true"
+      fi
+      if workdir_changed "$(pwd)"; then
+        commit_changes
+        produced_change="true"
+      fi
+      if [[ "${produced_change}" != "true" ]]; then
+        echo "No changes could be produced to open the PR; backing off before retrying." >&2
+        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
+      fi
+      continue
+    fi
 
     if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
       # CI failed or the branch conflicts: implement again with that context.
@@ -758,7 +791,7 @@ start_issue() {
   # model fall-through and go straight to opening the PR for review. This is
   # what keeps the driver from spinning through every model asking for work
   # that is already done.
-  if branch_has_commits "${default_branch}"; then
+  if branch_has_commits "${default_oid}" "${default_branch}"; then
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
   elif workdir_changed "$(pwd)"; then
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
