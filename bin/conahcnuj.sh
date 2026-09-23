@@ -247,9 +247,9 @@ report_bug_body() {
   if [[ -n "${input}" ]]; then
     # Fully-qualified so a report filed in one repository still points
     # unambiguously at the item being worked on in another one.
-    label=" ${owner}/${repo}#${input} (invoked as \`conahcnuj ${input}\`)"
+    label="${owner}/${repo}#${input} (invoked as \`conahcnuj ${input}\`)"
   else
-    label=" unknown (no issue/PR number was given; repository: ${owner}/${repo})"
+    label="unknown (no issue/PR number was given; repository: ${owner}/${repo})"
   fi
   log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
   if [[ -n "${log_tail}" ]]; then
@@ -264,7 +264,7 @@ The conahcnuj driver terminated abnormally and could not resolve the item it was
 
 ## Context
 
-- Issue/PR:${label}
+- Issue/PR: ${label}
 - Branch: ${branch:-unknown}
 - HEAD: ${oid:-unknown}
 - Exit code: ${code} (how the conahcnuj driver process itself exited)
