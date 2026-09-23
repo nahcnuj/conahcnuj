@@ -88,8 +88,6 @@ grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAI
     "opencode: trying model opencode/first" \
     "ERROR: could not implement issue #14 with any available model." \
     > "${RUN_LOG_FILE}"
-  BUG_REPORT_OWNER="nahcnuj"
-  BUG_REPORT_REPO="conahcnuj"
   BUG_REPORT_INPUT="14"
   BUG_REPORTED="0"
   report_bug_on_exit "1"
