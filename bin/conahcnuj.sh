@@ -18,7 +18,9 @@
 #   5. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the repository so a
 #      run the driver could not resolve is never silently lost. The report
-#      carries the tail of the run's console output as a detailed error log
+#      carries the tail of the run's console output as a detailed error log and
+#      is labelled `bug` plus the platform it ran on (`os/windows` for Git Bash
+#      on Windows, `os/ubuntu` for Ubuntu hosts)
 #
 # Usage: conahcnuj <issue-or-pr-number>
 #
@@ -405,6 +407,25 @@ The driver exits this way only when it is unable to finish the run; a maintainer
 EOF
 }
 
+# Labels for the bug report issue: the required `bug` plus one environment
+# label describing the platform the failing run happened on. `os/windows` marks
+# Git Bash on Windows (MSYSTEM). WSL excludes itself by not setting MSYSTEM, and
+# the driver re-launches into Git Bash when it can, so WSL that could not
+# relaunch is correctly an Ubuntu host. `os/ubuntu` covers Ubuntu hosts
+# (WSL / CI / the Docker image) via os-release. Any other host gets only `bug`.
+# CONAHCNUJ_OS_RELEASE overrides the os-release file to read so offline tests
+# can pin the detection deterministically.
+report_bug_labels() {
+  local labels=("bug")
+  local os_release="${CONAHCNUJ_OS_RELEASE:-/etc/os-release}"
+  if [[ -n "${MSYSTEM:-}" ]]; then
+    labels+=("os/windows")
+  elif [[ -f "${os_release}" ]] && grep -qE '^ID=ubuntu[[:space:]]*$' "${os_release}"; then
+    labels+=("os/ubuntu")
+  fi
+  printf '%s\n' "${labels[@]}"
+}
+
 # EXIT trap. The exit code is captured in the trap string ($? is not preserved
 # inside a function call), so the report always knows why the run died; on a
 # successful run (code 0) the report does nothing, so the happy-path flow tests
@@ -430,8 +451,14 @@ report_bug_on_exit() {
   oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
   title="$(report_bug_title "${code}" "${input}")"
   body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
+  local -a labels=()
+  local lbl
+  while IFS= read -r lbl; do
+    [[ -n "${lbl}" ]] && labels+=("${lbl}")
+  done < <(report_bug_labels)
+  echo "Bug report issue labels: ${labels[*]}" >&2
   echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
-  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
+  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}" "${labels[@]}")"; then
     if [[ -n "${num}" ]]; then
       echo "Bug report issue #${num} created: https://github.com/${owner}/${repo}/issues/${num}" >&2
       BUG_REPORTED="1"
