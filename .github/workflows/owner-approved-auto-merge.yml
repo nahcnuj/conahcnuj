@@ -1,0 +1,48 @@
+name: Owner-approved auto-merge
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        description: Repository in owner/name format
+        required: true
+        type: string
+      pr-number:
+        description: Pull request number
+        required: true
+        type: string
+      head-sha:
+        description: Pull request head commit that received approval
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: conahcnuj-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable:
+    if: >-
+      github.event.pull_request.state == 'open' &&
+      github.event.pull_request.draft == false &&
+      github.event.review.state == 'approved' &&
+      github.event.review.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ inputs.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          gh pr merge "$PR_NUMBER" \
+            --repo "$REPOSITORY" \
+            --merge \
+            --auto \
+            --match-head-commit "$HEAD_SHA"

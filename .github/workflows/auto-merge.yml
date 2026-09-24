@@ -8,32 +8,10 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: conahcnuj-auto-merge-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   enable:
-    if: >-
-      github.event.pull_request.state == 'open' &&
-      github.event.pull_request.draft == false &&
-      github.event.review.state == 'approved' &&
-      github.event.review.author_association == 'OWNER'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Enable auto-merge
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          gh pr merge "$PR_NUMBER" \
-            --repo "$REPOSITORY" \
-            --merge \
-            --auto \
-            --match-head-commit "$HEAD_SHA"
+    uses: ./.github/workflows/owner-approved-auto-merge
+    with:
+      repository: ${{ github.repository }}
+      pr-number: ${{ github.event.pull_request.number }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
