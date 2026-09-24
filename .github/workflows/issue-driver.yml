@@ -44,17 +44,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # opencode is not preinstalled on runners; resolved the same way the
-      # e2e-opencode job does (authenticated release lookup, free model).
+      # opencode is not preinstalled on runners; shared with ci.yml through the
+      # install-opencode composite action (authenticated release lookup so
+      # shared runner IPs do not hit the API rate limit).
       - name: Install opencode
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/anomalyco/opencode/releases/latest | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-          VER="${TAG#v}"
-          test -n "$VER"
-          curl -fsSL https://opencode.ai/install | bash -s -- --version "$VER"
-          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/install-opencode
 
       # The driver reads gh-app/app.env like any local run. The private key is
       # staged from the sealed secret, outside the work tree, so `git add -A`
