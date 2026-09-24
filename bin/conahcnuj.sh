@@ -243,7 +243,7 @@ branch_has_commits() {
 # Otherwise use the display name the OpenCode plugin wrote under os.tmpdir(), and
 # fall back to the provider/model id that produced the working-tree change.
 apply_driver_commit_model() {
-if [[ -n "${USER_COMMIT_MODEL}" && "${TEST_MODE:-0}" != "1" ]]; then
+  if [[ -n "${USER_COMMIT_MODEL}" && "${TEST_MODE:-0}" != "1" ]]; then
     CONAHCNUJ_COMMIT_MODEL="${USER_COMMIT_MODEL}"
     export CONAHCNUJ_COMMIT_MODEL
     return 0
@@ -1102,7 +1102,7 @@ main() {
   repo="${repo_info#*/}"
   echo "Repository: ${owner}/${repo}" >&2
 
-# File a bug report issue when the run terminates abnormally. The report goes
+  # File a bug report issue when the run terminates abnormally. The report goes
   # to the conahcnuj repository (the driver's own project), not the repository
   # being worked on, so the filing never depends on the GitHub App having write
   # access to the working repo. Registered only once the owner/repo and the
