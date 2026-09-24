@@ -28,10 +28,11 @@
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
 #   CONAHCNUJ_BUG_REPO       owner/repo where abnormal exits file their bug
 #                            report (default: the conahcnuj repo resolved from
-#                            gh-app/app.env, else the driver's own origin remote,
-#                            else derived from the GitHub App's own installation
-#                            when a run terminates abnormally, else the
-#                            conahcnuj repository itself — never the working
+#                            gh-app/app.env, else the driver's own origin remote
+#                            — when that origin is not the repository being
+#                            worked on — else derived from the GitHub App's own
+#                            installation when a run terminates abnormally, else
+#                            the conahcnuj repository itself — never the working
 #                            repository)
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
@@ -381,17 +382,23 @@ run_log_cleanup() {
 #   1. the CONAHCNUJ_BUG_REPO environment override
 #   2. a CONAHCNUJ_BUG_REPO setting in gh-app/app.env (or app.env.example)
 #   3. the origin remote of the conahcnuj checkout the driver runs from (the
-#      dev / test workflow, where the driver is invoked from its own clone)
+#      dev / test workflow, where the driver is invoked from its own clone),
+#      unless that checkout's origin is the repository being worked on: the
+#      report must go to the driver's own project, never to the working
+#      repository (issue #40 — the App may lack write access where the run
+#      failed, and the bug is about the driver anyway)
 #   4. nothing: printed empty so the caller can defer the last resort. An
 #      installed driver (~/.local/bin) has neither a configured value nor an
 #      origin remote, and the conahcnuj repo can then only be derived from the
 #      GitHub App itself (bug_report_app_repo), which costs an API call. That
 #      lookup is deferred to report_bug_on_exit so a successful run never pays
 #      for it.
+# Args: the "owner/repo" being worked on (optional; pass it so an origin that
+# happens to be the working repository is not mistaken for the driver's own).
 # Placeholder values ("<...>") and empty settings are treated as unset.
 # Best-effort: prints nothing and returns 0 on every non-detectable path.
 bug_report_repo() {
-  local value url
+  local value url work_pair="${1:-}"
   if [[ -n "${CONAHCNUJ_BUG_REPO:-}" ]]; then
     printf '%s\n' "${CONAHCNUJ_BUG_REPO}"
     return 0
@@ -403,7 +410,15 @@ bug_report_repo() {
   fi
   url="$(git -C "${HERE}/.." remote get-url origin 2>/dev/null || true)"
   if [[ -n "${url}" ]]; then
-    printf '%s' "${url}" | sed -E 's#.*github\.com[:/]##; s#\.git$##'
+    local origin_pair
+    origin_pair="$(printf '%s' "${url}" | sed -E 's#.*github\.com[:/]##; s#\.git$##')"
+    # GitHub treats owner/repo case-insensitively; compare folded so "Forks"
+    # style casing never re-introduces the working repository. An origin that
+    # is the working repository is ignored so the caller can fall through to
+    # the conahcnuj-targeted lookups instead.
+    if [[ -z "${work_pair}" ]] || [[ "${origin_pair,,}" != "${work_pair,,}" ]]; then
+      printf '%s\n' "${origin_pair}"
+    fi
   fi
 }
 
@@ -1070,7 +1085,7 @@ main() {
   # run terminates abnormally (see report_bug_on_exit), so a successful run
   # never pays for that lookup.
   local bug_pair bug_owner bug_repo
-  bug_pair="$(bug_report_repo)"
+  bug_pair="$(bug_report_repo "${owner}/${repo}")"
   bug_owner=""
   bug_repo=""
   if [[ -n "${bug_pair}" ]]; then

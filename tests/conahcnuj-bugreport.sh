@@ -162,6 +162,16 @@ unset CONAHCNUJ_REPO
   if [[ -n "${DRIVER_REPO}" ]]; then
     [[ "${out2}" == "${DRIVER_REPO}" ]] || { echo "FAIL: auto-detected report repo ${out2} (expected ${DRIVER_REPO})"; exit 1; }
   fi
+  # ... but an origin that IS the working repository is never used as the
+  # report target (issue #40): with the working repo passed in, nothing is
+  # printed so report_bug_on_exit falls through to the conahcnuj-targeted
+  # lookups instead of filing the report in the very repo the run failed on.
+  if [[ -n "${DRIVER_REPO}" ]]; then
+    out3="$(bug_report_repo "${DRIVER_REPO}")"
+    [[ -z "${out3}" ]] || { echo "FAIL: the working repository ${DRIVER_REPO} was accepted as the report target"; exit 1; }
+    out4="$(bug_report_repo "naHcnuj/CoNahcnUj")"
+    [[ -z "${out4}" ]] || { echo "FAIL: case-variant of the working repository was accepted as the report target (${out4})"; exit 1; }
+  fi
   run_log_cleanup
 )
 

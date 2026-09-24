@@ -103,8 +103,9 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_BUG_REPO=owner/repo`（バグ報告の
 格納先。未設定時は `gh-app/app.env` の設定値、さらに無ければドライバ自身の
-origin remote、異常終了時は GitHub App のインストールから導出、最後に
-conahcnuj リポジトリへフォールバック。作業中のリポジトリへは落とさない）、
+origin remote（作業中のリポジトリと一致する場合は使わない）、異常終了時は
+GitHub App のインストールから導出、最後に conahcnuj リポジトリへ
+フォールバック。作業中のリポジトリへは落とさない）、
 `CONAHCNUJ_MAX_SECONDS`、ポーリング幅などはすべて省略可能です。
 
 ## issue の自動対応（GitHub Actions）
