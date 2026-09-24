@@ -36,6 +36,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
 | `docker-run.sh` | 上記イメージでドライバを実行するラッパー（対象リポジトリを `/work` へマウント、コンテナ用 `app.env` を生成し秘密鍵を読み取り専用マウント） | テストではなく**実走行**用（実キー・ネットワーク・opencode 設定が必要） |
 | `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
+| `.github/workflows/issue-driver.yml` | issue が open されたらドライバで自動対応を試みる（issue→PR まで。失敗時はバグ報告 issue） | タイムアウトは Actions 側で制御（`timeout-minutes: 60`）。`CONAHCNUJ_MAX_SECONDS=3540` でドライバが先に自己終了しバグ報告を残す。repo secrets `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY`（PEM）が必要。bot 自身が作成した issue（`<slug>[bot]`）は再帰防止のためスキップ。`GITHUB_TOKEN` は `contents: read` のみ（書き込みは全て App トークン） |
 
 ## ローカル検証手順
 

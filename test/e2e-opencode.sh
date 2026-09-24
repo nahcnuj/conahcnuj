@@ -18,11 +18,13 @@ run_e2e_model() {
   echo "=== tool diagnostics ==="
   echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
 
-  # Bad: a bash call that neither succeeded (0), nor failed the
-  # sandbox way (2: no remote), nor was hook-blocked (git commit
-  # never executes: no exit at all), nor is git vc/api-commit.sh
-  # failing due to missing remote/token (exit 1 is expected).
-  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != 0 and .exit != 2 and (.exit != 1 or ((.cmd // "") | contains("git vc") | not) and ((.cmd // "") | contains("api-commit.sh") | not)) and (.exit != null or ((.cmd // "") | contains("git commit") | not))) | [.cmd, .exit] | @tsv' || true)"
+  # Bad: a bash call that concluded with an unexplained failure -
+  # neither success (0), nor the sandbox norm (2: no remote), nor a
+  # git vc/api-commit.sh call failing due to missing remote/token
+  # (exit 1 is expected). Calls with no exit (null) never concluded
+  # and are benign: the model often interrupts a long command, and a
+  # hook-blocked `git commit` likewise never executes.
+  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 2 and (.exit != 1 or ((.cmd // "") | contains("git vc") | not) and ((.cmd // "") | contains("api-commit.sh") | not))) | [.cmd, .exit] | @tsv' || true)"
   if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then
     return 0
   fi
