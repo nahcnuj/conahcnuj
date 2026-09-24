@@ -32,12 +32,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: conahcnuj
-    # Do not chase the driver's own outputs: bug-report issues are authored by
-    # <APP_SLUG>[bot], and running the driver on them would loop forever.
-    # Secrets are not pre-checked here: a missing one fails the run loudly,
-    # and the driver files its own bug report (no silent skip).
-    if: >-
-      github.event.issue.user.login != format('{0}[bot]', secrets.APP_SLUG)
+    # Do not chase the driver's own outputs: its bug-report issues are
+    # authored by bots, and running the driver on them would loop forever.
+    # A job-level `if` cannot read the `secrets` context (and APP_SLUG is
+    # not needed here), so any bot-authored issue is skipped by type. Missing
+    # secrets are not pre-checked either: the run fails loudly and the driver
+    # files its own bug report (no silent skip).
+    if: github.event.issue.user.type != 'Bot'
     defaults:
       run:
         shell: bash
