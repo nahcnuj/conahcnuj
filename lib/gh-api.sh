@@ -344,18 +344,19 @@ gh_api_review_summary() {
   done < <(printf '%s' "${reviews_part}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}' || true)
 
   # Issue-level comments.
-  local comments_part bn
+  local comments_part comment_matches bn
   comments_part="$(printf '%s' "${json}" | sed 's/"reviewThreads":.*//' | sed -n 's/.*"comments":{"nodes":\(\[[^]]*\]\).*/\1/p')"
-  if [[ -n "${comments_part}" ]]; then
+  comment_matches="$(printf '%s' "${comments_part}" | grep -oE '"body":"[^"]*"' | grep -v '"body":"<!-- conahcnuj-continuation -->' || true)"
+  if [[ -n "${comment_matches}" ]]; then
     echo "COMMENTS:"
   fi
   while IFS= read -r bn; do
     [[ -z "${bn}" ]] && continue
     local bd
     bd="$(gh_api_json_str "${bn}" "body")"
-    [[ -z "${bd}" ]] && bd="(no body)"
+    [[ -n "${bd}" ]] || bd="(no body)"
     printf -- '- %s\n' "${bd}"
-  done < <(printf '%s' "${comments_part}" | grep -oE '"body":"[^"]*"' || true)
+  done < <(printf '%s\n' "${comment_matches}")
 
   # Inline review threads: skip resolved ones, quote unresolved feedback.
   local threads_part tn
@@ -377,7 +378,7 @@ gh_api_review_summary() {
 # no reviews/comments/threads) is never mistaken for fresh feedback.
 gh_api_review_fingerprint() {
   local raw="${1}" matches="" decision=""
-  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' || true)"
+  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '"body":"<!-- conahcnuj-continuation -->' || true)"
   if [[ -z "${matches}" ]]; then
     # Only a decision that means "do work now" counts as feedback on its own;
     # REVIEW_REQUIRED / empty just mean "waiting for reviewers".

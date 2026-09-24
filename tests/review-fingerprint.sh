@@ -14,6 +14,7 @@ REPO="$(cd "${HERE}/.." && pwd)"
 
 EMPTY_REVIEWS='{"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}'
 NO_DECISION='{"data":{"repository":{"pullRequest":{"reviewDecision":null,"reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}'
+CONTINUATION_ONLY='{"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[{"body":"<!-- conahcnuj-continuation -->\n継続するにはこちらをクリック","author":{"login":"conahcnuj[bot]"}}]},"reviewThreads":{"nodes":[]}}}}'
 CHANGES_EMPTY_BODY='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}'
 WITH_FEEDBACK='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Nice work","author":{"login":"reviewer"}}]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Inline note"}]}}]}}}}'
 
@@ -24,6 +25,9 @@ echo "empty reviews / REVIEW_REQUIRED -> empty: passed"
 
 [[ -z "$(gh_api_review_fingerprint "${NO_DECISION}")" ]] || fail "empty reviews / no decision must fingerprint empty"
 echo "empty reviews / no decision -> empty: passed"
+
+[[ -z "$(gh_api_review_fingerprint "${CONTINUATION_ONLY}")" ]] || fail "continuation comment must not be treated as review feedback"
+echo "continuation comment -> empty: passed"
 
 [[ -n "$(gh_api_review_fingerprint "${CHANGES_EMPTY_BODY}")" ]] || fail "CHANGES_REQUESTED with empty body must fingerprint non-empty"
 echo "CHANGES_REQUESTED with empty body -> non-empty: passed"
