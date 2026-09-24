@@ -17,7 +17,7 @@ jobs:
     if: >-
       github.event.pull_request.state == 'open' &&
       github.event.pull_request.draft == false &&
-      github.event.review.state == 'APPROVED' &&
+      github.event.review.state == 'approved' &&
       github.event.review.author_association == 'OWNER'
     runs-on: ubuntu-latest
     timeout-minutes: 5
