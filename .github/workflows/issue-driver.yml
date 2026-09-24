@@ -33,12 +33,11 @@ jobs:
     timeout-minutes: 60
     environment: conahcnuj
     # Do not chase the driver's own outputs: bug-report issues are authored by
-    # <APP_SLUG>[bot], and running the driver on them would loop forever. All
-    # four secrets are required for the run to be meaningful.
+    # <APP_SLUG>[bot], and running the driver on them would loop forever.
+    # Secrets are not pre-checked here: a missing one fails the run loudly,
+    # and the driver files its own bug report (no silent skip).
     if: >-
-      github.event.issue.user.login != format('{0}[bot]', secrets.APP_SLUG) &&
-      secrets.APP_ID != '' && secrets.INSTALLATION_ID != '' &&
-      secrets.APP_SLUG != '' && secrets.PRIVATE_KEY != ''
+      github.event.issue.user.login != format('{0}[bot]', secrets.APP_SLUG)
     defaults:
       run:
         shell: bash
