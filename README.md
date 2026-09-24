@@ -107,6 +107,9 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 
 このリポジトリの `.github/workflows/issue-driver.yml` は、issue が open される
 と上記ドライバを Actions 上で自動実行して対応を試みるワークフローです。
+open 中の draft でない同一リポジトリの PR に `approved` 以外の review が
+submit・編集・dismiss された場合も、PR 番号でドライバを再開します。
+同じ PR で実行中の場合は、concurrency により新しい実行を待機させます。
 失敗時はドライバがバグ報告 issue を自動作成し、その issue（bot が開いたもの）
 は再帰防止のためワークフローから除外されます。
 
