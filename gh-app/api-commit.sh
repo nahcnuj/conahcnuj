@@ -355,6 +355,11 @@ if [[ -z "${COMMIT_SHA}" ]]; then
   exit 1
 fi
 
-git pull origin "${BRANCH}"
+# Sync the local checkout to the server-side commit just created (issue #49:
+# the commit is made directly on GitHub, so without a pull the local branch
+# never sees it). Best-effort: a transient local sync failure must not abort
+# a run whose Verified commit already exists; callers tolerate the remote
+# being ahead and re-sync with fetch/reset afterwards.
+git pull origin "${BRANCH}" >/dev/null || echo "WARNING: could not sync the local branch to ${BRANCH}; the commit was created on the remote." >&2
 
 printf '%s' "${COMMIT_SHA}"
