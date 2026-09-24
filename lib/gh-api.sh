@@ -488,12 +488,19 @@ gh_api_post_comment() {
 }
 
 # Create an issue. Args: owner repo title body. Output: issue number.
+# On a non-2xx response the API error body is echoed to stderr so a failed
+# bug report (or any other issue creation) says why, instead of failing
+# silently under set -e inside the caller's command substitution.
 gh_api_create_issue() {
   local owner="${1}" repo="${2}" title="${3}" body="${4}"
   local payload
   payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\"}"
-  local json
-  json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")"
+  local json rc=0
+  json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")" || rc=$?
+  if [[ ${rc} -ne 0 ]]; then
+    echo "ERROR: create issue ${owner}/${repo} failed: ${json}" >&2
+    return 1
+  fi
   gh_api_json_num "${json}" "number"
 }
 

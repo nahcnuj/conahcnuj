@@ -28,7 +28,9 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
-├── .github/workflows/ci.yml   # GitHub Actions (Ubuntu / Windows)
+├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
+├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
+├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
 ├── .gitignore
 └── AGENTS.md
 ```
@@ -53,6 +55,11 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
 GitHub 自身にコミットを作成させるしかない。
 
+`CONAHCNUJ_COMMIT_MODEL` にラベル（例: `Grok 4.7 (medium)`）が入っているとき、
+コミット本文の末尾へ Git trailer `Model: <ラベル>` を足す。未設定なら足さない。
+OpenCode ではプラグインがセッションの表示名と variant をこの変数へ入れる。
+別のエージェントや手元のシェルは、同じ変数に好きな文字列を入れて使える。
+
 ## issue駆動自律開発（conahcnuj）
 
 `bin/conahcnuj.sh`（`install.ps1` により `conahcnuj` コマンドとして配備）は、
@@ -69,8 +76,10 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    作成して実装する。コミットメッセージは必ずコーディングエージェントが
    決める（`.commit-msg`。未指定ならドライバはコミットしない）。ブランチ名も
    エージェントが決められる（`.branch-name`。未指定時のみドライバが
-   `conahcnuj/<番号>-<スラッグ>` で採番する）。実装は使用可能な全モデルを
-   順に試し、最初に作業ツリーへ変更を生んだモデルを採用する。
+   `conahcnuj/<番号>-<スラッグ>` で採番する）。最初のモデルが作業中に
+   rate limit などのエラーで進められなくなった場合、opencode の同じ
+   `sessionID` と現在の作業ツリーを次のモデルへ引き継ぎ、完了まで継続する。
+   セッションIDを取得できなかった場合だけ新しいセッションで作業ツリーから再開する。
 1. PR を作成し、レビュアー以外の制約（status checks・mergeable）が通るまで
    待ってからレビューを依頼する。PR の本文はクローズ対象 issue の内容を基に
    `Closes #<番号>` と合わせて自動生成され、既存 PR を再利用した場合も同期される。
@@ -88,15 +97,39 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
-自動マージは行わない。環境変数の上書き（時間予算・ポーリング幅）や
+ドライバ自身は自動マージを行わない。環境変数の上書き（時間予算・ポーリング幅）や
 offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `bin/conahcnuj.sh` のヘッダーコメントを参照。
 
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_BUG_REPO=owner/repo`（バグ報告の
 格納先。未設定時は `gh-app/app.env` の設定値、さらに無ければドライバ自身の
-origin remote、異常終了時は GitHub App のインストールから導出、最後に作業中
-リポジトリへフォールバック）、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
-すべて省略可能です。
+origin remote、異常終了時は GitHub App のインストールから導出、最後に
+conahcnuj リポジトリへフォールバック。作業中のリポジトリへは落とさない）、
+`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などはすべて省略可能です。
+
+## issue の自動対応（GitHub Actions）
+
+このリポジトリの `.github/workflows/issue-driver.yml` は、issue が open される
+と上記ドライバを Actions 上で自動実行して対応を試みるワークフローです。
+失敗時はドライバがバグ報告 issue を自動作成し、その issue（bot が開いたもの）
+は再帰防止のためワークフローから除外されます。
+
+- **タイムアウトは Actions 側で制御**します（ジョブの `timeout-minutes: 60`）。
+  `CONAHCNUJ_MAX_SECONDS=3540` をその直下に設定し、ジョブが強制終了される前に
+  ドライバが自己終了してバグ報告を残せるようにしています。予算を変えるときは
+  両方を合わせて変更してください。
+- 必要な repo secrets: `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /
+  `PRIVATE_KEY`（App の秘密鍵 PEM）。runner 上の `GITHUB_TOKEN` は
+  `contents: read` のみで、書き込み（ブランチ・コミット・PR・レビュー依頼・
+  コメント）はすべてローカル実行と同じく App のインストールトークンで行われます。
+
+## owner 承認後の自動マージ（GitHub Actions）
+
+`.github/workflows/auto-merge.yml` は、owner が open 中の draft でない PR を
+approve すると auto-merge を有効化します。必要な status checks が既に green なら
+その場でマージされ、まだ green でなければ条件達成後にマージされます。書き込みには
+GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
+auto-merge が有効になっている必要があります。
 
 ## 隔離環境で実行する（Docker）
 

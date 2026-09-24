@@ -7,15 +7,15 @@
 # (.branch-name; when the agent leaves none out, the driver picks one). A PR
 # number given on the command line is detected and resumed automatically:
 #   1. checks out the latest default branch and implements the issue with
-#      opencode (falling through every available model until one produces
-#      changes), committing only with the agent's .commit-msg
+#      opencode (handing the same session and working tree to another model
+#      when one fails), committing only with the agent's .commit-msg
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
 #      mergeability) passes, then requests review
 #   3. polls the review status; addresses comments / requested changes /
 #      security-review threads, pushes and re-verifies non-reviewer
 #      constraints, then replies on the PR
 #   4. exits only when the PR is ready to merge
-#   5. on an abnormal exit (timeout, no model produced changes, unexpected
+#   5. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the conahcnuj
 #      repository (the driver's own project, not the repository being
 #      worked on), so a run the driver could not resolve is never silently
@@ -30,12 +30,15 @@
 #                            report (default: the conahcnuj repo resolved from
 #                            gh-app/app.env, else the driver's own origin remote,
 #                            else derived from the GitHub App's own installation
-#                            when a run terminates abnormally, else the working
+#                            when a run terminates abnormally, else the
+#                            conahcnuj repository itself — never the working
 #                            repository)
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
 #   CONAHCNUJ_POLL_REVIEWS_MIN/MAX     review poll window (default 30/3600 s)
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
+#   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
+#                            the OpenCode display name (plugin) or the model id
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
@@ -52,6 +55,10 @@ POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
 POLL_REVIEWS_MIN="${CONAHCNUJ_POLL_REVIEWS_MIN:-30}"
 POLL_REVIEWS_MAX="${CONAHCNUJ_POLL_REVIEWS_MAX:-3600}"
 START_TIME="$(date +%s)"
+# Snapshot a caller-supplied trailer label. apply_driver_commit_model exports
+# CONAHCNUJ_COMMIT_MODEL for api-commit.sh, so a later commit must not treat
+# that export as a new explicit override.
+USER_COMMIT_MODEL="${CONAHCNUJ_COMMIT_MODEL:-}"
 
 # shellcheck source=lib/rate-limit.sh
 . "${HERE}/../lib/rate-limit.sh"
@@ -224,12 +231,38 @@ branch_has_commits() {
   [[ "${count}" -gt 0 ]]
 }
 
+# Pick the Model trailer label. An explicit CONAHCNUJ_COMMIT_MODEL wins.
+# Otherwise use the display name the OpenCode plugin wrote under os.tmpdir(), and
+# fall back to the provider/model id that produced the working-tree change.
+apply_driver_commit_model() {
+  if [[ -n "${USER_COMMIT_MODEL}" ]]; then
+    CONAHCNUJ_COMMIT_MODEL="${USER_COMMIT_MODEL}"
+    export CONAHCNUJ_COMMIT_MODEL
+    return 0
+  fi
+  CONAHCNUJ_COMMIT_MODEL=""
+  if [[ -n "${CONAHCNUJ_MODEL_LABEL_FILE:-}" && -f "${CONAHCNUJ_MODEL_LABEL_FILE}" ]]; then
+    local label
+    label="$(head -n 1 "${CONAHCNUJ_MODEL_LABEL_FILE}" | tr -d '\r')"
+    if [[ -n "${label}" ]]; then
+      CONAHCNUJ_COMMIT_MODEL="${label}"
+      export CONAHCNUJ_COMMIT_MODEL
+      return 0
+    fi
+  fi
+  if [[ -n "${OPENCODE_LAST_MODEL:-}" ]]; then
+    CONAHCNUJ_COMMIT_MODEL="${OPENCODE_LAST_MODEL}"
+    export CONAHCNUJ_COMMIT_MODEL
+  fi
+}
+
 # Commit every working-tree change as a Verified commit, then sync the local
 # branch to the remote head api-commit.sh created. The commit message always
 # comes from the coding agent (.commit-msg); the driver never invents a fixed
 # message, so when the agent left none out it refuses to commit. Test mode:
 # plain local commit (no network / no secret) so flows can be exercised
-# offline.
+# offline. api-commit.sh appends the Model trailer from CONAHCNUJ_COMMIT_MODEL;
+# test mode adds the same trailer with a second -m paragraph.
 commit_changes() {
   local message
   # .branch-name is metadata, never part of the implementation.
@@ -246,9 +279,14 @@ commit_changes() {
   fi
   echo "Using coding agent's commit message: ${message}" >&2
   git add -A
+  apply_driver_commit_model
   if [[ "${TEST_MODE}" == "1" ]]; then
     git config commit.gpgsign false
-    git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+    if [[ -n "${CONAHCNUJ_COMMIT_MODEL:-}" ]] && ! printf '%s\n' "${message}" | grep -qE '^[[:space:]]*[Mm]odel:'; then
+      git commit -q -m "${message}" -m "Model: ${CONAHCNUJ_COMMIT_MODEL}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+    else
+      git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+    fi
     return 0
   fi
   bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
@@ -481,17 +519,18 @@ report_bug_on_exit() {
   # layout with neither CONAHCNUJ_BUG_REPO nor the driver's origin remote):
   # derive the conahcnuj repo from the GitHub App's own installation now. Only
   # the failure path ever pays for this lookup. When it still resolves to
-  # nothing, fall back to the working repository (the historical behaviour) so
-  # a run that could not be resolved is never silently lost.
+  # nothing, fall back to the conahcnuj repository itself — never the working
+  # repository, which is exactly what issue #40 asks to stop doing (the App
+  # may lack write access there, and the bug is about the driver anyway).
   if [[ -z "${owner}" || -z "${repo}" ]]; then
     pair="$(bug_report_app_repo)"
     if [[ -n "${pair}" ]]; then
       owner="${pair%%/*}"
       repo="${pair#*/}"
     else
-      owner="${work_owner}"
-      repo="${work_repo}"
-      echo "WARNING: no bug-report repository could be resolved; filing the report into the working repository ${owner}/${repo}." >&2
+      owner="nahcnuj"
+      repo="conahcnuj"
+      echo "WARNING: no bug-report repository could be resolved; filing the report into ${owner}/${repo} (the driver's own repository, never the working repository)." >&2
     fi
   fi
   if [[ -z "${owner}" || -z "${repo}" ]]; then
@@ -515,7 +554,7 @@ report_bug_on_exit() {
       return 0
     fi
   fi
-  echo "WARNING: could not file a bug report issue (exit code ${code})." >&2
+  echo "WARNING: could not file a bug report issue in ${owner}/${repo} (exit code ${code})." >&2
   BUG_REPORTED="1"
   run_log_cleanup
   return 0
@@ -648,25 +687,43 @@ resolve_agent_branch_name() {
 
 # --- implementation ---------------------------------------------------------
 
-# Run opencode with each available model until one produces working-tree
-# changes. Records which models were tried in OPENCODE_USED_MODELS.
+# Run opencode until one model completes the work. A failed model hands its
+# session and working tree to the next model. Records tried models and handoffs.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed
   workdir="$(pwd)"
   echo "Implementing with available models..." >&2
   OPENCODE_USED_MODELS=""
+  OPENCODE_HANDOFFS=""
+  OPENCODE_SESSION_ID=""
   for model in $(opencode_get_models); do
     [[ -z "${model}" ]] && continue
     check_timeout
-    opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" || true
+    if [[ -n "${OPENCODE_SESSION_ID}" ]]; then
+      echo "Handing off session ${OPENCODE_SESSION_ID} from ${previous_model} to ${model}." >&2
+      OPENCODE_HANDOFFS="${OPENCODE_HANDOFFS}${previous_model}->${model} "
+    elif [[ -n "${previous_model}" ]]; then
+      echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
+    fi
+    run_failed="false"
+    if ! opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}"; then
+      run_failed="true"
+    fi
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
-    if workdir_changed "${workdir}"; then
-      echo "Model ${model} produced changes." >&2
+    if workdir_changed "${workdir}" && [[ -s "${workdir}/.commit-msg" ]]; then
+      echo "Model ${model} completed the work." >&2
+      OPENCODE_LAST_MODEL="${model}"
       return 0
     fi
-    echo "Model ${model} produced no changes; falling through to the next model." >&2
+    rm -f "${workdir}/.commit-msg"
+    previous_model="${model}"
+    if [[ "${run_failed}" == "true" ]]; then
+      echo "Model ${model} failed before completing the work; handing off to the next model." >&2
+    else
+      echo "Model ${model} produced no complete work; handing off to the next model." >&2
+    fi
   done
-  echo "ERROR: no available model produced changes (tried: ${OPENCODE_USED_MODELS:-none})." >&2
+  echo "ERROR: no available model completed the work (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
   return 1
 }
 
@@ -815,7 +872,7 @@ drive() {
         produced_change="true"
       fi
       if [[ "${produced_change}" != "true" ]]; then
-        echo "No model produced changes for the failing constraints; backing off before re-checking." >&2
+        echo "No model completed work for the failing constraints; backing off before re-checking." >&2
         rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
       fi
       continue

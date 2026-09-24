@@ -14,8 +14,8 @@
 #
 # Also covers the auto-detection chain: the driver's own origin remote when no
 # CONAHCNUJ_BUG_REPO is set, the App-derived target (installed layout with no
-# origin and no config), and the working-repository fallback when even that is
-# unavailable offline.
+# origin and no config), and the final conahcnuj fallback when even that is
+# unavailable offline — never the working repository (issue #40).
 #
 # No secrets, no network.
 set -euo pipefail
@@ -104,8 +104,9 @@ fi
 # An installed driver (~/.local/bin deployed by install.ps1) sits next to its
 # lib/ and gh-app/ but outside any git checkout, so the origin-remote guess of
 # scenario 2 is unavailable. In offline test mode the App-derived lookup is
-# skipped too, so the report falls back to the working repository with a
-# warning and the driver still exits cleanly (never silently dead).
+# skipped too, so the report falls back to the conahcnuj repository itself with
+# a warning — never to the working repository (issue #40) — and the driver
+# still exits cleanly (never silently dead).
 INST="${ROOT}/installed"
 mkdir -p "${INST}/bin" "${INST}/lib" "${INST}/gh-app"
 cp "${REPO}/bin/conahcnuj.sh" "${INST}/bin/conahcnuj.sh"
@@ -120,8 +121,9 @@ RC3=0
   CONAHCNUJ_MAX_SECONDS=120 bash "${INST}/bin/conahcnuj.sh" 14 < "${TAPE}"
 ) > "${LOG3}" 2>&1 || RC3=$?
 [[ ${RC3} -eq 1 ]] || { echo "FAIL: scenario 3 driver exit code ${RC3} (expected 1)"; exit 1; }
-grep -q "WARNING: no bug-report repository could be resolved; filing the report into the working repository nahcnuj/makamujo" "${LOG3}" || { echo "FAIL: scenario 3 did not warn about the working-repository fallback"; exit 1; }
-grep -q "filing a bug report issue in nahcnuj/makamujo" "${LOG3}" || { echo "FAIL: scenario 3 did not file into the fallback repository"; exit 1; }
+grep -q "WARNING: no bug-report repository could be resolved; filing the report into nahcnuj/conahcnuj" "${LOG3}" || { echo "FAIL: scenario 3 did not warn about the conahcnuj fallback"; exit 1; }
+grep -q "filing a bug report issue in nahcnuj/conahcnuj" "${LOG3}" || { echo "FAIL: scenario 3 did not file into the conahcnuj fallback repository"; exit 1; }
+grep -q "filing a bug report issue in nahcnuj/makamujo" "${LOG3}" && { echo "FAIL: scenario 3 fell back to the working repository"; exit 1; }
 unset CONAHCNUJ_REPO
 
 # --- unit: the bug report body carries a detailed error log -----------------
