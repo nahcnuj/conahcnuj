@@ -53,8 +53,7 @@ opencode_build_handoff_prompt() {
 # OPENCODE_SESSION_ID so a later model can continue the same conversation.
 # Args: title body workdir model [extra_context] [session_id] [previous_model]
 opencode_run() {
-  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}"
-  local session_id="${6:-}" previous_model="${7:-}"
+  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}"
   local prompt
   if [[ -n "${session_id}" ]]; then
     prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
