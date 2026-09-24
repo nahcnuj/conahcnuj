@@ -43,6 +43,16 @@ test_opencode_build_prompt_fresh() {
   echo "opencode_build_prompt (fresh round, branch-name offered) passed"
 }
 
+test_opencode_build_handoff_prompt() {
+  local prompt
+  prompt="$(opencode_build_handoff_prompt "opencode/dead-model")"
+  [[ "${prompt}" == *"taking over unfinished work from model opencode/dead-model"* ]]
+  [[ "${prompt}" == *"Continue this same session"* ]]
+  [[ "${prompt}" == *"preserve all work already present"* ]]
+  [[ "${prompt}" == *".commit-msg"* ]]
+  echo "opencode_build_handoff_prompt passed"
+}
+
 test_opencode_run() {
   export OPENCODE_TEST_MODE=1
   local tmp
@@ -68,20 +78,62 @@ test_opencode_run_noop_models() {
   local tmp
   tmp="$(mktemp -d)"
   opencode_run "Issue" "Body" "${tmp}" "opencode/dead-model" >/dev/null
+  [[ "${OPENCODE_SESSION_ID}" == "ses_mock" ]]
   [[ ! -f "${tmp}/conahcnuj.mock" ]]
   [[ ! -f "${tmp}/.commit-msg" ]]
-  opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" >/dev/null
+  local out
+  out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" "" "${OPENCODE_SESSION_ID}" "opencode/dead-model")"
+  [[ "${out}" == *"--session ses_mock"* ]]
+  [[ "${out}" == *"taking over unfinished work from model opencode/dead-model"* ]]
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
   rm -rf "${tmp}"
-  unset OPENCODE_TEST_MODE MOCK_OPENCODE_NOOP
+  unset OPENCODE_TEST_MODE MOCK_OPENCODE_NOOP OPENCODE_SESSION_ID
   echo "opencode_run (no-op model) passed"
+}
+
+test_opencode_run_session_handoff() {
+  local tmp old_path rc args
+  tmp="$(mktemp -d)"
+  old_path="${PATH}"
+  mkdir -p "${tmp}/bin"
+  cat > "${tmp}/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+printf '{"type":"step_start","sessionID":"ses_parsed"}\n'
+printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
+exit "${FAKE_OPENCODE_EXIT:-0}"
+EOF
+  chmod +x "${tmp}/bin/opencode"
+  PATH="${tmp}/bin:${PATH}"
+  export PATH
+  OPENCODE_ARGS_FILE="${tmp}/args.txt"
+  export OPENCODE_ARGS_FILE
+  FAKE_OPENCODE_EXIT=7
+  export FAKE_OPENCODE_EXIT
+  rc=0
+  opencode_run "Issue" "Body" "${tmp}" "opencode/first" >/dev/null || rc=$?
+  [[ "${rc}" -eq 7 ]]
+  [[ "${OPENCODE_SESSION_ID:-}" == "ses_parsed" ]]
+  args="$(cat "${OPENCODE_ARGS_FILE}")"
+  [[ "${args}" == *"--model opencode/first"* ]]
+  [[ "${args}" != *"--session"* ]]
+  rc=0
+  opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/first" >/dev/null || rc=$?
+  [[ "${rc}" -eq 7 ]]
+  args="$(cat "${OPENCODE_ARGS_FILE}")"
+  [[ "${args}" == *"--model opencode/second"* ]]
+  [[ "${args}" == *"--session ses_parsed"* ]]
+  PATH="${old_path}"
+  rm -rf "${tmp}"
+  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID
 }
 
 test_opencode_get_models
 test_opencode_build_prompt
 test_opencode_build_prompt_fresh
+test_opencode_build_handoff_prompt
 test_opencode_run
 test_opencode_run_noop_models
+test_opencode_run_session_handoff
 
 echo "All opencode tests passed"

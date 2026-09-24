@@ -7,15 +7,15 @@
 # (.branch-name; when the agent leaves none out, the driver picks one). A PR
 # number given on the command line is detected and resumed automatically:
 #   1. checks out the latest default branch and implements the issue with
-#      opencode (falling through every available model until one produces
-#      changes), committing only with the agent's .commit-msg
+#      opencode (handing the same session and working tree to another model
+#      when one fails), committing only with the agent's .commit-msg
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
 #      mergeability) passes, then requests review
 #   3. polls the review status; addresses comments / requested changes /
 #      security-review threads, pushes and re-verifies non-reviewer
 #      constraints, then replies on the PR
 #   4. exits only when the PR is ready to merge
-#   5. on an abnormal exit (timeout, no model produced changes, unexpected
+#   5. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the repository so a
 #      run the driver could not resolve is never silently lost. The report
 #      carries the tail of the run's console output as a detailed error log
@@ -565,26 +565,43 @@ resolve_agent_branch_name() {
 
 # --- implementation ---------------------------------------------------------
 
-# Run opencode with each available model until one produces working-tree
-# changes. Records which models were tried in OPENCODE_USED_MODELS.
+# Run opencode until one model completes the work. A failed model hands its
+# session and working tree to the next model. Records tried models and handoffs.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed
   workdir="$(pwd)"
   echo "Implementing with available models..." >&2
   OPENCODE_USED_MODELS=""
+  OPENCODE_HANDOFFS=""
+  OPENCODE_SESSION_ID=""
   for model in $(opencode_get_models); do
     [[ -z "${model}" ]] && continue
     check_timeout
-    opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" || true
+    if [[ -n "${OPENCODE_SESSION_ID}" ]]; then
+      echo "Handing off session ${OPENCODE_SESSION_ID} from ${previous_model} to ${model}." >&2
+      OPENCODE_HANDOFFS="${OPENCODE_HANDOFFS}${previous_model}->${model} "
+    elif [[ -n "${previous_model}" ]]; then
+      echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
+    fi
+    run_failed="false"
+    if ! opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}"; then
+      run_failed="true"
+    fi
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
-    if workdir_changed "${workdir}"; then
-      echo "Model ${model} produced changes." >&2
+    if workdir_changed "${workdir}" && [[ -s "${workdir}/.commit-msg" ]]; then
+      echo "Model ${model} completed the work." >&2
       OPENCODE_LAST_MODEL="${model}"
       return 0
     fi
-    echo "Model ${model} produced no changes; falling through to the next model." >&2
+    rm -f "${workdir}/.commit-msg"
+    previous_model="${model}"
+    if [[ "${run_failed}" == "true" ]]; then
+      echo "Model ${model} failed before completing the work; handing off to the next model." >&2
+    else
+      echo "Model ${model} produced no complete work; handing off to the next model." >&2
+    fi
   done
-  echo "ERROR: no available model produced changes (tried: ${OPENCODE_USED_MODELS:-none})." >&2
+  echo "ERROR: no available model completed the work (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
   return 1
 }
 
@@ -733,7 +750,7 @@ drive() {
         produced_change="true"
       fi
       if [[ "${produced_change}" != "true" ]]; then
-        echo "No model produced changes for the failing constraints; backing off before re-checking." >&2
+        echo "No model completed work for the failing constraints; backing off before re-checking." >&2
         rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
       fi
       continue

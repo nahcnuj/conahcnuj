@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opencode wrapper for conahcnuj
-# Provides model enumeration and one opencode session per model so the
-# driver can fall through every available model until one produces changes.
+# Provides model enumeration and hands the same opencode session to the next
+# model when the current model cannot complete the work.
 
 set -euo pipefail
 
@@ -44,19 +44,43 @@ If you want to choose the feature branch name, write your preferred branch name 
   printf '%s\n' "${prompt}"
 }
 
-# Run one opencode session with a specific model.
-# Args: title body workdir model [extra_context]
-# Returns 0 even when a model produced nothing; callers detect changes
-# themselves via the working tree.
+opencode_build_handoff_prompt() {
+  local previous_model="${1}"
+  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}"
+}
+
+# Run opencode with a specific model and publish its session ID in
+# OPENCODE_SESSION_ID so a later model can continue the same conversation.
+# Args: title body workdir model [extra_context] [session_id] [previous_model]
 opencode_run() {
-  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}"
+  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}"
   local prompt
-  prompt="$(opencode_build_prompt "${issue_title}" "${issue_body}" "${extra_context}")"
+  if [[ -n "${session_id}" ]]; then
+    prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
+  else
+    prompt="$(opencode_build_prompt "${issue_title}" "${issue_body}" "${extra_context}")"
+    if [[ -n "${previous_model}" ]]; then
+      prompt="${prompt}"$'\n\n'"Model ${previous_model} failed before this work could be handed off through its session. Continue from the current working tree without discarding existing changes."
+    fi
+  fi
 
   echo "opencode: trying model ${model}" >&2
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
-    printf 'opencode run --format json --model %s --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}"
+    if [[ -n "${session_id}" ]]; then
+      printf 'opencode run --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"
+    else
+      printf 'opencode run --format json --model %s --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}"
+    fi
+    OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
+    export OPENCODE_SESSION_ID
+    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" ]]; then
+      if [[ -d "${workdir}" && -w "${workdir}" ]]; then
+        printf 'partial change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
+      fi
+      echo "opencode: mock error for ${model} (leaves an incomplete change)" >&2
+      return 1
+    fi
     if [[ -z "${MOCK_OPENCODE_NOOP:-}" || "${MOCK_OPENCODE_NOOP}" != "${model}" ]]; then
       if [[ -d "${workdir}" && -w "${workdir}" ]]; then
         printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
@@ -80,5 +104,26 @@ opencode_run() {
   fi
   CONAHCNUJ_SESSION_MODEL="${model}"
   export CONAHCNUJ_SESSION_MODEL
-  opencode run --print-logs --format json --model "${model}" --dir "${workdir}" --title conahcnuj "${prompt}" || return 1
+
+  local output_file status
+  local -a args
+  output_file="$(mktemp)"
+  args=(run --print-logs --format json --model "${model}" --dir "${workdir}")
+  if [[ -n "${session_id}" ]]; then
+    args+=(--session "${session_id}")
+  else
+    args+=(--title conahcnuj)
+  fi
+  args+=("${prompt}")
+  status=0
+  opencode "${args[@]}" > "${output_file}" || status=$?
+  cat "${output_file}"
+  local detected_session
+  detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
+  if [[ "${detected_session}" =~ ^ses_[A-Za-z0-9_-]+$ ]]; then
+    OPENCODE_SESSION_ID="${detected_session}"
+    export OPENCODE_SESSION_ID
+  fi
+  rm -f "${output_file}"
+  return "${status}"
 }

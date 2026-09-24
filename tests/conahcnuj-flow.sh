@@ -65,10 +65,9 @@ EOF
 export CONAHCNUJ_TEST_MODE=1
 export GH_API_TEST_MODE=1
 export OPENCODE_TEST_MODE=1
-# Two models; the first produces changes so the "try all models then stop"
-# fallthrough stays on the happy path.
 export MOCK_OPENCODE_MODELS="opencode/first
 opencode/second"
+export MOCK_OPENCODE_ERROR="opencode/first"
 export CONAHCNUJ_REPO="nahcnuj/conahcnuj"
 
 LOG="${ROOT}/run.log"
@@ -88,6 +87,10 @@ grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit
 grep -q "Created PR #123" "${LOG}" || { echo "FAIL: PR #123 was not created"; exit 1; }
 grep -q "Replied on PR #123 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
+grep -q "Model opencode/first failed before completing the work; handing off to the next model" "${LOG}" || { echo "FAIL: failed model did not hand off"; exit 1; }
+grep -q "Handing off session ses_mock from opencode/first to opencode/second" "${LOG}" || { echo "FAIL: session was not handed to the second model"; exit 1; }
+grep -q -- "--session ses_mock" "${LOG}" || { echo "FAIL: continuation command omitted --session"; exit 1; }
+grep -q "Model opencode/second completed the work" "${LOG}" || { echo "FAIL: second model was not adopted"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }
 # Capture first, then grep via here-string: `git log | grep -q` under
@@ -97,9 +100,9 @@ grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback
 # from a fixed driver-side fallback.
 ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
-grep -q "mock commit from opencode/first" <<<"${ONELINE}" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
+grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the handoff model's .commit-msg was not used"; exit 1; }
 FULL_LOG="$(git -C "${WORK}" log --format=%B)"
-grep -q "Model: opencode/first" <<<"${FULL_LOG}" || { echo "FAIL: model trailer missing"; exit 1; }
+grep -q "Model: opencode/second" <<<"${FULL_LOG}" || { echo "FAIL: handoff model trailer missing"; exit 1; }
 # init + implement + review-feedback fix = 3 commits from the branch tip.
 [[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement + review commits"; exit 1; }
 
