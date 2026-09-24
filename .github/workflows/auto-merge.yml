@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   enable:
-    uses: ./.github/workflows/owner-approved-auto-merge
+    uses: ./.github/workflows/owner-approved-auto-merge.yml
     with:
       repository: ${{ github.repository }}
       pr-number: ${{ github.event.pull_request.number }}
