@@ -5,7 +5,8 @@ on:
     types: [submitted]
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: conahcnuj-auto-merge-${{ github.event.pull_request.number }}
@@ -20,41 +21,18 @@ jobs:
       github.event.review.author_association == 'OWNER'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    environment: conahcnuj
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-
-      - name: Stage App private key and app.env
-        env:
-          APP_ID: ${{ secrets.APP_ID }}
-          INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
-          APP_SLUG: ${{ secrets.APP_SLUG }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-        run: |
-          pem="$RUNNER_TEMP/conahcnuj-app.pem"
-          printf '%s\n' "$PRIVATE_KEY" > "$pem"
-          chmod 600 "$pem"
-          cat > gh-app/app.env <<EOF
-          APP_ID="$APP_ID"
-          INSTALLATION_ID="$INSTALLATION_ID"
-          APP_SLUG="$APP_SLUG"
-          PRIVATE_KEY_PATH="$pem"
-          BASH_EXE="/usr/bin/bash"
-          EOF
-
       - name: Enable auto-merge
         env:
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          token="$(bash gh-app/get-token.sh)"
-          GH_TOKEN="$token" gh pr merge "$PR_NUMBER" \
+          gh pr merge "$PR_NUMBER" \
             --repo "$REPOSITORY" \
             --merge \
             --auto \

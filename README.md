@@ -122,7 +122,7 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `.github/workflows/auto-merge.yml` は、owner が open 中の draft でない PR を
 approve すると auto-merge を有効化します。必要な status checks が既に green なら
 その場でマージされ、まだ green でなければ条件達成後にマージされます。書き込みには
-issue-driver と同じく App のインストールトークンを使用します。リポジトリ設定で
+GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
 auto-merge が有効になっている必要があります。
 
 ## 隔離環境で実行する（Docker）
