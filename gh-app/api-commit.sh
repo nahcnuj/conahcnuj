@@ -355,6 +355,4 @@ if [[ -z "${COMMIT_SHA}" ]]; then
   exit 1
 fi
 
-git pull origin "${BRANCH}"
-
 printf '%s' "${COMMIT_SHA}"
