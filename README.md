@@ -28,7 +28,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
-├── .github/workflows/ci.yml   # GitHub Actions (Ubuntu / Windows)
+├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
+├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
 ├── .gitignore
 └── AGENTS.md
 ```
@@ -98,6 +99,22 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
 すべて省略可能です。
+
+## issue の自動対応（GitHub Actions）
+
+このリポジトリの `.github/workflows/issue-driver.yml` は、issue が open される
+と上記ドライバを Actions 上で自動実行して対応を試みるワークフローです。
+失敗時はドライバがバグ報告 issue を自動作成し、その issue（bot が開いたもの）
+は再帰防止のためワークフローから除外されます。
+
+- **タイムアウトは Actions 側で制御**します（ジョブの `timeout-minutes: 60`）。
+  `CONAHCNUJ_MAX_SECONDS=3540` をその直下に設定し、ジョブが強制終了される前に
+  ドライバが自己終了してバグ報告を残せるようにしています。予算を変えるときは
+  両方を合わせて変更してください。
+- 必要な repo secrets: `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /
+  `PRIVATE_KEY`（App の秘密鍵 PEM）。runner 上の `GITHUB_TOKEN` は
+  `contents: read` のみで、書き込み（ブランチ・コミット・PR・レビュー依頼・
+  コメント）はすべてローカル実行と同じく App のインストールトークンで行われます。
 
 ## 隔離環境で実行する（Docker）
 
