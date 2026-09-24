@@ -31,6 +31,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
 ├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
 ├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
+├── .github/workflows/owner-approved-auto-merge.yml # 再利用用 auto-merge workflow
 ├── .gitignore
 └── AGENTS.md
 ```
@@ -129,6 +130,38 @@ approve すると auto-merge を有効化します。必要な status checks が
 その場でマージされ、まだ green でなければ条件達成後にマージされます。書き込みには
 GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
 auto-merge が有効になっている必要があります。
+
+### 他のリポジトリで使う（Reusable Workflow）
+
+`.github/workflows/owner-approved-auto-merge.yml` は、`workflow_call` で
+再利用できる Workflow です。イベント検知は利用側で行い、中央の Workflow が
+owner 承認条件と `gh pr merge` を実行します。対象リポジトリには次のファイルを
+追加します。
+
+```yaml
+name: Owner-approved auto-merge
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable:
+    uses: nahcnuj/conahcnuj/.github/workflows/owner-approved-auto-merge@main
+    with:
+      repository: ${{ github.repository }}
+      pr-number: ${{ github.event.pull_request.number }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+```
+
+Reusable Workflow は利用側Workflowの `GITHUB_TOKEN` を使い、secret の
+`inherit` は不要です。呼び出し側の `permissions` で `contents: write` と
+`pull-requests: write` を許可し、対象リポジトリの **Settings → General →
+Pull Requests** で **Allow auto-merge** を有効にしてください。
 
 ## 隔離環境で実行する（Docker）
 
