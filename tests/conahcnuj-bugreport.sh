@@ -74,7 +74,7 @@ grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAI
 # self-evident repository name (reviewer: the report is filed in that very
 # repository), and that the bug labels are attached (always `bug`, plus the
 # environment label for the platform the test runs on).
-(
+{
   export CONAHCNUJ_IMPORT=1
   unset CONAHCNUJ_REPO
   # Source the driver so its functions (plus our stub) run in one shell.
@@ -96,7 +96,7 @@ grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAI
   BUG_REPORT_INPUT="14"
   BUG_REPORTED="0"
   report_bug_on_exit "1"
-)
+}
 
 grep -q "## Error log" "${ROOT}/captured-body.txt" || { echo "FAIL: bug report has no error log section"; exit 1; }
 grep -q "ERROR: could not implement issue #14 with any available model." "${ROOT}/captured-body.txt" || { echo "FAIL: the error log does not carry the failing message"; exit 1; }
@@ -115,24 +115,24 @@ fi
 # --- unit: report_bug_labels is deterministic --------------------------------
 # MSYSTEM (Git Bash / Windows) => bug + os/windows; Ubuntu os-release => bug +
 # os/ubuntu; anything else => bug only. CONAHCNUJ_OS_RELEASE pins the file.
-(
+{
   export CONAHCNUJ_IMPORT=1
   unset CONAHCNUJ_REPO MSYSTEM
   # shellcheck source=bin/conahcnuj.sh
   source "${DRIVER}"
 
-  win="$( (export MSYSTEM=MINGW64; report_bug_labels) )"
+  win="$(MSYSTEM=MINGW64 report_bug_labels)"
   [[ "${win}" == $'bug\nos/windows' ]] || { echo "FAIL: MSYSTEM should yield bug + os/windows (got: ${win})"; exit 1; }
 
   rel="$(mktemp)"
   printf 'NAME="Ubuntu"\nID=ubuntu\n' > "${rel}"
-  ub="$( (export MSYSTEM=; export CONAHCNUJ_OS_RELEASE="${rel}"; report_bug_labels) )"
+  ub="$(MSYSTEM='' CONAHCNUJ_OS_RELEASE="${rel}" report_bug_labels)"
   [[ "${ub}" == $'bug\nos/ubuntu' ]] || { echo "FAIL: Ubuntu os-release should yield bug + os/ubuntu (got: ${ub})"; exit 1; }
 
   rel2="$(mktemp)"
   printf 'ID=centos\n' > "${rel2}"
-  none="$( (export MSYSTEM=; export CONAHCNUJ_OS_RELEASE="${rel2}"; report_bug_labels) )"
+  none="$(MSYSTEM='' CONAHCNUJ_OS_RELEASE="${rel2}" report_bug_labels)"
   [[ "${none}" == "bug" ]] || { echo "FAIL: unknown platform should yield only bug (got: ${none})"; exit 1; }
-)
+}
 
 echo "conahcnuj abnormal-exit bug report passed"
