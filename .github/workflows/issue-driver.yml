@@ -31,6 +31,7 @@ jobs:
     name: Attempt to resolve issue
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    environment: conahcnuj
     # Do not chase the driver's own outputs: bug-report issues are authored by
     # <APP_SLUG>[bot], and running the driver on them would loop forever. All
     # four secrets are required for the run to be meaningful.
@@ -55,13 +56,6 @@ jobs:
           test -n "$VER"
           curl -fsSL https://opencode.ai/install | bash -s -- --version "$VER"
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
-
-      # Pin a free model so `opencode models` is never empty (the driver needs
-      # at least one model to fall through). No API key required.
-      - name: Pin a free opencode model
-        run: |
-          mkdir -p "$HOME/.config/opencode"
-          printf '%s\n' '{"model":"opencode/mimo-v2.5-free"}' > "$HOME/.config/opencode/opencode.json"
 
       # The driver reads gh-app/app.env like any local run. The private key is
       # staged from the sealed secret, outside the work tree, so `git add -A`
@@ -91,6 +85,5 @@ jobs:
           # and files its bug report before Actions kills the run.
           CONAHCNUJ_MAX_SECONDS: "3540"
           OPENCODE_DISABLE_AUTOUPDATE: "true"
-          OPENCODE_DISABLE_MODELS_FETCH: "true"
         run: |
           bash bin/conahcnuj.sh "${{ github.event.issue.number }}"
