@@ -1,0 +1,22 @@
+name: Install opencode
+description: >
+  Resolve the latest opencode release via the GitHub CLI (gh is preinstalled
+  on runners and authenticates with the built-in token, avoiding the shared
+  runner rate limit on api.github.com) and install it, adding the opencode and
+  conahcnuj bin dirs to PATH. Requires a prior actions/checkout step so the
+  action can be referenced as ./.github/actions/install-opencode.
+
+runs:
+  using: composite
+  steps:
+    - name: Install opencode
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        TAG="$(gh release view --repo anomalyco/opencode --json tagName --jq .tagName)"
+        VER="${TAG#v}"
+        test -n "$VER"
+        curl -fsSL https://opencode.ai/install | bash -s -- --version "$VER"
+        echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
