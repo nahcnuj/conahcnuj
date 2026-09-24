@@ -128,6 +128,26 @@ EOF
   unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID
 }
 
+test_opencode_run_timeout() {
+  local tmp old_path rc
+  tmp="$(mktemp -d)"
+  old_path="${PATH}"
+  mkdir -p "${tmp}/bin"
+  cat > "${tmp}/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+sleep 5
+EOF
+  chmod +x "${tmp}/bin/opencode"
+  PATH="${tmp}/bin:${PATH}"
+  export PATH
+  rc=0
+  CONAHCNUJ_RUN_TIMEOUT_SECONDS=0.1 opencode_run "Issue" "Body" "${tmp}" "opencode/hanging" >/dev/null 2>&1 || rc=$?
+  [[ "${rc}" -eq 124 ]]
+  PATH="${old_path}"
+  rm -rf "${tmp}"
+  echo "opencode_run timeout passed"
+}
+
 test_opencode_get_models
 test_opencode_build_prompt
 test_opencode_build_prompt_fresh
@@ -135,5 +155,6 @@ test_opencode_build_handoff_prompt
 test_opencode_run
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
+test_opencode_run_timeout
 
 echo "All opencode tests passed"

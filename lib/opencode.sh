@@ -106,8 +106,12 @@ opencode_run() {
   export CONAHCNUJ_SESSION_MODEL
 
   local output_file status
-  local -a args
+  local -a args executable
   output_file="$(mktemp)"
+  executable=(opencode)
+  if [[ -n "${CONAHCNUJ_RUN_TIMEOUT_SECONDS:-}" ]]; then
+    executable=(timeout --signal=TERM --kill-after=30s "${CONAHCNUJ_RUN_TIMEOUT_SECONDS}s" opencode)
+  fi
   args=(run --print-logs --format json --model "${model}" --dir "${workdir}")
   if [[ -n "${session_id}" ]]; then
     args+=(--session "${session_id}")
@@ -116,7 +120,7 @@ opencode_run() {
   fi
   args+=("${prompt}")
   status=0
-  opencode "${args[@]}" > "${output_file}" || status=$?
+  "${executable[@]}" "${args[@]}" > "${output_file}" || status=$?
   cat "${output_file}"
   local detected_session
   detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
@@ -125,5 +129,8 @@ opencode_run() {
     export OPENCODE_SESSION_ID
   fi
   rm -f "${output_file}"
+  if [[ "${status}" == "124" ]]; then
+    echo "opencode exceeded the remaining driver time budget; stopping this model." >&2
+  fi
   return "${status}"
 }

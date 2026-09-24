@@ -133,6 +133,9 @@ test_review_summary() {
   [[ "${summary}" == *"Inline note on line 10"* ]]
   # Resolved threads are excluded.
   [[ "${summary}" != *"Resolved thread"* ]]
+  local continuation_summary
+  continuation_summary="$(printf '%s\n' '{\"data\":{\"repository\":{\"pullRequest\":{\"reviewDecision\":\"REVIEW_REQUIRED\",\"reviews\":{\"nodes\":[]},\"comments\":{\"nodes\":[{\"body\":\"<!-- conahcnuj-continuation -->\\n継続するにはこちらをクリック\",\"author\":{\"login\":\"conahcnuj[bot]\"}}]},\"reviewThreads\":{\"nodes\":[]}}}}}' | gh_api_review_summary)"
+  [[ "${continuation_summary}" != *"conahcnuj-continuation"* ]]
   echo "gh_api_review_summary passed"
 }
 
