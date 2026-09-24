@@ -77,6 +77,7 @@ gh_api_post_comment() {
 }
 post_pr_continuation_comment "nahcnuj" "conahcnuj" "123"
 grep -q '^COMMENT|123|.*conahcnuj-continuation.*再実行してください.*gh workflow run issue-driver.yml -f number=123 -R nahcnuj/conahcnuj' "${REPORT}" || { echo "FAIL: continuation comment was not posted with the workflow-run command"; exit 1; }
-grep -q 'actions/workflows/issue-driver.yml/dispatch' "${REPORT}" && { echo "FAIL: continuation comment must not embed a GitHub-web dispatch link (it 404s when the workflow is not on the default branch)"; exit 1; }
+grep -q '^COMMENT|123|.*actions/workflows/issue-driver.yml) を開き' "${REPORT}" || { echo "FAIL: continuation comment must link to the workflow run-history page"; exit 1; }
+grep -q 'issue-driver.yml/dispatch' "${REPORT}" && { echo "FAIL: continuation comment must not embed the prefilled <file>/dispatch page (it 404s with \"This workflow does not exist\" even for a workflow registered on the default branch)"; exit 1; }
 
 echo "All ensure_pr body tests passed"

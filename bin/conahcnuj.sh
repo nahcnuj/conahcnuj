@@ -619,12 +619,18 @@ implement() {
 
 post_pr_continuation_comment() {
   local owner="${1}" repo="${2}" pr="${3}"
-  # No GitHub-web dispatch link: its /actions/workflows/<file>/dispatch page 404s
-  # ("This workflow does not exist") unless the workflow is on the default branch.
+  # Link to the workflow run-history page, never to the prefilled dispatch
+  # page (<file>/dispatch?inputs%5B...%5D): that route 404s with "This workflow
+  # does not exist" even when the workflow is active and registered on the
+  # default branch, so a one-click "re-run" link would break (issue #65).
+  # Dispatching via `gh workflow run` always works, and the workflow page is
+  # reliably reachable for the manual Run workflow form.
   if gh_api_post_comment "${owner}" "${repo}" "${pr}" "<!-- conahcnuj-continuation -->
 PR #${pr} の処理を継続するには、Issue auto-drive を再実行してください。
 
-gh workflow run issue-driver.yml -f number=${pr} -R ${owner}/${repo}" >/dev/null; then
+gh workflow run issue-driver.yml -f number=${pr} -R ${owner}/${repo}
+
+または、GitHub の [Issue auto-drive](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml) を開き、Run workflow から number に ${pr} を入力して実行してください。" >/dev/null; then
     return 0
   fi
   echo "WARNING: could not post the continuation comment for PR #${pr}." >&2
