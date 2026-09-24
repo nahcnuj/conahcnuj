@@ -1,0 +1,33 @@
+name: Owner-approved auto-merge
+description: Enable auto-merge for an owner-approved pull request at its approved head commit
+
+inputs:
+  repository:
+    description: Repository in owner/name format
+    required: true
+    type: string
+  pr-number:
+    description: Pull request number
+    required: true
+    type: string
+  head-sha:
+    description: Pull request head commit that received approval
+    required: true
+    type: string
+
+runs:
+  using: composite
+  steps:
+    - name: Enable auto-merge
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY: ${{ inputs.repository }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+      shell: bash
+      run: |
+        gh pr merge "$PR_NUMBER" \
+          --repo "$REPOSITORY" \
+          --merge \
+          --auto \
+          --match-head-commit "$HEAD_SHA"

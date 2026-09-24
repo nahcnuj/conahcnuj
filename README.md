@@ -28,8 +28,9 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
+├── .github/actions/owner-approved-auto-merge/action.yml # owner 承認後の auto-merge 実行
 ├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
-├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
+├── .github/workflows/issue-driver.yml # issue が open されたら自動でドライバ実行
 ├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
 ├── .gitignore
 └── AGENTS.md
@@ -129,6 +130,50 @@ approve すると auto-merge を有効化します。必要な status checks が
 その場でマージされ、まだ green でなければ条件達成後にマージされます。書き込みには
 GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
 auto-merge が有効になっている必要があります。
+
+### 他のリポジトリで使う（Composite Action）
+
+`.github/actions/owner-approved-auto-merge/action.yml` は、`gh pr merge`
+を実行する Composite Action です。イベント検知と owner 承認条件は利用側ワークフローに
+残ります。対象リポジトリに次のファイルを追加します。
+
+```yaml
+name: Owner-approved auto-merge
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: conahcnuj-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable:
+    if: >-
+      github.event.pull_request.state == 'open' &&
+      github.event.pull_request.draft == false &&
+      github.event.review.state == 'approved' &&
+      github.event.review.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: nahcnuj/conahcnuj/.github/actions/owner-approved-auto-merge@main
+        with:
+          repository: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+```
+
+導入後、対象リポジトリの **Settings → General → Pull Requests** で
+**Allow auto-merge** を有効にします。`contents: write` と
+`pull-requests: write` は、Composite Action が `GITHUB_TOKEN` で PR を
+マージするために必要です。利用側の `GITHUB_TOKEN` を使うため、
+`conahcnuj` App の秘密鍵は不要です。
 
 ## 隔離環境で実行する（Docker）
 
