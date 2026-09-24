@@ -18,13 +18,19 @@ name: Issue auto-drive
 on:
   issues:
     types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      number:
+        description: Issue or pull request number to continue
+        required: true
+        type: number
 
 permissions:
   contents: read
 
 concurrency:
-  group: conahcnuj-issue-${{ github.event.issue.number }}
-  cancel-in-progress: false
+  group: conahcnuj-${{ github.event_name == 'issues' && github.event.issue.number || inputs.number }}
+  cancel-in-progress: true
 
 jobs:
   attempt:
@@ -38,7 +44,7 @@ jobs:
     # not needed here), so any bot-authored issue is skipped by type. Missing
     # secrets are not pre-checked either: the run fails loudly and the driver
     # files its own bug report (no silent skip).
-    if: github.event.issue.user.type != 'Bot'
+    if: github.event_name != 'issues' || github.event.issue.user.type != 'Bot'
     defaults:
       run:
         shell: bash
@@ -75,9 +81,11 @@ jobs:
       - name: Run the conahcnuj driver
         env:
           CONAHCNUJ_REPO: ${{ github.repository }}
+          CONAHCNUJ_INPUT: ${{ github.event_name == 'issues' && github.event.issue.number || inputs.number }}
           # Just under the 60-minute job cap so the driver exits gracefully
           # and files its bug report before Actions kills the run.
           CONAHCNUJ_MAX_SECONDS: "3540"
           OPENCODE_DISABLE_AUTOUPDATE: "true"
         run: |
-          bash bin/conahcnuj.sh "${{ github.event.issue.number }}"
+          [[ "${CONAHCNUJ_INPUT}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number: ${CONAHCNUJ_INPUT}" >&2; exit 1; }
+          bash bin/conahcnuj.sh "${CONAHCNUJ_INPUT}"

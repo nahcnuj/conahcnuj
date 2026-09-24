@@ -70,6 +70,7 @@ fi
 # a "1" written into the file. Lives outside the work tree so it is never picked
 # up by `git add -A`.
 PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
+PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
 
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
@@ -77,6 +78,12 @@ pr_body_synced() {
 }
 pr_body_mark_synced() {
   printf '1\n' > "${PR_BODY_SYNCED_FILE}"
+}
+pr_continuation_commented() {
+  [[ "$(cat "${PR_CONTINUATION_COMMENTED_FILE}" 2>/dev/null || true)" == "1" ]]
+}
+pr_continuation_mark_commented() {
+  printf '1\n' > "${PR_CONTINUATION_COMMENTED_FILE}"
 }
 
 # --- Windows relaunch -------------------------------------------------------
@@ -568,7 +575,7 @@ resolve_agent_branch_name() {
 # Run opencode until one model completes the work. A failed model hands its
 # session and working tree to the next model. Records tried models and handoffs.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now
   workdir="$(pwd)"
   echo "Implementing with available models..." >&2
   OPENCODE_USED_MODELS=""
@@ -577,6 +584,9 @@ implement() {
   for model in $(opencode_get_models); do
     [[ -z "${model}" ]] && continue
     check_timeout
+    now="$(date +%s)"
+    run_timeout=$((MAX_DURATION - (now - START_TIME) - 30))
+    (( run_timeout > 0 )) || run_timeout=1
     if [[ -n "${OPENCODE_SESSION_ID}" ]]; then
       echo "Handing off session ${OPENCODE_SESSION_ID} from ${previous_model} to ${model}." >&2
       OPENCODE_HANDOFFS="${OPENCODE_HANDOFFS}${previous_model}->${model} "
@@ -584,7 +594,7 @@ implement() {
       echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
     fi
     run_failed="false"
-    if ! opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}"; then
+    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}"; then
       run_failed="true"
     fi
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
@@ -606,6 +616,18 @@ implement() {
 }
 
 # --- PR lifecycle -----------------------------------------------------------
+
+post_pr_continuation_comment() {
+  local owner="${1}" repo="${2}" pr="${3}"
+  if gh_api_post_comment "${owner}" "${repo}" "${pr}" "<!-- conahcnuj-continuation -->
+PR #${pr} の処理を継続するには、Issue auto-drive を手動実行してください。
+
+[継続するにはこちらをクリック](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml/dispatch?inputs%5Bnumber%5D=${pr})" >/dev/null; then
+    return 0
+  fi
+  echo "WARNING: could not post the continuation comment for PR #${pr}." >&2
+  return 1
+}
 
 # Reuse the open PR for this head branch, else create one. Both reuse paths keep
 # the PR body derived from the linked issue ("Closes #<n>\n\n<issue body>"), so a
@@ -733,6 +755,12 @@ drive() {
         rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
       fi
       continue
+    fi
+
+    if ! pr_continuation_commented; then
+      if post_pr_continuation_comment "${owner}" "${repo}" "${pr}"; then
+        pr_continuation_mark_commented
+      fi
     fi
 
     if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
