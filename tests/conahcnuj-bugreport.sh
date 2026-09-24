@@ -69,9 +69,11 @@ grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAI
 
 # --- unit: the bug report body carries a detailed error log -----------------
 # Source the driver (CONAHCNUJ_IMPORT=1, so main() is not run) and stub
-# gh_api_create_issue to capture the body it would send. Assert the report
-# includes the tail of the run log and no longer repeats the self-evident
-# repository name (reviewer: the report is filed in that very repository).
+# gh_api_create_issue to capture the body and labels it would send. Assert the
+# report includes the tail of the run log and no longer repeats the
+# self-evident repository name (reviewer: the report is filed in that very
+# repository), and that the bug labels are attached (always `bug`, plus the
+# environment label for the platform the test runs on).
 (
   export CONAHCNUJ_IMPORT=1
   unset CONAHCNUJ_REPO
@@ -79,7 +81,10 @@ grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAI
   # shellcheck source=bin/conahcnuj.sh
   source "${DRIVER}"
   gh_api_create_issue() {
-    printf '%s\n' "${4}" > "${ROOT}/captured-body.txt"
+    local body="${4}"
+    shift 4
+    printf '%s\n' "${body}" > "${ROOT}/captured-body.txt"
+    printf '%s\n' "$@" > "${ROOT}/captured-labels.txt"
     printf '99\n'
   }
   RUN_LOG_FILE="$(mktemp)"
@@ -97,5 +102,37 @@ grep -q "## Error log" "${ROOT}/captured-body.txt" || { echo "FAIL: bug report h
 grep -q "ERROR: could not implement issue #14 with any available model." "${ROOT}/captured-body.txt" || { echo "FAIL: the error log does not carry the failing message"; exit 1; }
 grep -q "Exit code: 1" "${ROOT}/captured-body.txt" || { echo "FAIL: exit code is missing from the report"; exit 1; }
 grep -q "Repository:" "${ROOT}/captured-body.txt" && { echo "FAIL: self-evident repository line is still in the report"; exit 1; }
+
+# The report must always carry the `bug` label plus the environment label of
+# the platform the test runs on (os/windows on Git Bash / os/ubuntu on Ubuntu).
+grep -q '^bug$' "${ROOT}/captured-labels.txt" || { echo "FAIL: bug label is missing from the report"; exit 1; }
+if [[ -n "${MSYSTEM:-}" ]]; then
+  grep -q '^os/windows$' "${ROOT}/captured-labels.txt" || { echo "FAIL: os/windows label is missing on Git Bash"; exit 1; }
+elif [[ -f "/etc/os-release" ]] && grep -qE '^ID=ubuntu[[:space:]]*$' "/etc/os-release"; then
+  grep -q '^os/ubuntu$' "${ROOT}/captured-labels.txt" || { echo "FAIL: os/ubuntu label is missing on Ubuntu"; exit 1; }
+fi
+
+# --- unit: report_bug_labels is deterministic --------------------------------
+# MSYSTEM (Git Bash / Windows) => bug + os/windows; Ubuntu os-release => bug +
+# os/ubuntu; anything else => bug only. CONAHCNUJ_OS_RELEASE pins the file.
+(
+  export CONAHCNUJ_IMPORT=1
+  unset CONAHCNUJ_REPO MSYSTEM
+  # shellcheck source=bin/conahcnuj.sh
+  source "${DRIVER}"
+
+  win="$( (export MSYSTEM=MINGW64; report_bug_labels) )"
+  [[ "${win}" == $'bug\nos/windows' ]] || { echo "FAIL: MSYSTEM should yield bug + os/windows (got: ${win})"; exit 1; }
+
+  rel="$(mktemp)"
+  printf 'NAME="Ubuntu"\nID=ubuntu\n' > "${rel}"
+  ub="$( (export MSYSTEM=; export CONAHCNUJ_OS_RELEASE="${rel}"; report_bug_labels) )"
+  [[ "${ub}" == $'bug\nos/ubuntu' ]] || { echo "FAIL: Ubuntu os-release should yield bug + os/ubuntu (got: ${ub})"; exit 1; }
+
+  rel2="$(mktemp)"
+  printf 'ID=centos\n' > "${rel2}"
+  none="$( (export MSYSTEM=; export CONAHCNUJ_OS_RELEASE="${rel2}"; report_bug_labels) )"
+  [[ "${none}" == "bug" ]] || { echo "FAIL: unknown platform should yield only bug (got: ${none})"; exit 1; }
+)
 
 echo "conahcnuj abnormal-exit bug report passed"

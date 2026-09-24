@@ -179,10 +179,29 @@ test_post_comment() {
 }
 
 test_create_issue() {
-  local out
-  out="$(printf '%s\n' '{"number":25}' | gh_api_create_issue "nahcnuj" "conahcnuj" "Bug report" "details")"
-  [[ "${out}" == "25" ]]
-  echo "gh_api_create_issue passed"
+  local out capture_file
+  capture_file="$(mktemp)"
+  out="$(
+    gh_api_call() {
+      printf '%s' "${3}" > "${capture_file}"
+      printf '%s\n' '{"number":25}'
+    }
+    gh_api_create_issue "nahcnuj" "conahcnuj" "Bug report" "details"
+  )"
+  [[ "${out}" == "25" ]] || { echo "FAIL: create-issue returned ${out} (expected 25)"; exit 1; }
+  grep -q '"labels":\[\]' "${capture_file}" || { echo "FAIL: create without labels must send an empty labels array"; exit 1; }
+
+  out="$(
+    gh_api_call() {
+      printf '%s' "${3}" > "${capture_file}"
+      printf '%s\n' '{"number":26}'
+    }
+    gh_api_create_issue "nahcnuj" "conahcnuj" "Bug report" "details" "bug" "os/ubuntu"
+  )"
+  [[ "${out}" == "26" ]] || { echo "FAIL: labeled create-issue returned ${out} (expected 26)"; exit 1; }
+  grep -q '"labels":\["bug","os/ubuntu"\]' "${capture_file}" || { echo "FAIL: labels were not sent in the create payload"; exit 1; }
+  rm -f "${capture_file}"
+  echo "gh_api_create_issue (labels) passed"
 }
 
 test_merge_pr() {

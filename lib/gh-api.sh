@@ -487,11 +487,30 @@ gh_api_post_comment() {
   gh_api_json_num "${json}" "id"
 }
 
-# Create an issue. Args: owner repo title body. Output: issue number.
+# Create an issue. Args: owner repo title body [label ...]. Output: issue number.
+# Labels are passed straight into the create payload (the API ignores names
+# that do not exist in the repository), so a single call both creates and
+# labels the issue. Test mode still consumes exactly one mock line.
 gh_api_create_issue() {
   local owner="${1}" repo="${2}" title="${3}" body="${4}"
+  shift 4
+  local labels_json=""
+  local label first_label=1
+  for label in "$@"; do
+    if [[ ${first_label} -eq 1 ]]; then
+      first_label=0
+    else
+      labels_json="${labels_json},"
+    fi
+    labels_json="${labels_json}\"$(gh_api_escape "${label}")\""
+  done
+  if [[ $# -gt 0 ]]; then
+    labels_json="[${labels_json}]"
+  else
+    labels_json="[]"
+  fi
   local payload
-  payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\"}"
+  payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\",\"labels\":${labels_json}}"
   local json
   json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")"
   gh_api_json_num "${json}" "number"
