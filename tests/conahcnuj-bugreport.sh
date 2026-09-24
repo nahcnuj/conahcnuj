@@ -12,6 +12,11 @@
 # failure is logged, and the bug report issue landed in conahcnuj while the
 # body still names the item worked on in makamujo.
 #
+# Also covers the auto-detection chain: the driver's own origin remote when no
+# CONAHCNUJ_BUG_REPO is set, the App-derived target (installed layout with no
+# origin and no config), and the working-repository fallback when even that is
+# unavailable offline.
+#
 # No secrets, no network.
 set -euo pipefail
 
@@ -95,13 +100,37 @@ if [[ -n "${DRIVER_REPO}" ]]; then
   grep -q "filing a bug report issue in ${DRIVER_REPO}" "${LOG2}" || { echo "FAIL: report did not go to the driver's own repository (${DRIVER_REPO})"; exit 1; }
 fi
 
+# --- Scenario 3: installed layout (no origin, no config) ----------------------
+# An installed driver (~/.local/bin deployed by install.ps1) sits next to its
+# lib/ and gh-app/ but outside any git checkout, so the origin-remote guess of
+# scenario 2 is unavailable. In offline test mode the App-derived lookup is
+# skipped too, so the report falls back to the working repository with a
+# warning and the driver still exits cleanly (never silently dead).
+INST="${ROOT}/installed"
+mkdir -p "${INST}/bin" "${INST}/lib" "${INST}/gh-app"
+cp "${REPO}/bin/conahcnuj.sh" "${INST}/bin/conahcnuj.sh"
+cp "${REPO}"/lib/*.sh "${INST}/lib/"
+cp "${REPO}"/gh-app/*.sh "${INST}/gh-app/"
+cp "${REPO}/gh-app/app.env.example" "${INST}/gh-app/app.env.example"
+export CONAHCNUJ_REPO="nahcnuj/makamujo"
+LOG3="${ROOT}/run3.log"
+RC3=0
+(
+  cd "${WORK}"
+  CONAHCNUJ_MAX_SECONDS=120 bash "${INST}/bin/conahcnuj.sh" 14 < "${TAPE}"
+) > "${LOG3}" 2>&1 || RC3=$?
+[[ ${RC3} -eq 1 ]] || { echo "FAIL: scenario 3 driver exit code ${RC3} (expected 1)"; exit 1; }
+grep -q "WARNING: no bug-report repository could be resolved; filing the report into the working repository nahcnuj/makamujo" "${LOG3}" || { echo "FAIL: scenario 3 did not warn about the working-repository fallback"; exit 1; }
+grep -q "filing a bug report issue in nahcnuj/makamujo" "${LOG3}" || { echo "FAIL: scenario 3 did not file into the fallback repository"; exit 1; }
+unset CONAHCNUJ_REPO
+
 # --- unit: the bug report body carries a detailed error log -----------------
 # Source the driver (CONAHCNUJ_IMPORT=1, so main() is not run) and stub
 # gh_api_create_issue to capture the body it would send. Assert the report
 # includes the tail of the run log and names the item worked on in the WORKING
 # repository (nahcnuj/makamujo) even though the issue is filed in conahcnuj.
 (
-  export CONAHCNUJ_IMPORT=1
+  CONAHCNUJ_IMPORT=1
   unset CONAHCNUJ_REPO CONAHCNUJ_BUG_REPO
   # Source the driver so its functions (plus our stub) run in one shell.
   # shellcheck source=bin/conahcnuj.sh
@@ -139,5 +168,77 @@ grep -q "ERROR: could not implement issue #14 with any available model." "${ROOT
 grep -q "Exit code: 1" "${ROOT}/captured-body.txt" || { echo "FAIL: exit code is missing from the report"; exit 1; }
 grep -q "nahcnuj/makamujo#14" "${ROOT}/captured-body.txt" || { echo "FAIL: the report does not name the item worked on in makamujo"; exit 1; }
 grep -q "Repository:" "${ROOT}/captured-body.txt" && { echo "FAIL: self-evident repository line is still in the report"; exit 1; }
+
+# --- unit: App-derived report target (installed layout) ----------------------
+# When neither CONAHCNUJ_BUG_REPO nor the driver's origin remote resolves (the
+# installed ~/.local/bin layout), the bug-report repository is derived from the
+# GitHub App's own installation on the abnormal-exit path: the repository whose
+# short name equals APP_SLUG, falling back to the installation owner + APP_SLUG.
+# Placeholder settings stay unset. Offline: gh_api_call is stubbed.
+(
+  CONAHCNUJ_IMPORT=1
+  unset CONAHCNUJ_REPO CONAHCNUJ_BUG_REPO GH_API_TEST_MODE
+  # Source the driver so its functions (plus our stubs) run in one shell.
+  # shellcheck source=bin/conahcnuj.sh
+  source "${DRIVER}"
+
+  # A fixture app.env describing a real App (APP_SLUG=conahcnuj) in a gh-app
+  # dir that is not a git checkout, exactly like an installed driver's.
+  FIXAPP="${ROOT}/ghapp"
+  mkdir -p "${FIXAPP}"
+  cat > "${FIXAPP}/app.env" <<'EOF'
+APP_ID="1"
+INSTALLATION_ID="2"
+APP_SLUG="conahcnuj"
+PRIVATE_KEY_PATH="/nonexistent"
+BASH_EXE="/bin/bash"
+EOF
+  export GH_APP_DIR="${FIXAPP}"
+
+  # Stub the installation-repositories lookup: the App covers makamujo (the
+  # working repo) and conahcnuj (its own project).
+  gh_api_call() {
+    printf '%s\n' '{"total_count":2,"repositories":[{"id":1,"node_id":"n1","name":"makamujo","full_name":"nahcnuj/makamujo","private":true,"owner":{"login":"nahcnuj","id":1}},{"id":2,"node_id":"n2","name":"conahcnuj","full_name":"nahcnuj/conahcnuj","private":true,"owner":{"login":"nahcnuj","id":2}}],"permissions":{"issues":"write"}}'
+  }
+
+  # The repository whose short name equals the App slug is the driver's project.
+  out="$(bug_report_app_repo)"
+  [[ "${out}" == "nahcnuj/conahcnuj" ]] || { echo "FAIL: App-derived report repo ${out} (expected nahcnuj/conahcnuj)"; exit 1; }
+
+  # Without a matching repository, the installation owner + APP_SLUG is used.
+  gh_api_call() {
+    printf '%s\n' '{"total_count":1,"repositories":[{"id":1,"node_id":"n1","name":"makamujo","full_name":"nahcnuj/makamujo","private":true,"owner":{"login":"nahcnuj","id":1}}],"permissions":{}}'
+  }
+  out="$(bug_report_app_repo)"
+  [[ "${out}" == "nahcnuj/conahcnuj" ]] || { echo "FAIL: owner fallback ${out} (expected nahcnuj/conahcnuj)"; exit 1; }
+
+  # A placeholder APP_SLUG means "not configured": nothing is derived.
+  export GH_APP_DIR="${ROOT}/ghapp-ph"
+  mkdir -p "${GH_APP_DIR}"
+  printf 'APP_SLUG="<your-app-name>"\n' > "${GH_APP_DIR}/app.env"
+  out="$(bug_report_app_repo)"
+  [[ -z "${out}" ]] || { echo "FAIL: placeholder APP_SLUG derived ${out} (expected nothing)"; exit 1; }
+
+  # Installed-layout abnormal exit: with no static bug-report repository, the
+  # EXIT trap derives nahcnuj/conahcnuj from the App installation instead of
+  # falling back to the working repository (nahcnuj/makamujo).
+  export GH_APP_DIR="${FIXAPP}"
+  gh_api_create_issue() {
+    printf '%s/%s\n' "${1}" "${2}" > "${ROOT}/trap-target.txt"
+    printf '77\n'
+  }
+  RUN_LOG_FILE="$(mktemp)"
+  printf 'ERROR: could not implement issue #14\n' > "${RUN_LOG_FILE}"
+  BUG_REPORT_OWNER=""
+  BUG_REPORT_REPO=""
+  BUG_WORK_OWNER="nahcnuj"
+  BUG_WORK_REPO="makamujo"
+  BUG_REPORT_INPUT="14"
+  BUG_REPORTED="0"
+  report_bug_on_exit "1"
+  got="$(cat "${ROOT}/trap-target.txt")"
+  [[ "${got}" == "nahcnuj/conahcnuj" ]] || { echo "FAIL: trap filed the report into ${got} (expected nahcnuj/conahcnuj)"; exit 1; }
+  run_log_cleanup
+)
 
 echo "conahcnuj abnormal-exit bug report passed"

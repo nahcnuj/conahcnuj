@@ -29,7 +29,9 @@
 #   CONAHCNUJ_BUG_REPO       owner/repo where abnormal exits file their bug
 #                            report (default: the conahcnuj repo resolved from
 #                            gh-app/app.env, else the driver's own origin remote,
-#                            else the working repository)
+#                            else derived from the GitHub App's own installation
+#                            when a run terminates abnormally, else the working
+#                            repository)
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
 #   CONAHCNUJ_POLL_REVIEWS_MIN/MAX     review poll window (default 30/3600 s)
@@ -342,9 +344,12 @@ run_log_cleanup() {
 #   2. a CONAHCNUJ_BUG_REPO setting in gh-app/app.env (or app.env.example)
 #   3. the origin remote of the conahcnuj checkout the driver runs from (the
 #      dev / test workflow, where the driver is invoked from its own clone)
-#   4. nothing: the caller keeps the working repository (the historical
-#      behaviour) and warns, because there is no better guess in an installed
-#      layout (~/.local/bin) with no configured value.
+#   4. nothing: printed empty so the caller can defer the last resort. An
+#      installed driver (~/.local/bin) has neither a configured value nor an
+#      origin remote, and the conahcnuj repo can then only be derived from the
+#      GitHub App itself (bug_report_app_repo), which costs an API call. That
+#      lookup is deferred to report_bug_on_exit so a successful run never pays
+#      for it.
 # Placeholder values ("<...>") and empty settings are treated as unset.
 # Best-effort: prints nothing and returns 0 on every non-detectable path.
 bug_report_repo() {
@@ -361,6 +366,50 @@ bug_report_repo() {
   url="$(git -C "${HERE}/.." remote get-url origin 2>/dev/null || true)"
   if [[ -n "${url}" ]]; then
     printf '%s' "${url}" | sed -E 's#.*github\.com[:/]##; s#\.git$##'
+  fi
+}
+
+# The conahcnuj repository as the GitHub App itself sees it: the driver's own
+# project. An installed driver lives outside any git checkout, so when neither
+# CONAHCNUJ_BUG_REPO nor the driver's origin remote resolves (bug_report_repo
+# printed nothing), the only remaining source of truth is the GitHub App: the
+# installation access token can list the repositories its installation can
+# access, and the driver's project is the repository sharing the App's slug
+# (APP_SLUG, read from gh-app/app.env, e.g. "conahcnuj"). That repository is
+# guaranteed to be reachable with the App's own token, unlike the working
+# repository the run may have been operating on.
+# Only ever called on an abnormal exit (report_bug_on_exit), so a successful
+# run never pays for this lookup. Skipped entirely in offline test mode (no
+# mocked response is defined for it). Best-effort: prints nothing and returns 0
+# on every non-detectable path.
+bug_report_app_repo() {
+  local slug json owner match
+  # A placeholder APP_SLUG ("<your-app-name>") means "not configured".
+  slug="$(gh_app_env_value "APP_SLUG")"
+  if [[ -z "${slug}" || "${slug}" == *"<"* ]]; then
+    return 0
+  fi
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    return 0
+  fi
+  json="$(gh_api_call GET "https://api.github.com/installation/repositories?per_page=100" || true)"
+  if [[ -z "${json}" ]]; then
+    return 0
+  fi
+  # Prefer the repository whose short name equals the App slug (the driver's
+  # own project, e.g. "conahcnuj" inside "nahcnuj/conahcnuj").
+  match="$(printf '%s' "${json}" | sed -n "s/.*\"name\":\"${slug}\",\"full_name\":\"\([^\"]*\)\".*/\1/p" | head -1)"
+  if [[ -n "${match}" ]]; then
+    printf '%s\n' "${match}"
+    return 0
+  fi
+  # Fallback: every repository of an installation belongs to the same account,
+  # so the first repository's owner combined with the App slug names the
+  # driver's project even when it is not in the installation's first page.
+  owner="$(printf '%s' "${json}" | grep -oE '"full_name":"[^"/]+' | head -1 | sed -n 's/"full_name":"//p')"
+  if [[ -n "${owner}" ]]; then
+    printf '%s/%s\n' "${owner}" "${slug}"
+    return 0
   fi
 }
 
@@ -420,7 +469,7 @@ report_bug_on_exit() {
   local code="${1:-}"
   local owner="${BUG_REPORT_OWNER:-}" repo="${BUG_REPORT_REPO:-}" input="${BUG_REPORT_INPUT:-}"
   local work_owner="${BUG_WORK_OWNER:-${owner}}" work_repo="${BUG_WORK_REPO:-${repo}}"
-  local branch oid title body num
+  local branch oid title body num pair
   # Complete the run log (close the FIFO, reap the reader) so report_bug_body
   # sees the whole console output, then always clean up, successful run or not.
   run_log_finalize
@@ -428,8 +477,25 @@ report_bug_on_exit() {
     run_log_cleanup
     return 0
   fi
+  # No static bug-report repository was resolved for this run (an installed
+  # layout with neither CONAHCNUJ_BUG_REPO nor the driver's origin remote):
+  # derive the conahcnuj repo from the GitHub App's own installation now. Only
+  # the failure path ever pays for this lookup. When it still resolves to
+  # nothing, fall back to the working repository (the historical behaviour) so
+  # a run that could not be resolved is never silently lost.
   if [[ -z "${owner}" || -z "${repo}" ]]; then
-    echo "WARNING: abnormal exit (${code}) but no owner/repo is known; skipping the bug report." >&2
+    pair="$(bug_report_app_repo)"
+    if [[ -n "${pair}" ]]; then
+      owner="${pair%%/*}"
+      repo="${pair#*/}"
+    else
+      owner="${work_owner}"
+      repo="${work_repo}"
+      echo "WARNING: no bug-report repository could be resolved; filing the report into the working repository ${owner}/${repo}." >&2
+    fi
+  fi
+  if [[ -z "${owner}" || -z "${repo}" ]]; then
+    echo "WARNING: abnormal exit (${code}) but no bug-report repository is known; skipping the bug report." >&2
     BUG_REPORTED="1"
     run_log_cleanup
     return 0
@@ -941,15 +1007,19 @@ main() {
   # being worked on, so the filing never depends on the GitHub App having write
   # access to the working repo. Registered only once the owner/repo and the
   # input are known: a usage error or a failed repo detection has no context to
-  # report to and stays quiet.
+  # report to and stays quiet. When no bug-report repository is configured (no
+  # CONAHCNUJ_BUG_REPO, no app.env value, no origin remote), the target is left
+  # unresolved here and derived from the GitHub App's own installation when the
+  # run terminates abnormally (see report_bug_on_exit), so a successful run
+  # never pays for that lookup.
   local bug_pair bug_owner bug_repo
   bug_pair="$(bug_report_repo)"
-  if [[ -z "${bug_pair}" ]]; then
-    echo "WARNING: no bug-report repository is configured; filing the report into the working repository ${owner}/${repo}. Set CONAHCNUJ_BUG_REPO=owner/repo (or gh-app/app.env) to send it to the conahcnuj repository." >&2
-    bug_pair="${owner}/${repo}"
+  bug_owner=""
+  bug_repo=""
+  if [[ -n "${bug_pair}" ]]; then
+    bug_owner="${bug_pair%%/*}"
+    bug_repo="${bug_pair#*/}"
   fi
-  bug_owner="${bug_pair%%/*}"
-  bug_repo="${bug_pair#*/}"
   BUG_REPORT_OWNER="${bug_owner}"
   BUG_REPORT_REPO="${bug_repo}"
   BUG_WORK_OWNER="${owner}"
