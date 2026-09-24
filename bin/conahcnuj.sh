@@ -620,9 +620,11 @@ implement() {
 post_pr_continuation_comment() {
   local owner="${1}" repo="${2}" pr="${3}"
   if gh_api_post_comment "${owner}" "${repo}" "${pr}" "<!-- conahcnuj-continuation -->
-PR #${pr} の処理を継続するには、Issue auto-drive を手動実行してください。
+PR #${pr} の処理を継続するには、Issue auto-drive を再実行してください。
 
-[継続するにはこちらをクリック](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml/dispatch?inputs%5Bnumber%5D=${pr})" >/dev/null; then
+gh workflow run issue-driver.yml -f number=${pr} -R ${owner}/${repo}
+
+または、GitHub のワークフロー画面から [Issue auto-drive を再実行](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml/dispatch?inputs%5Bnumber%5D=${pr}) をクリックして実行することもできます。" >/dev/null; then
     return 0
   fi
   echo "WARNING: could not post the continuation comment for PR #${pr}." >&2
