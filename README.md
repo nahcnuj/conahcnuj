@@ -80,10 +80,11 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    PR へ返信する。
 3. PR が「Approved かつ全制約通過（ready to merge）」になるまで終了しない。
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開など
-   で PR を解決できずに終了コード非 0 で終わる場合）は、ドライバが対象
+   で PR を解決できずに終了コード非 0 で終わる場合）は、ドライバが conahcnuj
    リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
    `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
-   実行ログ末尾を含む）。
+   実行ログ末尾を含む）。作業中のリポジトリではなく conahcnuj 自身へ作るので、
+   報告先は操作対象の GitHub App に権限が無くてもファイルできる。
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
@@ -91,8 +92,10 @@ X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/r
 offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `bin/conahcnuj.sh` のヘッダーコメントを参照。
 
-`CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
-すべて省略可能です。
+`CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_BUG_REPO=owner/repo`（バグ報告の
+格納先。未設定時は `gh-app/app.env` の設定値、さらに無ければドライバ自身の
+origin remote、最後に作業中リポジトリへフォールバック）、
+`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などはすべて省略可能です。
 
 ## 隔離環境で実行する（Docker）
 

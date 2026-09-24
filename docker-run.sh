@@ -24,7 +24,8 @@
 #   CONAHCNUJ_NAME         container name to use in daemon mode (default: conahcnuj-<epoch>)
 #   OPENCODE_CONFIG_DIR    host opencode config dir (default: ~/.config/opencode)
 #   OPENCODE_DATA_DIR      host opencode data/auth dir (default: ~/.local/share/opencode)
-#   CONAHCNUJ_REPO, CONAHCNUJ_MAX_SECONDS, CONAHCNUJ_POLL_* are passed through.
+#   CONAHCNUJ_REPO, CONAHCNUJ_BUG_REPO, CONAHCNUJ_MAX_SECONDS,
+#   CONAHCNUJ_POLL_* are passed through.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,6 +88,9 @@ trap 'rm -rf "${RUN_DIR}"' EXIT
   printf 'APP_SLUG=%s\n' "${APP_SLUG}"
   printf 'PRIVATE_KEY_PATH=%s\n' "/run/secrets/app.pem"
   printf 'BASH_EXE=%s\n' "/usr/bin/bash"
+  if [[ -n "${CONAHCNUJ_BUG_REPO:-}" ]]; then
+    printf 'CONAHCNUJ_BUG_REPO=%s\n' "${CONAHCNUJ_BUG_REPO}"
+  fi
   if [[ -n "${BOT_USER_ID:-}" ]]; then
     printf 'BOT_USER_ID=%s\n' "${BOT_USER_ID}"
   fi
@@ -94,7 +98,7 @@ trap 'rm -rf "${RUN_DIR}"' EXIT
 
 # Forward driver overrides that are actually set.
 env_args=()
-for name in CONAHCNUJ_REPO CONAHCNUJ_MAX_SECONDS \
+for name in CONAHCNUJ_REPO CONAHCNUJ_BUG_REPO CONAHCNUJ_MAX_SECONDS \
             CONAHCNUJ_POLL_CONDITIONS_MIN CONAHCNUJ_POLL_CONDITIONS_MAX \
             CONAHCNUJ_POLL_REVIEWS_MIN CONAHCNUJ_POLL_REVIEWS_MAX; do
   if [[ -n "${!name:-}" ]]; then

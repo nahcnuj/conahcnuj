@@ -16,14 +16,20 @@
 #      constraints, then replies on the PR
 #   4. exits only when the PR is ready to merge
 #   5. on an abnormal exit (timeout, no model produced changes, unexpected
-#      errors) automatically files a bug report issue in the repository so a
-#      run the driver could not resolve is never silently lost. The report
-#      carries the tail of the run's console output as a detailed error log
+#      errors) automatically files a bug report issue in the conahcnuj
+#      repository (the driver's own project, not the repository being
+#      worked on), so a run the driver could not resolve is never silently
+#      lost. The report carries the tail of the run's console output as a
+#      detailed error log
 #
 # Usage: conahcnuj <issue-or-pr-number>
 #
 # Environment overrides (all optional):
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
+#   CONAHCNUJ_BUG_REPO       owner/repo where abnormal exits file their bug
+#                            report (default: the conahcnuj repo resolved from
+#                            gh-app/app.env, else the driver's own origin remote,
+#                            else the working repository)
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
 #   CONAHCNUJ_POLL_REVIEWS_MIN/MAX     review poll window (default 30/3600 s)
@@ -75,25 +81,35 @@ pr_body_mark_synced() {
 
 # --- Windows relaunch -------------------------------------------------------
 
-# The configured Git Bash: environment override > gh-app/app.env > the
-# committed app.env.example. A placeholder means "not configured", so fall
-# back to the standard Git for Windows location, like setup-git.sh does.
-driver_bash_exe() {
-  local env_file line
-  if [[ -n "${BASH_EXE:-}" ]]; then
-    printf '%s\n' "${BASH_EXE}"
-    return 0
-  fi
+# Read one quoted `KEY="value"` setting from gh-app/app.env, falling back to
+# the committed app.env.example (which is present in every checkout / install).
+# Returns nothing for a missing key or a missing file, so callers can apply
+# their own default. Only simple quoted values are recognised, the same shape
+# the other gh-app settings (BASH_EXE, APP_ID, ...) are written in.
+gh_app_env_value() {
+  local key="${1}" env_file
   env_file="${GH_APP_DIR:-${HERE}/../gh-app}/app.env"
   if [[ ! -f "${env_file}" ]]; then
     env_file="${HERE}/../gh-app/app.env.example"
   fi
   if [[ -f "${env_file}" ]]; then
-    line="$(sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${env_file}" | head -1)"
-    if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
-      printf '%s\n' "${line}"
-      return 0
-    fi
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\"\([^\"]*\)\"[[:space:]]*$/\1/p" "${env_file}" | head -1
+  fi
+}
+
+# The configured Git Bash: environment override > gh-app/app.env > the
+# committed app.env.example. A placeholder means "not configured", so fall
+# back to the standard Git for Windows location, like setup-git.sh does.
+driver_bash_exe() {
+  local value
+  if [[ -n "${BASH_EXE:-}" ]]; then
+    printf '%s\n' "${BASH_EXE}"
+    return 0
+  fi
+  value="$(gh_app_env_value "BASH_EXE")"
+  if [[ -n "${value}" && "${value}" != "<your-bash-exe>" ]]; then
+    printf '%s\n' "${value}"
+    return 0
   fi
   printf '%s\n' "C:/Program Files/Git/bin/bash.exe"
 }
@@ -243,13 +259,21 @@ commit_changes() {
 # --- bug reporting ----------------------------------------------------------
 
 # When the driver terminates abnormally it files a bug report issue in the
-# repository it was working on, so a failed run is never silently lost and the
-# next driver invocation can pick the report up (the driver resolves issues).
+# conahcnuj repository (the driver's own project, not the repository it was
+# working on), so a failed run is never silently lost and the next driver
+# invocation can pick the report up (the driver resolves issues). That keeps
+# bug reports out of repositories the GitHub App may not be able to write to,
+# where filing would fail exactly when the run already went wrong.
 # Best-effort only: the report must never change the exit code, never trigger
 # an extra API call on a successful run, and must not recurse into another
 # report (a failed report files nothing further).
 BUG_REPORT_INPUT=""
 BUG_REPORTED="0"
+# The repository the abnormal run was operating on (the working repo). The
+# report issue goes to BUG_REPORT_OWNER/REPO, but its body still needs to
+# name the repository / issue being worked on, which live here.
+BUG_WORK_OWNER=""
+BUG_WORK_REPO=""
 # Exit code captured by the EXIT trap at runtime ($? is not preserved across a
 # function call). Pre-declared so the trap string's reference is valid.
 bug_exit_code=""
@@ -313,6 +337,33 @@ run_log_cleanup() {
   fi
 }
 
+# The repository that receives automated bug reports ("owner/repo"). Precedence:
+#   1. the CONAHCNUJ_BUG_REPO environment override
+#   2. a CONAHCNUJ_BUG_REPO setting in gh-app/app.env (or app.env.example)
+#   3. the origin remote of the conahcnuj checkout the driver runs from (the
+#      dev / test workflow, where the driver is invoked from its own clone)
+#   4. nothing: the caller keeps the working repository (the historical
+#      behaviour) and warns, because there is no better guess in an installed
+#      layout (~/.local/bin) with no configured value.
+# Placeholder values ("<...>") and empty settings are treated as unset.
+# Best-effort: prints nothing and returns 0 on every non-detectable path.
+bug_report_repo() {
+  local value url
+  if [[ -n "${CONAHCNUJ_BUG_REPO:-}" ]]; then
+    printf '%s\n' "${CONAHCNUJ_BUG_REPO}"
+    return 0
+  fi
+  value="$(gh_app_env_value "CONAHCNUJ_BUG_REPO")"
+  if [[ -n "${value}" && "${value}" != *"<"* ]]; then
+    printf '%s\n' "${value}"
+    return 0
+  fi
+  url="$(git -C "${HERE}/.." remote get-url origin 2>/dev/null || true)"
+  if [[ -n "${url}" ]]; then
+    printf '%s' "${url}" | sed -E 's#.*github\.com[:/]##; s#\.git$##'
+  fi
+}
+
 report_bug_title() {
   local code="${1}" input="${2:-}"
   if [[ -n "${input}" ]]; then
@@ -368,6 +419,7 @@ EOF
 report_bug_on_exit() {
   local code="${1:-}"
   local owner="${BUG_REPORT_OWNER:-}" repo="${BUG_REPORT_REPO:-}" input="${BUG_REPORT_INPUT:-}"
+  local work_owner="${BUG_WORK_OWNER:-${owner}}" work_repo="${BUG_WORK_REPO:-${repo}}"
   local branch oid title body num
   # Complete the run log (close the FIFO, reap the reader) so report_bug_body
   # sees the whole console output, then always clean up, successful run or not.
@@ -385,7 +437,9 @@ report_bug_on_exit() {
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
   title="$(report_bug_title "${code}" "${input}")"
-  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
+  # The report body names the item that was being worked on (the working
+  # repository), while the issue itself lands in the conahcnuj repository.
+  body="$(report_bug_body "${code}" "${work_owner}" "${work_repo}" "${input}" "${branch}" "${oid}")"
   echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
   if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
     if [[ -n "${num}" ]]; then
@@ -882,11 +936,24 @@ main() {
   repo="${repo_info#*/}"
   echo "Repository: ${owner}/${repo}" >&2
 
-  # File a bug report issue when the run terminates abnormally. Registered only
-  # once owner/repo and the input are known: a usage error or a failed repo
-  # detection has no target to report to and stays quiet.
-  BUG_REPORT_OWNER="${owner}"
-  BUG_REPORT_REPO="${repo}"
+  # File a bug report issue when the run terminates abnormally. The report goes
+  # to the conahcnuj repository (the driver's own project), not the repository
+  # being worked on, so the filing never depends on the GitHub App having write
+  # access to the working repo. Registered only once the owner/repo and the
+  # input are known: a usage error or a failed repo detection has no context to
+  # report to and stays quiet.
+  local bug_pair bug_owner bug_repo
+  bug_pair="$(bug_report_repo)"
+  if [[ -z "${bug_pair}" ]]; then
+    echo "WARNING: no bug-report repository is configured; filing the report into the working repository ${owner}/${repo}. Set CONAHCNUJ_BUG_REPO=owner/repo (or gh-app/app.env) to send it to the conahcnuj repository." >&2
+    bug_pair="${owner}/${repo}"
+  fi
+  bug_owner="${bug_pair%%/*}"
+  bug_repo="${bug_pair#*/}"
+  BUG_REPORT_OWNER="${bug_owner}"
+  BUG_REPORT_REPO="${bug_repo}"
+  BUG_WORK_OWNER="${owner}"
+  BUG_WORK_REPO="${repo}"
   BUG_REPORT_INPUT="${input}"
   trap 'bug_exit_code=$?; report_bug_on_exit "${bug_exit_code}"' EXIT
 
