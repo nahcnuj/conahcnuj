@@ -30,6 +30,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
 ├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
 ├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
+├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
 ├── .gitignore
 └── AGENTS.md
 ```
@@ -93,7 +94,7 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
-自動マージは行わない。環境変数の上書き（時間予算・ポーリング幅）や
+ドライバ自身は自動マージを行わない。環境変数の上書き（時間予算・ポーリング幅）や
 offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `bin/conahcnuj.sh` のヘッダーコメントを参照。
 
@@ -115,6 +116,14 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
   `PRIVATE_KEY`（App の秘密鍵 PEM）。runner 上の `GITHUB_TOKEN` は
   `contents: read` のみで、書き込み（ブランチ・コミット・PR・レビュー依頼・
   コメント）はすべてローカル実行と同じく App のインストールトークンで行われます。
+
+## owner 承認後の自動マージ（GitHub Actions）
+
+`.github/workflows/auto-merge.yml` は、owner が open 中の draft でない PR を
+approve すると auto-merge を有効化します。必要な status checks が既に green なら
+その場でマージされ、まだ green でなければ条件達成後にマージされます。書き込みには
+GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
+auto-merge が有効になっている必要があります。
 
 ## 隔離環境で実行する（Docker）
 
