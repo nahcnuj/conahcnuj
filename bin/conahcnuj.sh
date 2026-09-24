@@ -673,10 +673,14 @@ poll_conditions() {
       echo "All non-reviewer constraints pass." >&2
       return 0
     fi
-    # Fallback: if checks pass but mergeable is empty (API parsing issue),
-    # assume mergeable since CI passes.
-    if [[ "${state}" == "SUCCESS" && -z "${mergeable}" ]]; then
-      echo "Checks pass but mergeable state unknown; assuming MERGEABLE." >&2
+    # Once checks are green and GitHub reports no conflict, treat the PR as
+    # satisfying the non-reviewer constraints. GitHub background-computes
+    # mergeability, so until that job finishes mergeable is UNKNOWN (and
+    # mergeStateStatus is UNKNOWN or BLOCKED). Spinning on that would burn
+    # the whole run budget and crash the driver (issue #56); a real conflict
+    # still surfaces as CONFLICTING / DIRTY and is fixed by a new round.
+    if [[ "${state}" == "SUCCESS" && "${mss}" != "DIRTY" && "${mergeable}" != "CONFLICTING" ]]; then
+      echo "Checks pass but mergeability ${mergeable:-not-confirmed}; assuming MERGEABLE." >&2
       return 0
     fi
     if [[ "${state}" == "FAILURE" || "${state}" == "ERROR" || "${mergeable}" == "CONFLICTING" || "${mss}" == "DIRTY" ]]; then
