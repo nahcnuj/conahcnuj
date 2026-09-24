@@ -163,6 +163,9 @@ Reusable Workflow は利用側Workflowの `GITHUB_TOKEN` を使い、secret の
 `pull-requests: write` を許可し、対象リポジトリの **Settings → General →
 Pull Requests** で **Allow auto-merge** を有効にしてください。
 
+`merge-method` は省略すると `merge` です。Merge commitを許可しないリポジトリでは、
+`with` に `merge-method: squash` または `merge-method: rebase` を指定します。
+
 ## 隔離環境で実行する（Docker）
 
 自律実行（opencode が作業ツリーを自由に編集する）をホストから隔離したい場合は、

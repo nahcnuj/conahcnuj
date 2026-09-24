@@ -15,6 +15,11 @@ on:
         description: Pull request head commit that received approval
         required: true
         type: string
+      merge-method:
+        description: Merge method passed to GitHub CLI
+        required: false
+        default: merge
+        type: string
 
 permissions:
   contents: write
@@ -40,9 +45,19 @@ jobs:
           REPOSITORY: ${{ inputs.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
           HEAD_SHA: ${{ inputs.head-sha }}
+          MERGE_METHOD: ${{ inputs.merge-method }}
         run: |
+          case "$MERGE_METHOD" in
+            merge) MERGE_FLAG=--merge ;;
+            squash) MERGE_FLAG=--squash ;;
+            rebase) MERGE_FLAG=--rebase ;;
+            *)
+              echo "unsupported merge method: $MERGE_METHOD" >&2
+              exit 1
+              ;;
+          esac
           gh pr merge "$PR_NUMBER" \
             --repo "$REPOSITORY" \
-            --merge \
+            "$MERGE_FLAG" \
             --auto \
             --match-head-commit "$HEAD_SHA"
