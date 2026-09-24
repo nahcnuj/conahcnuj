@@ -1,8 +1,8 @@
 name: Issue auto-drive
 
-# When an issue is created, attempt to resolve it with the conahcnuj driver
-# end-to-end (feature branch -> PR -> review feedback) and end with a
-# ready-to-merge PR, or file a bug-report issue on failure.
+# When an issue is created or reopened, attempt to resolve it with the
+# conahcnuj driver end-to-end (feature branch -> PR -> review feedback) and
+# end with a ready-to-merge PR, or file a bug-report issue on failure.
 #
 # The timeout is controlled on the Actions side: "timeout-minutes" below is
 # the hard cap for the whole job, and CONAHCNUJ_MAX_SECONDS is kept just under
@@ -17,7 +17,7 @@ name: Issue auto-drive
 
 on:
   issues:
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   contents: read
