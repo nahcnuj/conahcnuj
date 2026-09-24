@@ -53,6 +53,7 @@ cat > "${TAPE}" <<'EOF'
 {"number": 25}
 EOF
 
+unset CONAHCNUJ_COMMIT_MODEL
 export CONAHCNUJ_TEST_MODE=1
 export GH_API_TEST_MODE=1
 export OPENCODE_TEST_MODE=1

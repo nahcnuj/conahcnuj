@@ -236,7 +236,7 @@ branch_has_commits() {
 # Otherwise use the display name the OpenCode plugin wrote under os.tmpdir(), and
 # fall back to the provider/model id that produced the working-tree change.
 apply_driver_commit_model() {
-  if [[ -n "${USER_COMMIT_MODEL}" ]]; then
+  if [[ -n "${USER_COMMIT_MODEL}" && "${TEST_MODE:-0}" != "1" ]]; then
     CONAHCNUJ_COMMIT_MODEL="${USER_COMMIT_MODEL}"
     export CONAHCNUJ_COMMIT_MODEL
     return 0
