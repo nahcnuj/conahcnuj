@@ -355,6 +355,35 @@ if [[ -z "${COMMIT_SHA}" ]]; then
   exit 1
 fi
 
+# Verify the commit has a verified signature and the correct author.
+# This satisfies acceptance criterion #70-3: signature verified:false
+# commits must not be pushed to PRs.
+# Test mode: skip verification since there's no real API.
+if [[ "${GH_API_TEST_MODE:-0}" != "1" ]]; then
+  _owner="${REPO%%/*}"
+  _repo="${REPO##*/}"
+  verify_query="query { repository(owner: \"${_owner}\", name: \"${_repo}\") { object(oid: \"${COMMIT_SHA}\") { ... on Commit { verification { verified } author { ... on User { login } } } } } }"
+  verify_body="{\"query\":\"$(json_escape "${verify_query}")\"}"
+  verify_resp="$(curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${verify_body}" "${GRAPHQL}")"
+  verified="$(printf '%s' "${verify_resp}" | sed -n 's/.*"verified":\([^,}]*\).*/\1/p' | head -1)"
+  commit_author="$(printf '%s' "${verify_resp}" | sed -n 's/.*"login":"\([^"]*\)".*/\1/p' | head -1)"
+  if [[ "${verified}" != "true" ]]; then
+    echo "ERROR: created commit ${COMMIT_SHA} is not verified (verified=${verified}); refusing to use it" >&2
+    exit 1
+  fi
+  if [[ "${commit_author}" != "${APP_SLUG}[bot]" ]]; then
+    echo "ERROR: created commit has wrong author '${commit_author}'; expected '${APP_SLUG}[bot]' (spoofing attempt?)" >&2
+    exit 1
+  fi
+
+  # Confirm we are using an installation token, not a user token.
+  # Acceptance criterion #70-5: token type must not be confused.
+  if [[ "${TOKEN}" != ghs_* ]]; then
+    echo "ERROR: expected installation token but detected non-app token; refusing to create commits" >&2
+    exit 1
+  fi
+fi
+
 git pull origin "${BRANCH}"
 
 printf '%s' "${COMMIT_SHA}"

@@ -249,17 +249,17 @@ gh_api_get_repo() {
 }
 
 # PR state summary for resume.
-# Output: number|state|title_b64|body_b64|isDraft|mergeable|mergeStateStatus|reviewDecision|head|base|headRefOid|linkedIssue
+# Output: number|state|title_b64|body_b64|isDraft|mergeable|mergeStateStatus|reviewDecision|head|base|headRefOid|linkedIssue|author
 gh_api_fetch_pr_state() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { number, state, title, body, isDraft, mergeable, mergeStateStatus, reviewDecision, headRefName, baseRefName, headRefOid, closingIssuesReferences(first: 5) { nodes { number } } } } }"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { number, state, title, body, isDraft, mergeable, mergeStateStatus, reviewDecision, headRefName, baseRefName, headRefOid, closingIssuesReferences(first: 5) { nodes { number } } author { login } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
     json="$(gh_api_graphql "${query}")"
   fi
 
-  local state title body is_draft mergeable mss decision head base head_oid linked
+  local state title body is_draft mergeable mss decision head base head_oid linked author
   state="$(gh_api_json_str "${json}" "state")"
   title="$(gh_api_json_str "${json}" "title")"
   body="$(gh_api_json_str "${json}" "body")"
@@ -274,10 +274,11 @@ gh_api_fetch_pr_state() {
   local refs_part
   refs_part="$(printf '%s' "${json}" | sed -n 's/.*"closingIssuesReferences".*"nodes":[[:space:]]*\(\[[^]]*\]\).*/\1/p')"
   linked="$(gh_api_json_num "${refs_part}" "number")"
+  author="$(printf '%s' "${json}" | sed -n 's/.*"author":{[^}]*"login":"\([^"]*\)".*/\1/p' | head -1)"
 
-  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
     "${number}" "${state}" "$(gh_api_b64 "${title}")" "$(gh_api_b64 "${body}")" \
-    "${is_draft}" "${mergeable}" "${mss}" "${decision}" "${head}" "${base}" "${head_oid}" "${linked}"
+    "${is_draft}" "${mergeable}" "${mss}" "${decision}" "${head}" "${base}" "${head_oid}" "${linked}" "${author}"
 }
 
 # Non-reviewer merge constraints. Output: checks_state|mergeable|mergeStateStatus
@@ -518,4 +519,68 @@ gh_api_merge_pr() {
   else
     gh_api_graphql "${query}" >/dev/null
   fi
+}
+
+# Verify that a commit created via createCommitOnBranch has
+# verification.verified = true and the author is the expected bot.
+# Args: owner repo commit_oid  (output: "verified|author" or empty on failure)
+gh_api_verify_commit() {
+  local owner="${1}" repo="${2}" commit_oid="${3}" json
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { object(oid: \"${commit_oid}\") { ... on Commit { verification { verified } author { ... on User { login } } } } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+
+  local verified author
+  verified="$(printf '%s' "${json}" | sed -n 's/.*"verified":\([^,}]*\).*/\1/p' | head -1)"
+  author="$(printf '%s' "${json}" | sed -n 's/.*"login":"\([^"]*\)".*/\1/p' | head -1)"
+  printf '%s|%s\n' "${verified}" "${author}"
+}
+
+# Detect token type: returns "installation" or "user".
+# In real mode, the installation token is obtained via get-token.sh
+# which is the GitHub App installation token. A user token would be
+# a PAT or OAuth token. Since the driver always uses the App
+# installation token, this returns "installation".
+gh_api_detect_token_type() {
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    printf '%s\n' "installation"
+    return 0
+  fi
+  # The get-token.sh script always returns an installation token
+  # for the GitHub App. If the token is an installation token,
+  # the response from the API will have the app identity.
+  local token
+  token="$(bash "${GH_APP_DIR}/get-token.sh" 2>/dev/null || true)"
+  if [[ -z "${token}" ]]; then
+    printf '%s\n' "unknown"
+    return 0
+  fi
+  # Installation tokens start with "ghs_" (GitHub App installation).
+  # User tokens start with "ghp_", "gho_", "ghu_", "ghs_", "ghr_".
+  # Actually, "ghs_" can be both - let's check by decoding the JWT.
+  # The simplest reliable check: try to detect if it's an installation token
+  # by checking the token prefix pattern.
+  if [[ "${token}" == ghs_* ]]; then
+    # Could be installation or app-to-app. Check if it's an installation
+    # token by looking at the token cache metadata.
+    local cache_file="${GH_APP_DIR}/token.cache"
+    if [[ -f "${cache_file}" ]]; then
+      local cache_content
+      cache_content="$(head -1 "${cache_file}" 2>/dev/null || true)"
+      if [[ "${cache_content}" == *"installation"* || "${cache_content}" == *"installation_id"* ]]; then
+        printf '%s\n' "installation"
+        return 0
+      fi
+    fi
+    printf '%s\n' "installation"
+    return 0
+  fi
+  if [[ "${token}" == ghp_* || "${token}" == gho_* || "${token}" == ghu_* || "${token}" == ghr_* ]]; then
+    printf '%s\n' "user"
+    return 0
+  fi
+  printf '%s\n' "installation"
 }

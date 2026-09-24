@@ -800,6 +800,16 @@ drive() {
     sig="$(gh_api_review_fingerprint "${raw}")"
     echo "reviewDecision: ${decision:-NONE}" >&2
 
+    # Self-approval detection: PR author must not approve their own PR.
+    # Acceptance criterion #70-4: warn explicitly on self-approval.
+    if [[ -n "${CONAHCNUJ_PR_AUTHOR:-}" ]]; then
+      local self_approval
+      self_approval="$(printf '%s' "${raw}" | grep -oE '"login":"[^"]*"' | sed 's/"login":"//; s/"$//' | grep -i "^${CONAHCNUJ_PR_AUTHOR}$" || true)"
+      if [[ -n "${self_approval}" ]]; then
+        echo "WARNING: PR author ${CONAHCNUJ_PR_AUTHOR} appears to have self-approved the PR; self-approval is not valid." >&2
+      fi
+    fi
+
     if [[ "${decision}" == "APPROVED" ]]; then
       if poll_conditions "${owner}" "${repo}" "${pr}"; then
         echo "PR #${pr} is APPROVED and every non-reviewer constraint passes." >&2
@@ -894,6 +904,7 @@ start_issue() {
     commit_changes
   fi
 
+  CONAHCNUJ_PR_AUTHOR=""
   drive "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}"
 }
 
@@ -907,6 +918,9 @@ resume_pr() {
   head="$(printf '%s' "${ps}" | cut -d'|' -f9)"
   base="$(printf '%s' "${ps}" | cut -d'|' -f10)"
   closes="$(printf '%s' "${ps}" | cut -d'|' -f12)"
+  pr_author="$(printf '%s' "${ps}" | cut -d'|' -f13)"
+  # Make pr_author available to drive().
+  export CONAHCNUJ_PR_AUTHOR="${pr_author}"
   title="$(gh_api_unb64 "${title_b64}")"
   body="$(gh_api_unescape "$(gh_api_unb64 "${body_b64}")")"
   echo "PR #${pr}: state=${state} head=${head} base=${base}" >&2

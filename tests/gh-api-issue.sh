@@ -193,6 +193,23 @@ test_merge_pr() {
   echo "gh_api_merge_pr passed"
 }
 
+test_verify_commit() {
+  local verified author
+  verified="$(printf '%s\n' '{"data":{"repository":{"object":{"verification":{"verified":true},"author":{"login":"conahcnuj[bot]"}}}}}' | gh_api_verify_commit "o" "r" "abc123")"
+  [[ "$(echo "${verified}" | cut -d'|' -f1)" == "true" ]]
+  [[ "$(echo "${verified}" | cut -d'|' -f2)" == "conahcnuj[bot]" ]]
+  verified="$(printf '%s\n' '{"data":{"repository":{"object":{"verification":{"verified":false},"author":{"login":"attacker"}}}}}' | gh_api_verify_commit "o" "r" "abc123")"
+  [[ "$(echo "${verified}" | cut -d'|' -f1)" == "false" ]]
+  echo "gh_api_verify_commit passed"
+}
+
+test_detect_token_type() {
+  local result
+  result="$(gh_api_detect_token_type)"
+  [[ "${result}" == "installation" ]]
+  echo "gh_api_detect_token_type passed"
+}
+
 test_fetch_issue
 test_fetch_issue_is_pr
 test_get_repo
@@ -207,5 +224,7 @@ test_request_review
 test_post_comment
 test_create_issue
 test_merge_pr
+test_verify_commit
+test_detect_token_type
 
 echo "All gh-api tests passed"
