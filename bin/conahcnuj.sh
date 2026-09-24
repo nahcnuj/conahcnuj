@@ -624,7 +624,7 @@ PR #${pr} の処理を継続するには、Issue auto-drive を再実行して�
 
 gh workflow run issue-driver.yml -f number=${pr} -R ${owner}/${repo}
 
-または、GitHub のワークフロー画面から [Issue auto-drive を再実行](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml/dispatch?inputs%5Bnumber%5D=${pr}) をクリックして実行することもできます。" >/dev/null; then
+または、GitHub の [Issue auto-drive](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml) を開き、Run workflow から number に ${pr} を入力して実行してください。" >/dev/null; then
     return 0
   fi
   echo "WARNING: could not post the continuation comment for PR #${pr}." >&2
