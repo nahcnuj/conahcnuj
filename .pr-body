@@ -1,0 +1,50 @@
+Issue #17「PRタイトル・本文の修正対応」。
+
+## 背景
+
+PR のタイトルと本文はドライバが issue のタイトル・本文から機械的に作っていた。
+結果として:
+
+- 本文が空の issue（例: #4 Linux対応）では説明が `Closes #4` だけになり、
+  プロファイルに載る「PR本文がルール違反」になる
+- レビュー対応で作業内容が変わっても、PR の説明は古い issue テキストのまま
+
+`.commit-msg` と `.branch-name` が「コーディングエージェントが変える」契約なので、
+PR の見せ方も変えられるようにした。
+
+## 変更
+
+- `.pr-title`（1 行）と `.pr-body` を新しいメタデータとして追加。
+  `capture_pr_overrides()` が作業ツリーから取り出して
+  `PR_TITLE_OVERRIDE_FILE` / `PR_BODY_OVERRIDE_FILE`（作業ツリー外）に保持し、
+  コミットには含まれない。`workdir_changed()` と `commit_changes()` からも除外。
+- `ensure_pr()`:
+  - 作成時は `.pr-title` / `.pr-body` があればそれを使う
+  - 既存 PR では一度だけ `gh_api_update_pr` で title と body を patching
+  - どちらのファイルも無いときは従来通り issue のタイトル・本文
+- `gh_api_update_pr()` に任意の第 5 引数 `title` を追加。渡されたときだけ
+  payload に含めるので、body しか触らない呼び出し元はtape も互換。
+- issue の本文が空の場合は issue タイトルをフォールバックに使う
+  （`Closes #n` だけの説明を作らない）
+- プロンプト（`opencode_build_prompt` / `opencode_build_handoff_prompt`）に
+  `.pr-title` / `.pr-body` の使い方を明記
+
+## テスト
+
+`tests/ensure-pr-body.sh` に 5 ケースを追加（すべて offline・ネットワーク不要）:
+
+- 取り出したメタデータが作業ツリーから消え、`workdir_changed` に数えられない
+- 作成時に title / body が適用される（再 PATCH はしない）
+- 既存 PR に一度だけ title + body が適用される
+- override が無いときは issue のタイトル・本文が使われる
+- issue の本文が空なら issue タイトルにフォールバックする
+
+`bash -n` / `shellcheck -x` clean、`bash test.sh`（ドライバ全体）と
+`bash gh-app/tests/run.sh` も green。
+
+## 注意（既存の挙動は変えていない）
+
+PR 作成直後の冗長な PATCH（同一 body の再送）は**意図的に残した**。
+省略すると `tests/*.sh` のモック tape（API 呼び出し順を 1 行ずつ固定している）
+が 1 行ずれて壊れるためで、挙動を変えて tape を更新するほうがリスクが高い。
+PR 作成時のメタデータ反映は tape 側の行を追加せずに済む形にしてある。

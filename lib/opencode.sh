@@ -39,14 +39,16 @@ When you are done, write a short, descriptive commit message (one line, no more 
   if [[ -z "${extra_context}" ]]; then
     prompt="${prompt}
 
-If you want to choose the feature branch name, write your preferred branch name (one line, e.g. feature/my-work) to the file .branch-name in the repository root; if you leave the file absent, the driver picks a name for you."
+If you want to choose the feature branch name, write your preferred branch name (one line, e.g. feature/my-work) to the file .branch-name in the repository root; if you leave the file absent, the driver picks a name for you.
+
+If the pull request title or description should differ from the issue (for example when the issue has no body, or after a review round changed what the work does), write the PR title as one line to .pr-title and the PR description to .pr-body in the repository root. The driver applies them to the pull request and closes them when it does; they are never committed."
   fi
   printf '%s\n' "${prompt}"
 }
 
 opencode_build_handoff_prompt() {
   local previous_model="${1}"
-  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}"
+  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root. If the finished work should be presented differently in the pull request (the issue title/body no longer describe it), also write .pr-title (one line) and .pr-body to the repository root; the driver applies them to the PR and they are never committed.\n' "${previous_model}"
 }
 
 # Run opencode with a specific model and publish its session ID in

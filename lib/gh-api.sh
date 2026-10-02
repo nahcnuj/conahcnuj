@@ -462,12 +462,17 @@ gh_api_create_pr() {
   gh_api_json_num "${json}" "number"
 }
 
-# Update a PR's body so it stays in sync with the linked issue. Args: owner repo pr body
+# Update a PR's title and/or body. Args: owner repo pr body [title]
+# The title is only sent when it is given, so callers that only manage the body
+# keep their previous behaviour (and their mock tapes stay valid).
 # (Discards the updated PR JSON; the response must not leak into the caller's stdout.)
 gh_api_update_pr() {
-  local owner="${1}" repo="${2}" number="${3}" body="${4}"
+  local owner="${1}" repo="${2}" number="${3}" body="${4}" title="${5:-}"
   local payload
   payload="{\"body\":\"$(gh_api_escape "${body}")\"}"
+  if [[ -n "${title}" ]]; then
+    payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\"}"
+  fi
   gh_api_call PATCH "https://api.github.com/repos/${owner}/${repo}/pulls/${number}" "${payload}" >/dev/null
 }
 
