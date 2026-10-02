@@ -16,13 +16,13 @@ on:
         required: true
         type: string
       merge-method:
-        description: Merge method passed to GitHub CLI
+        description: Merge method used when auto-merging
         required: false
         default: merge
         type: string
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 concurrency:
@@ -47,17 +47,34 @@ jobs:
           HEAD_SHA: ${{ inputs.head-sha }}
           MERGE_METHOD: ${{ inputs.merge-method }}
         run: |
+          set -euo pipefail
+
+          # GITHUB_TOKEN でマージするとそのマージ由来の push では workflow が起動しない
+          # （再帰実行を防ぐ GitHub の仕様）ため、GitHub 自身がマージする
+          # ネイティブ auto-merge を有効化する。
           case "$MERGE_METHOD" in
-            merge) MERGE_FLAG=--merge ;;
-            squash) MERGE_FLAG=--squash ;;
-            rebase) MERGE_FLAG=--rebase ;;
+            merge) MERGE_METHOD_ENUM=MERGE ;;
+            squash) MERGE_METHOD_ENUM=SQUASH ;;
+            rebase) MERGE_METHOD_ENUM=REBASE ;;
             *)
               echo "unsupported merge method: $MERGE_METHOD" >&2
               exit 1
               ;;
           esac
-          gh pr merge "$PR_NUMBER" \
-            --repo "$REPOSITORY" \
-            "$MERGE_FLAG" \
-            --auto \
-            --match-head-commit "$HEAD_SHA"
+
+          pull_request="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          current_head="$(printf '%s' "$pull_request" | jq -r .head.sha)"
+          if [ "$current_head" != "$HEAD_SHA" ]; then
+            echo "approved commit $HEAD_SHA is not the current head $current_head; skipping"
+            exit 0
+          fi
+          pull_request_id="$(printf '%s' "$pull_request" | jq -r .node_id)"
+
+          gh api graphql -f query="
+            mutation {
+              enablePullRequestAutoMerge(
+                input: { pullRequestId: \"$pull_request_id\", mergeMethod: $MERGE_METHOD_ENUM }
+              ) {
+                clientMutationId
+              }
+            }"
