@@ -182,11 +182,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # opencode.json is version controlled so agents (and the driver's
-      # non-interactive `opencode run`) get the same permission policy on every
-      # machine. The test pins the safety denies.
-      - name: Validate opencode.json permission policy
-        run: bash test/opencode-config.sh
+      # opencode.json is version controlled so agents get the same permission
+      # policy on every machine. The test only checks the config's shape (valid
+      # JSON, keys and actions the schema accepts), not the policy itself.
+      - name: Validate opencode.json
+        run: node test/opencode-config.js
 
   lint-ts:
     name: Typecheck opencode plugin

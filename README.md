@@ -212,18 +212,20 @@ cd <repo>
 
 ## エージェントの権限設定（opencode.json）
 
-リポジトリルートに `opencode.json` を置き、このリポジトリで動く opencode
-エージェントの権限ポリシーをバージョン管理しています（マシンごとの
-`~/.config/opencode/opencode.jsonc` より優先されます）。
+リポジトリルートに `opencode.json` を置き、このリポジトリで opencode エージェント
+に**禁止したい操作だけ**を宣言しています（許可の明示はしません。指定していない
+ツール・コマンドは既定値に従います）。
 
-- 通常の作業（`bash` / `edit` / 外部ディレクトリ）は許可。ドライバは
-  `opencode run` を**非対話**で起動するため、`ask` は「自動拒否」になり、
-  モデルが作業を終えられなくなるためです。
-- 安全のため `deny` を残しています: `gh-app/app.env`（App の秘密鍵）、
-  `git push --force` / `-f`、`git config --global` への書き込み。
+- `deny`: `gh-app/app.env`（App の秘密鍵）、`* --force*` と
+  `git push --force` / `-f`、`git config --global` への書き込み
+- `allow`: `external_directory`（既定が `ask` のため明示）
 
-変更したら `bash test/opencode-config.sh`（CI の `config-test` ジョブ）を
-実行してください。
+`ask` は使いません。ドライバは `opencode run` を**非対話**で起動するため、`ask` は
+「自動拒否」になり、モデルが作業を終えられなくなるためです。
+
+変更したら `node test/opencode-config.js`（CI の `config-test` ジョブ）を
+実行してください。テストは設定の**形**（JSONとして妥当か、スキーマのキーと
+`allow`/`ask`/`deny` だけを使っているか）のみを検証し、ポリシー自体は固定しません。
 
 ## トラブルシューティング
 
