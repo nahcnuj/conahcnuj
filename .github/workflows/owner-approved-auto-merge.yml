@@ -20,16 +20,18 @@ on:
         required: false
         default: merge
         type: string
-    secrets:
-      auto-merge-token:
+      post-merge-dispatch:
         description: >-
-          User token (PAT) used to enable auto-merge. GITHUB_TOKEN cannot:
-          the API answers "Resource not accessible by integration", and a
-          token-driven merge would not start the caller's on: push workflows.
-        required: true
+          Workflow to dispatch after the merge succeeds (e.g. cd.yml). GITHUB_TOKEN merges
+          do not emit a push event, so deploy workflows need an explicit dispatch.
+        required: false
+        default: ''
+        type: string
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+  actions: write
 
 concurrency:
   group: conahcnuj-auto-merge-${{ github.event.pull_request.number }}
@@ -43,26 +45,19 @@ jobs:
       github.event.review.state == 'approved' &&
       github.event.review.author_association == 'OWNER'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # CI の完了待ちは gh pr checks --watch で行うため、checks の所要時間ぶん確保する
+    timeout-minutes: 30
     steps:
-      - name: Enable auto-merge
+      - name: Merge and dispatch
         env:
-          GH_TOKEN: ${{ secrets.auto-merge-token }}
+          GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ inputs.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
           HEAD_SHA: ${{ inputs.head-sha }}
           MERGE_METHOD: ${{ inputs.merge-method }}
+          POST_MERGE_DISPATCH: ${{ inputs.post-merge-dispatch }}
         run: |
           set -euo pipefail
-
-          # required secret として宣言しても、caller 側の repository secret が未設定だと
-          # 空文字で渡る。auto-merge は「設定されているリポジトリだけ」有効になる機能なので、
-          # 未設定は異常ではなく未構成として warning でスキップする（空の token を gh に
-          # 渡すと exit 4 になるだけで、原因がログに残らない）。
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::warning title=auto-merge not configured::no user token secret; add the repository secret named by the caller (e.g. AUTO_MERGE_TOKEN) to enable auto-merge"
-            exit 0
-          fi
 
           case "$MERGE_METHOD" in
             merge) MERGE_FLAG=--merge ;;
@@ -73,8 +68,36 @@ jobs:
               exit 1
               ;;
           esac
+
+          pull_request="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          current_head="$(printf '%s' "$pull_request" | jq -r .head.sha)"
+          if [ "$current_head" != "$HEAD_SHA" ]; then
+            echo "approved commit $HEAD_SHA is not the current head $current_head; skipping"
+            exit 0
+          fi
+
+          # ネイティブ auto-merge は integration token では有効化できない
+          # （"Resource not accessible by integration"）ため、checks を待って自前で
+          # マージする。GITHUB_TOKEN のマージは push イベントを発生させない
+          # ので、呼び出し側が post-merge-dispatch でデプロイを起動する。
+          if ! checks_output="$(gh pr checks "$PR_NUMBER" --repo "$REPOSITORY" --watch --interval 30 2>&1)"; then
+            if printf '%s' "$checks_output" | grep -q 'no checks reported'; then
+              echo 'no checks reported on the PR; merging'
+            else
+              printf '%s\n' "$checks_output"
+              echo "checks did not pass for $REPOSITORY#$PR_NUMBER" >&2
+              exit 1
+            fi
+          else
+            printf '%s\n' "$checks_output"
+          fi
+
           gh pr merge "$PR_NUMBER" \
             --repo "$REPOSITORY" \
             "$MERGE_FLAG" \
-            --auto \
             --match-head-commit "$HEAD_SHA"
+
+          if [ -n "$POST_MERGE_DISPATCH" ]; then
+            echo "dispatching $POST_MERGE_DISPATCH on $REPOSITORY"
+            gh workflow run "$POST_MERGE_DISPATCH" --repo "$REPOSITORY"
+          fi
