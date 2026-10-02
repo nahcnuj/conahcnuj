@@ -81,6 +81,9 @@ echo "-----------------------------"
 grep -q "already has commits; skipping implement" "${LOG}" || { echo "FAIL: implement was not skipped"; exit 1; }
 grep -q "Implementing with available models" "${LOG}" && { echo "FAIL: the driver still ran the model fall-through"; exit 1; }
 grep -q "Created PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; exit 1; }
+# Implement was skipped, so no .pr-body exists: the run log must say so and the
+# description falls back to the issue text.
+grep -q "the coding agent wrote no .pr-body" "${LOG}" || { echo "FAIL: the missing .pr-body was not reported"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }

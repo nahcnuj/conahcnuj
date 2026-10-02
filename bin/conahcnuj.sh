@@ -3,14 +3,18 @@
 #
 # Resolves a GitHub issue (or resumes a pull request) end-to-end. The coding
 # agent, not the driver, decides how the work is presented: it writes the
-# commit message (.commit-msg) and may choose the feature branch name
-# (.branch-name; when the agent leaves none out, the driver picks one). A PR
+# commit message (.commit-msg), the pull request description (.pr-body) and
+# may choose the feature branch name (.branch-name; when the agent leaves none
+# out, the driver picks one). The .pr-body text becomes the PR body (behind the
+# "Closes #<n>" line); without one the driver falls back to the linked issue's
+# text, and never opens a PR with an empty (or literal "null") description. A PR
 # number given on the command line is detected and resumed automatically:
 #   1. checks out the latest default branch and implements the issue with
 #      opencode (handing the same session and working tree to another model
 #      when one fails), committing only with the agent's .commit-msg
-#   2. opens a PR, waits until every non-reviewer constraint (CI checks,
-#      mergeability) passes, then requests review
+#   2. opens a PR with the agent's .pr-body as its description, waits until every
+#      non-reviewer constraint (CI checks, mergeability) passes, then requests
+#      review
 #   3. polls the review status; addresses comments / requested changes /
 #      security-review threads, pushes and re-verifies non-reviewer
 #      constraints, then replies on the PR
@@ -63,27 +67,112 @@ if [[ "${TEST_MODE}" == "1" ]]; then
   rate_limit_poll_sleep() { :; }
 fi
 
-# Marker file so the PR body sync below runs at most once per driver process.
-# A file (not a shell variable) because ensure_pr runs in a command-substitution
+# Scratch files so the PR description sync runs at most once per distinct body.
+# Files (not shell variables) because ensure_pr runs in a command-substitution
 # subshell whose variable assignments would not survive back to the caller.
-# Lazy existence is not enough (mktemp creates an empty file), so the marker is
-# a "1" written into the file. Lives outside the work tree so it is never picked
-# up by `git add -A`.
-PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
+# Lazy existence is not enough (mktemp creates an empty file), so
+# PR_BODY_PUBLISHED_FILE holds the description that was last written to the PR.
+# Both live outside the work tree so they are never picked up by `git add -A`.
+PR_BODY_PUBLISHED_FILE="${PR_BODY_PUBLISHED_FILE:-$(mktemp)}"
 PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
+# The coding agent's pull request description (.pr-body), captured out of the
+# work tree for the same reason.
+AGENT_PR_BODY_FILE="${AGENT_PR_BODY_FILE:-$(mktemp)}"
 
-# True once the per-process PR body sync has already run.
-pr_body_synced() {
-  [[ "$(cat "${PR_BODY_SYNCED_FILE}" 2>/dev/null || true)" == "1" ]]
-}
-pr_body_mark_synced() {
-  printf '1\n' > "${PR_BODY_SYNCED_FILE}"
-}
 pr_continuation_commented() {
   [[ "$(cat "${PR_CONTINUATION_COMMENTED_FILE}" 2>/dev/null || true)" == "1" ]]
 }
 pr_continuation_mark_commented() {
   printf '1\n' > "${PR_CONTINUATION_COMMENTED_FILE}"
+}
+
+# --- pull request description ------------------------------------------------
+
+# Normalize a pull request description: CRLF to LF, trailing blank lines
+# dropped, and the JSON literals "null" / "\"\"" (what the API reports for a
+# missing or empty body) treated as no description at all. A body reading
+# "null" cannot be reviewed, so the literal must never reach GitHub.
+pr_body_clean() {
+  local text
+  text="$(printf '%s' "${1:-}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
+  case "${text}" in
+    null | '""') text="" ;;
+  esac
+  printf '%s\n' "${text}"
+}
+
+# The description the coding agent wrote this run, if any. Prints nothing when
+# no round produced one.
+agent_pr_body() {
+  [[ -f "${AGENT_PR_BODY_FILE}" ]] || return 0
+  pr_body_clean "$(cat "${AGENT_PR_BODY_FILE}")"
+}
+
+# Take the coding agent's .pr-body out of the work tree and remember it. Like
+# .commit-msg and .branch-name it is metadata, never part of the implementation,
+# so it must not be committed; the scratch copy lives outside the work tree.
+# A blank .pr-body is dropped with a warning so the driver falls back to the
+# issue text instead of publishing an empty description.
+capture_agent_pr_body() {
+  local dir="${1}" text
+  [[ -f "${dir}/.pr-body" ]] || return 0
+  text="$(pr_body_clean "$(cat "${dir}/.pr-body")")"
+  rm -f "${dir}/.pr-body"
+  if [[ -z "${text}" ]]; then
+    echo "WARNING: the coding agent's .pr-body is empty; using the issue text instead." >&2
+    return 0
+  fi
+  printf '%s\n' "${text}" > "${AGENT_PR_BODY_FILE}"
+  echo "Using the coding agent's PR description (${#text} characters)." >&2
+}
+
+# Compose the description to submit for the pull request. Priority: what the
+# coding agent wrote (.pr-body), then the issue text (or the description a
+# resumed PR already carries), and never empty: a PR without a description
+# cannot be reviewed. Args: closes (issue number or empty) title fallback
+compose_pr_body() {
+  local closes="${1}" title="${2}" fallback="${3}" desc
+  desc="$(agent_pr_body)"
+  if [[ -z "${desc}" ]]; then
+    desc="$(pr_body_clean "${fallback}")"
+  fi
+  if [[ -z "${desc}" ]]; then
+    # An issue with an empty body and no .pr-body: at least name the change.
+    desc="$(pr_body_clean "${title}")"
+  fi
+  if [[ -z "${desc}" ]]; then
+    desc="Automated change produced by the conahcnuj driver."
+  fi
+  if [[ -n "${closes}" ]]; then
+    printf 'Closes #%s\n\n%s\n' "${closes}" "${desc}"
+  else
+    printf '%s\n' "${desc}"
+  fi
+}
+
+# Write the description to the PR when it differs from the one the PR already
+# carries. Idempotent: PR_BODY_PUBLISHED_FILE remembers what was last written,
+# so a poll loop never re-PATCHes an unchanged description while a later round
+# that revises .pr-body does update the PR once.
+# Args: owner repo pr body current
+publish_pr_body() {
+  local owner="${1}" repo="${2}" pr="${3}" body="${4}" current="${5}" published
+  [[ -n "${pr}" ]] || return 0
+  [[ -n "${body}" ]] || return 0
+  published="$(cat "${PR_BODY_PUBLISHED_FILE}" 2>/dev/null || true)"
+  if [[ "${published}" == "${body}" ]]; then
+    return 0
+  fi
+  if [[ "${body}" == "${current}" ]]; then
+    # The PR already carries exactly this description (a resumed PR with a
+    # hand-written body): remember it instead of PATCHing it needlessly.
+    printf '%s\n' "${body}" > "${PR_BODY_PUBLISHED_FILE}"
+    return 0
+  fi
+  echo "Publishing the PR description on PR #${pr}." >&2
+  if gh_api_update_pr "${owner}" "${repo}" "${pr}" "${body}"; then
+    printf '%s\n' "${body}" > "${PR_BODY_PUBLISHED_FILE}"
+  fi
 }
 
 # --- Windows relaunch -------------------------------------------------------
@@ -183,12 +272,12 @@ check_timeout() {
 }
 
 # True when the working tree holds real changes. The coding agent's
-# .commit-msg and .branch-name are metadata, not code changes, so they are
-# ignored: a model that writes nothing but a commit message or a branch name
-# must not count as having produced work.
+# .commit-msg, .branch-name and .pr-body are metadata, not code changes, so they
+# are ignored: a model that writes nothing but a commit message, a branch name
+# or a PR description must not count as having produced work.
 workdir_changed() {
   local dir="${1}" changes
-  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' || true)"
+  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' | grep -v '\.pr-body' || true)"
   [[ -n "${changes}" ]]
 }
 
@@ -253,8 +342,11 @@ apply_driver_commit_model() {
 # test mode adds the same trailer with a second -m paragraph.
 commit_changes() {
   local message
-  # .branch-name is metadata, never part of the implementation.
+  # .branch-name and .pr-body are metadata, never part of the implementation;
+  # capture_agent_pr_body keeps the description outside the tree before
+  # `git add -A` can stage it.
   rm -f .branch-name
+  capture_agent_pr_body "$(pwd)"
   if [[ ! -f ".commit-msg" ]]; then
     echo "ERROR: the coding agent left no .commit-msg; refusing to commit with a fixed message." >&2
     return 1
@@ -600,6 +692,8 @@ implement() {
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
     if workdir_changed "${workdir}" && [[ -s "${workdir}/.commit-msg" ]]; then
       echo "Model ${model} completed the work." >&2
+      # Take the PR description the agent wrote before any commit can stage it.
+      capture_agent_pr_body "${workdir}"
       OPENCODE_LAST_MODEL="${model}"
       return 0
     fi
@@ -629,31 +723,22 @@ PR #${pr} の処理を継続するには、Issue auto-drive を手動実行し�
   return 1
 }
 
-# Reuse the open PR for this head branch, else create one. Both reuse paths keep
-# the PR body derived from the linked issue ("Closes #<n>\n\n<issue body>"), so a
-# PR that was created without a written body (or with a stale one) gets it set.
-# The update runs at most once per driver process (PR_BODY_SYNCED_FILE) to avoid
-# a PATCH on every poll iteration. Outputs PR number.
+# Reuse the open PR for this head branch, else create one. The PR description
+# is what the coding agent wrote (.pr-body), falling back to the linked issue's
+# text, and it is never empty or the literal "null" (compose_pr_body), so a PR
+# is always reviewable. An existing PR gets the description synced once per
+# distinct body (PR_BODY_PUBLISHED_FILE) to avoid a PATCH on every poll.
+# Outputs PR number.
 ensure_pr() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
-  local pr_body
-  # A resumed PR that is not linked to any issue must keep its body verbatim;
-  # prefixing it with a bare "Closes #" would produce a malformed description.
-  if [[ -n "${closes}" ]]; then
-    # Trim trailing whitespace from issue body to avoid extra blank lines
-    body="$(printf '%s' "${body}" | sed 's/[[:space:]]*$//')"
-    pr_body="Closes #${closes}
+  local pr_body current
+  pr_body="$(compose_pr_body "${closes}" "${title}" "${body}")"
+  # The description the PR is known to carry: the issue text on the issue path,
+  # the PR's own description on the resume path.
+  current="$(pr_body_clean "${body}")"
 
-${body}"
-  else
-    pr_body="${body}"
-  fi
   if [[ -n "${pr}" ]]; then
-    if [[ -n "${closes}" ]] && ! pr_body_synced; then
-      echo "Syncing body of PR #${pr} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}"
-      pr_body_mark_synced
-    fi
+    publish_pr_body "${owner}" "${repo}" "${pr}" "${pr_body}" "${current}"
     printf '%s\n' "${pr}"
     return 0
   fi
@@ -661,15 +746,14 @@ ${body}"
   existing="$(gh_api_find_pr_by_head "${owner}" "${repo}" "${branch}")"
   if [[ -n "${existing}" ]]; then
     echo "Reusing open PR #${existing} for ${branch}." >&2
-    if [[ -n "${closes}" ]] && ! pr_body_synced; then
-      echo "Syncing body of PR #${existing} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}"
-      pr_body_mark_synced
-    fi
+    publish_pr_body "${owner}" "${repo}" "${existing}" "${pr_body}" "${current}"
     printf '%s\n' "${existing}"
     return 0
   fi
   local num
+  if [[ -z "$(agent_pr_body)" ]]; then
+    echo "WARNING: the coding agent wrote no .pr-body; the PR description falls back to the issue text." >&2
+  fi
   num="$(gh_api_create_pr "${owner}" "${repo}" "${title}" "${pr_body}" "${branch}" "${base}")"
   if [[ -z "${num}" ]]; then
     echo "ERROR: PR creation failed for ${branch} -> ${base}." >&2
@@ -911,14 +995,15 @@ resume_pr() {
   body="$(gh_api_unescape "$(gh_api_unb64 "${body_b64}")")"
   echo "PR #${pr}: state=${state} head=${head} base=${base}" >&2
 
-  # When the PR body is still just the auto-generated "Closes #<n>" stub, derive
-  # a real description from the linked issue so the resumed PR gets a written body.
-  if [[ -n "${closes}" ]] && [[ "${body}" == "Closes #${closes}" || "${body}" == "Closes #${closes}"$'\n' ]]; then
+  # A PR whose description is missing (the API reports it as null) or still just
+  # the auto-generated "Closes #<n>" stub is not reviewable: derive a real one
+  # from the linked issue so the resumed PR gets a written body.
+  if [[ -n "${closes}" ]] && [[ -z "${body}" || "${body}" == "Closes #${closes}" || "${body}" == "Closes #${closes}"$'\n' ]]; then
     local iss iss_body
     iss="$(gh_api_fetch_issue "${owner}" "${repo}" "${closes}")"
     iss_body="$(gh_api_unescape "$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)")"
     if [[ -n "${iss_body}" ]]; then
-      echo "PR body is just the closing stub; reusing issue #${closes} as the PR body." >&2
+      echo "PR #${pr} has no usable description; reusing issue #${closes} as the PR description." >&2
       body="${iss_body}"
     fi
   fi

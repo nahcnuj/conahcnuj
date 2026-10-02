@@ -16,9 +16,12 @@ opencode_get_models() {
 
 # Build the implementation prompt for a single model run.
 # Args: issue_title issue_body [extra_context]
-# A fresh implementation round (no extra_context) also lets the agent choose
-# the feature branch via .branch-name; follow-up rounds (fix constraints,
-# review feedback) keep the existing branch, so the instruction is omitted.
+# Every round asks the agent for the same two out-of-band artifacts: the commit
+# message (.commit-msg) and the pull request description (.pr-body), both written
+# to the repository root and consumed by the driver. A fresh implementation round
+# (no extra_context) also lets the agent choose the feature branch via
+# .branch-name; follow-up rounds (fix constraints, review feedback) keep the
+# existing branch, so the instruction is omitted.
 opencode_build_prompt() {
   local issue_title="${1}" issue_body="${2}" extra_context="${3:-}"
   local prompt
@@ -35,7 +38,9 @@ ${extra_context}"
 
 Implement the changes needed to resolve this issue. Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
 
-When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. This message should summarize the changes you made."
+When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. This message should summarize the changes you made.
+
+Also write the pull request description to the file .pr-body in the repository root, as Markdown. The driver publishes it verbatim as the PR body, so a reviewer must be able to judge the change from it alone: say what you changed, why, and how you verified it. Never leave it empty and never write \"null\" or a placeholder. In later rounds keep it in sync with the changes you make."
   if [[ -z "${extra_context}" ]]; then
     prompt="${prompt}
 
@@ -46,7 +51,7 @@ If you want to choose the feature branch name, write your preferred branch name 
 
 opencode_build_handoff_prompt() {
   local previous_model="${1}"
-  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}"
+  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root, and the pull request description (Markdown: what changed, why, and how it was verified) to .pr-body.\n' "${previous_model}"
 }
 
 # Run opencode with a specific model and publish its session ID in
@@ -86,6 +91,8 @@ opencode_run() {
         printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
         # Simulate the agent honouring the .commit-msg contract.
         printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+        # ...and the .pr-body contract (the PR description the driver publishes).
+        printf '## What changed\n\nmock description from %s\n' "${model}" > "${workdir}/.pr-body"
       fi
     else
       echo "opencode: mock no-op for ${model} (produces no changes)" >&2

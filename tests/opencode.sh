@@ -30,6 +30,9 @@ test_opencode_build_prompt() {
   [[ "${prompt}" == *"extra ctx"* ]]
   [[ "${prompt}" == *"Do NOT create any commits"* ]]
   [[ "${prompt}" == *".commit-msg"* ]]
+  # Every round asks for a PR description; the driver publishes it verbatim.
+  [[ "${prompt}" == *".pr-body"* ]]
+  [[ "${prompt}" == *"Markdown"* ]]
   # Follow-up rounds keep the existing branch: no branch-name instruction.
   [[ "${prompt}" != *".branch-name"* ]]
   echo "opencode_build_prompt passed"
@@ -50,6 +53,8 @@ test_opencode_build_handoff_prompt() {
   [[ "${prompt}" == *"Continue this same session"* ]]
   [[ "${prompt}" == *"preserve all work already present"* ]]
   [[ "${prompt}" == *".commit-msg"* ]]
+  # The taking-over model must also leave a PR description behind.
+  [[ "${prompt}" == *".pr-body"* ]]
   echo "opencode_build_handoff_prompt passed"
 }
 
@@ -64,9 +69,10 @@ test_opencode_run() {
   [[ "${out}" == *"Test Issue"* ]]
   [[ "${out}" == *"more ctx"* ]]
   # A mock change file is written (the driver relies on working-tree changes),
-  # and the mock honours the .commit-msg contract.
+  # and the mock honours the .commit-msg and .pr-body contracts.
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
+  [[ -f "${tmp}/.pr-body" ]]
   rm -rf "${tmp}"
   unset OPENCODE_TEST_MODE
   echo "opencode_run passed"
@@ -81,12 +87,14 @@ test_opencode_run_noop_models() {
   [[ "${OPENCODE_SESSION_ID}" == "ses_mock" ]]
   [[ ! -f "${tmp}/conahcnuj.mock" ]]
   [[ ! -f "${tmp}/.commit-msg" ]]
+  [[ ! -f "${tmp}/.pr-body" ]]
   local out
   out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" "" "${OPENCODE_SESSION_ID}" "opencode/dead-model")"
   [[ "${out}" == *"--session ses_mock"* ]]
   [[ "${out}" == *"taking over unfinished work from model opencode/dead-model"* ]]
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
+  [[ -f "${tmp}/.pr-body" ]]
   rm -rf "${tmp}"
   unset OPENCODE_TEST_MODE MOCK_OPENCODE_NOOP OPENCODE_SESSION_ID
   echo "opencode_run (no-op model) passed"

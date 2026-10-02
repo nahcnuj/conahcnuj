@@ -204,6 +204,19 @@ gh_api_json_str() {
   printf '%s\n' "${val}"
 }
 
+# Free-text field value. GitHub reports a missing / empty issue or PR body as
+# JSON null ("" for an empty string), and gh_api_json_str hands those back
+# verbatim ("null" / "\"\""). Writing such a literal into a PR body produces the
+# unreviewable "Closes #n\n\nnull" description, so map them to an empty value.
+gh_api_json_text() {
+  local json="${1}" key="${2}" val
+  val="$(gh_api_json_str "${json}" "${key}")"
+  case "${val}" in
+    null | '""') val="" ;;
+  esac
+  printf '%s\n' "${val}"
+}
+
 # Numeric field value.
 gh_api_json_num() {
   local json="${1}" key="${2}"
@@ -223,7 +236,7 @@ gh_api_fetch_issue() {
 
   local title body labels is_pr="false"
   title="$(gh_api_json_str "${json}" "title")"
-  body="$(gh_api_json_str "${json}" "body")"
+  body="$(gh_api_json_text "${json}" "body")"
   labels="$(printf '%s' "${json}" | sed -n 's/.*"labels"[[:space:]]*:[[:space:]]*\(\[[^]]*\]\).*/\1/p')"
   if printf '%s' "${json}" | grep -q '"pull_request"'; then
     is_pr="true"
@@ -262,7 +275,7 @@ gh_api_fetch_pr_state() {
   local state title body is_draft mergeable mss decision head base head_oid linked
   state="$(gh_api_json_str "${json}" "state")"
   title="$(gh_api_json_str "${json}" "title")"
-  body="$(gh_api_json_str "${json}" "body")"
+  body="$(gh_api_json_text "${json}" "body")"
   is_draft="$(printf '%s' "${json}" | sed -n 's/.*"isDraft"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -1)"
   mergeable="$(gh_api_json_str "${json}" "mergeable")"
   mss="$(gh_api_json_str "${json}" "mergeStateStatus")"

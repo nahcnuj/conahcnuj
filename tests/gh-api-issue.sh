@@ -91,6 +91,27 @@ test_fetch_pr_state() {
   echo "gh_api_fetch_pr_state passed"
 }
 
+test_json_text_null_body() {
+  local out body
+  # An issue with an empty body: the API answers with a JSON null (or ""), which
+  # must read as "no body" instead of the literal text "null"/"\"\"".
+  out="$(printf '%s\n' '{"number": 30, "title": "no body", "body": null, "labels": [], "state": "open"}' | gh_api_fetch_issue "nahcnuj" "conahcnuj" 30)"
+  body="$(printf '%s' "${out}" | cut -d'|' -f2 | gh_api_unb64)"
+  [[ "${body}" == "" ]]
+  [[ "${body}" != "null" ]]
+
+  out="$(printf '%s\n' '{"number": 30, "title": "no body", "body": "", "labels": [], "state": "open"}' | gh_api_fetch_issue "nahcnuj" "conahcnuj" 30)"
+  body="$(printf '%s' "${out}" | cut -d'|' -f2 | gh_api_unb64)"
+  [[ "${body}" == "" ]]
+
+  # Same for a PR whose body was never written.
+  out="$(printf '%s\n' '{"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"t","body":null,"headRefName":"b","baseRefName":"main"}}}}' | gh_api_fetch_pr_state "nahcnuj" "conahcnuj" 15)"
+  body="$(printf '%s' "${out}" | cut -d'|' -f4 | gh_api_unb64)"
+  [[ "${body}" == "" ]]
+  [[ "${body}" != "null" ]]
+  echo "gh_api_fetch_issue / gh_api_fetch_pr_state (null body) passed"
+}
+
 test_fetch_pr_conditions() {
   local out state mergeable
   out="$(printf '%s\n' "${MOCK_CONDITIONS_OK}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
@@ -197,6 +218,7 @@ test_fetch_issue
 test_fetch_issue_is_pr
 test_get_repo
 test_fetch_pr_state
+test_json_text_null_body
 test_fetch_pr_conditions
 test_fetch_reviews
 test_review_summary

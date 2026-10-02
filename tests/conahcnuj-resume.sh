@@ -32,10 +32,11 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (stub body
-#   -> real issue body), update_pr (body sync on the reuse path), conditions,
-#   request_review, fetch_reviews (CHANGES_REQUESTED), conditions,
-#   request_review, post_comment, fetch_reviews (fingerprint refresh after the
-#   reply), conditions, fetch_reviews (APPROVED), conditions.
+#   -> real issue body), update_pr (description sync on the reuse path),
+#   continuation comment, conditions, request_review, fetch_reviews
+#   (CHANGES_REQUESTED), conditions, request_review, post_comment, fetch_reviews
+#   (fingerprint refresh after the reply), update_pr (the agent's .pr-body
+#   supersedes the issue text), conditions, fetch_reviews (APPROVED), conditions.
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit
 # path runs `git add -A`).
 TAPE="${ROOT}/tape.txt"
@@ -52,6 +53,7 @@ cat > "${TAPE}" <<'EOF'
 {}
 {"id":888}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Addressed the review feedback:\n\nreviewDecision: CHANGES_REQUESTED","author":{"login":"conahcnuj[bot]"}}]},"reviewThreads":{"nodes":[]}}}}}
+{}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
@@ -81,6 +83,11 @@ grep -q "is a pull request; resuming it in place" "${LOG}" || { echo "FAIL: PR i
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
 grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
+# The stub "Closes #10" body is replaced by a real description: first from the
+# issue text, then by the coding agent's own .pr-body.
+grep -q "PR #15 has no usable description; reusing issue #10" "${LOG}" || { echo "FAIL: the stub PR body was not replaced"; exit 1; }
+grep -q "Using the coding agent's PR description" "${LOG}" || { echo "FAIL: the agent's .pr-body was not used as the PR description"; exit 1; }
+[[ ! -f "${WORK}/.pr-body" ]] || { echo "FAIL: .pr-body was left in the work tree"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "feature/fix-10" ]] || { echo "FAIL: wrong current branch"; exit 1; }
 # Capture first, then grep via here-string: `git log | grep -q` under
@@ -92,5 +99,8 @@ FULL_LOG="$(git -C "${WORK}" log --format=%B)"
 grep -q "Model: opencode/first" <<<"${FULL_LOG}" || { echo "FAIL: model trailer missing"; exit 1; }
 # The fixed driver-side message must not reappear.
 grep -q "conahcnuj:.*address review feedback" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
+# .pr-body is agent metadata, never part of the implementation.
+COMMITTED="$(git -C "${WORK}" log --name-only --format=)"
+grep -q "pr-body" <<<"${COMMITTED}" && { echo "FAIL: the agent's .pr-body was committed"; exit 1; }
 
 echo "conahcnuj resume flow passed"

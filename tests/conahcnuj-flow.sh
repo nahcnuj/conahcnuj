@@ -92,6 +92,11 @@ grep -q "Model opencode/first failed before completing the work; handing off to 
 grep -q "Handing off session ses_mock from opencode/first to opencode/second" "${LOG}" || { echo "FAIL: session was not handed to the second model"; exit 1; }
 grep -q -- "--session ses_mock" "${LOG}" || { echo "FAIL: continuation command omitted --session"; exit 1; }
 grep -q "Model opencode/second completed the work" "${LOG}" || { echo "FAIL: second model was not adopted"; exit 1; }
+# The PR description comes from the coding agent's .pr-body, and the file is
+# metadata: it must be taken out of the work tree instead of being committed.
+grep -q "Using the coding agent's PR description" "${LOG}" || { echo "FAIL: the agent's .pr-body was not used as the PR description"; exit 1; }
+grep -q "Publishing the PR description on PR #123" "${LOG}" || { echo "FAIL: the PR description was never published"; exit 1; }
+[[ ! -f "${WORK}/.pr-body" ]] || { echo "FAIL: .pr-body was left in the work tree"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }
 # Capture first, then grep via here-string: `git log | grep -q` under
@@ -104,6 +109,9 @@ grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the handoff model's .commit-msg was not used"; exit 1; }
 FULL_LOG="$(git -C "${WORK}" log --format=%B)"
 grep -q "Model: opencode/second" <<<"${FULL_LOG}" || { echo "FAIL: handoff model trailer missing"; exit 1; }
+# .pr-body is agent metadata, never part of the implementation.
+COMMITTED="$(git -C "${WORK}" log --name-only --format=)"
+grep -q "pr-body" <<<"${COMMITTED}" && { echo "FAIL: the agent's .pr-body was committed"; exit 1; }
 # init + implement + review-feedback fix = 3 commits from the branch tip.
 [[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement + review commits"; exit 1; }
 
