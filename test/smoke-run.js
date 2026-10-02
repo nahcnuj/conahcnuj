@@ -115,6 +115,34 @@ async function main() {
   delete process.env.CONAHCNUJ_MODEL_LABEL_FILE
   fs.rmSync(labelDir, { recursive: true, force: true })
 
+  // app.env.example ships BASH_EXE="<your-bash-exe>". A fresh clone (or a
+  // Linux install that copied the example) must fall back to the platform
+  // default instead of baking the placeholder into the helper command.
+  const envPath = path.join(__dirname, ".smoke", "gh-app", "app.env")
+  const originalEnv = fs.readFileSync(envPath, "utf8")
+  try {
+    fs.writeFileSync(
+      envPath,
+      originalEnv.replace(/^BASH_EXE=.*$/m, 'BASH_EXE="<your-bash-exe>"')
+    )
+    const pluginPath = require.resolve("./.smoke/out/gh-app-token.js")
+    delete require.cache[pluginPath]
+    const reloaded = await require(pluginPath).GhAppTokenPlugin({})
+    const reloadedOut = { env: {} }
+    await reloaded["shell.env"]({}, reloadedOut)
+    const reloadedCount = Number(reloadedOut.env.GIT_CONFIG_COUNT)
+    for (let i = 0; i < reloadedCount; i++) {
+      const value = String(reloadedOut.env[`GIT_CONFIG_VALUE_${i}`] || "")
+      assert(
+        !value.includes("<your-bash-exe>"),
+        `GIT_CONFIG_VALUE_${i} kept the app.env.example placeholder: ${value}`
+      )
+    }
+    delete require.cache[pluginPath]
+  } finally {
+    fs.writeFileSync(envPath, originalEnv)
+  }
+
   console.log("PLUGIN SMOKE OK")
 }
 

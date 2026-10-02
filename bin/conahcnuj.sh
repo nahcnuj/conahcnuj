@@ -57,6 +57,8 @@ USER_COMMIT_MODEL="${CONAHCNUJ_COMMIT_MODEL:-}"
 . "${HERE}/../lib/gh-api.sh"
 # shellcheck source=lib/opencode.sh
 . "${HERE}/../lib/opencode.sh"
+# shellcheck source=gh-app/bash-exe.sh
+. "${HERE}/../gh-app/bash-exe.sh"
 
 if [[ "${TEST_MODE}" == "1" ]]; then
   # Offline tests must not sleep.
@@ -90,7 +92,7 @@ pr_continuation_mark_commented() {
 
 # The configured Git Bash: environment override > gh-app/app.env > the
 # committed app.env.example. A placeholder means "not configured", so fall
-# back to the standard Git for Windows location, like setup-git.sh does.
+# back to the platform default (gh-app/bash-exe.sh), like setup-git.sh does.
 driver_bash_exe() {
   local env_file line
   if [[ -n "${BASH_EXE:-}" ]]; then
@@ -103,12 +105,12 @@ driver_bash_exe() {
   fi
   if [[ -f "${env_file}" ]]; then
     line="$(sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${env_file}" | head -1)"
-    if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
+    if [[ -n "${line}" ]] && ! bash_exe_is_placeholder "${line}"; then
       printf '%s\n' "${line}"
       return 0
     fi
   fi
-  printf '%s\n' "C:/Program Files/Git/bin/bash.exe"
+  default_bash_exe
 }
 
 # True when the driver must re-launch itself under the configured Git Bash.

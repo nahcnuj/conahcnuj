@@ -38,10 +38,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Syntax check
-        run: bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
+        run: bash -n install.sh gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test/*.sh test.sh
 
       - name: ShellCheck
-        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
+        run: shellcheck -x install.sh gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test/*.sh test.sh
 
   lint-ps:
     name: Check install.ps1 syntax
@@ -86,6 +86,7 @@ jobs:
             "gh-app/setup-git.sh",
             "gh-app/api-commit.sh",
             "gh-app/bot-user-id.sh",
+            "gh-app/bash-exe.sh",
             "gh-app/app.env.example",
             "plugins/gh-app-token.ts"
           )
@@ -125,11 +126,13 @@ jobs:
             @($dest, "gh-app/setup-git.sh", "gh-app/setup-git.sh"),
             @($dest, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),
             @($dest, "gh-app/bot-user-id.sh", "gh-app/bot-user-id.sh"),
+            @($dest, "gh-app/bash-exe.sh", "gh-app/bash-exe.sh"),
             @($dest, "gh-app/app.env.example", "gh-app/app.env.example"),
             @($dest, "plugins/gh-app-token.ts", "plugins/gh-app-token.ts"),
             @($binSide, "gh-app/get-token.sh", "gh-app/get-token.sh"),
             @($binSide, "gh-app/setup-git.sh", "gh-app/setup-git.sh"),
             @($binSide, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),
+            @($binSide, "gh-app/bash-exe.sh", "gh-app/bash-exe.sh"),
             @($binSide, "lib/gh-api.sh", "lib/gh-api.sh"),
             @($binSide, "lib/opencode.sh", "lib/opencode.sh"),
             @($binSide, "lib/rate-limit.sh", "lib/rate-limit.sh"),
@@ -148,6 +151,21 @@ jobs:
             }
           }
           Write-Host "all files deployed OK"
+
+  install-test-sh:
+    name: install.sh deployment test (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # POSIX counterpart of the install.ps1 job above: same payload, checked
+      # into a temp dir ($HOME is never touched). test/install-test.sh is the
+      # same verification the Windows job spells out in PowerShell.
+      - name: Run install.sh deployment test
+        run: bash test/install-test.sh
 
   mock-test:
     name: Mock tests (no secrets / no network)
@@ -233,7 +251,11 @@ jobs:
 
   e2e-opencode:
     name: E2E opencode run (opencode free model)
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         shell: bash
@@ -246,11 +268,21 @@ jobs:
       - name: Install opencode
         uses: ./.github/actions/install-opencode
 
-      # Install exactly like a user would, into a temp dir.
-      - name: Install plugin via install.ps1
+      # Install exactly like a user would, into a temp dir: install.ps1 under
+      # MSYS/MinGW, install.sh on Linux.
+      - name: Install plugin via the platform installer
         run: |
-          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-            -File ./install.ps1 -Destination "$RUNNER_TEMP/e2e-inst"
+          case "$(uname -s 2>/dev/null || printf 'unknown')" in
+            MINGW*|MSYS*|CYGWIN*|Windows_NT)
+              pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+                -File ./install.ps1 -Destination "$RUNNER_TEMP/e2e-inst" \
+                -InstallPath "$RUNNER_TEMP/e2e-bin"
+              ;;
+            *)
+              bash ./install.sh --destination "$RUNNER_TEMP/e2e-inst" \
+                --install-path "$RUNNER_TEMP/e2e-bin"
+              ;;
+          esac
 
       # app.env over the installed copy: IDs come straight from repo
       # secrets; no private key is ever needed (no token is issued here).
