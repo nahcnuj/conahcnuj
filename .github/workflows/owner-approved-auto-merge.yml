@@ -16,14 +16,20 @@ on:
         required: true
         type: string
       merge-method:
-        description: Merge method used when auto-merging
+        description: Merge method passed to GitHub CLI
         required: false
         default: merge
         type: string
+    secrets:
+      auto-merge-token:
+        description: >-
+          User token (PAT) used to enable auto-merge. GITHUB_TOKEN cannot:
+          the API answers "Resource not accessible by integration", and a
+          token-driven merge would not start the caller's on: push workflows.
+        required: true
 
 permissions:
   contents: read
-  pull-requests: write
 
 concurrency:
   group: conahcnuj-auto-merge-${{ github.event.pull_request.number }}
@@ -41,7 +47,7 @@ jobs:
     steps:
       - name: Enable auto-merge
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.auto-merge-token }}
           REPOSITORY: ${{ inputs.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
           HEAD_SHA: ${{ inputs.head-sha }}
@@ -49,32 +55,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          # GITHUB_TOKEN でマージするとそのマージ由来の push では workflow が起動しない
-          # （再帰実行を防ぐ GitHub の仕様）ため、GitHub 自身がマージする
-          # ネイティブ auto-merge を有効化する。
+          # required secret として宣言しても、caller 側の repository secret が未設定だと
+          # 空文字で渡る。auto-merge は「設定されているリポジトリだけ」有効になる機能なので、
+          # 未設定は異常ではなく未構成として warning でスキップする（空の token を gh に
+          # 渡すと exit 4 になるだけで、原因がログに残らない）。
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning title=auto-merge not configured::no user token secret; add the repository secret named by the caller (e.g. AUTO_MERGE_TOKEN) to enable auto-merge"
+            exit 0
+          fi
+
           case "$MERGE_METHOD" in
-            merge) MERGE_METHOD_ENUM=MERGE ;;
-            squash) MERGE_METHOD_ENUM=SQUASH ;;
-            rebase) MERGE_METHOD_ENUM=REBASE ;;
+            merge) MERGE_FLAG=--merge ;;
+            squash) MERGE_FLAG=--squash ;;
+            rebase) MERGE_FLAG=--rebase ;;
             *)
               echo "unsupported merge method: $MERGE_METHOD" >&2
               exit 1
               ;;
           esac
-
-          pull_request="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
-          current_head="$(printf '%s' "$pull_request" | jq -r .head.sha)"
-          if [ "$current_head" != "$HEAD_SHA" ]; then
-            echo "approved commit $HEAD_SHA is not the current head $current_head; skipping"
-            exit 0
-          fi
-          pull_request_id="$(printf '%s' "$pull_request" | jq -r .node_id)"
-
-          gh api graphql -f query="
-            mutation {
-              enablePullRequestAutoMerge(
-                input: { pullRequestId: \"$pull_request_id\", mergeMethod: $MERGE_METHOD_ENUM }
-              ) {
-                clientMutationId
-              }
-            }"
+          gh pr merge "$PR_NUMBER" \
+            --repo "$REPOSITORY" \
+            "$MERGE_FLAG" \
+            --auto \
+            --match-head-commit "$HEAD_SHA"
