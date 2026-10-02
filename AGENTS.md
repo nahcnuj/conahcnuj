@@ -71,6 +71,24 @@ bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "message" --delete path/to/
 bash gh-app/api-commit.sh -m "message" -a --dry-run   # owner/repo/branch 自動検出・API を呼ばず収集結果のみ表示
 ```
 
+## shellcheck disable の台帳（#16）
+
+リポジトリ内の `shellcheck disable` は **3 ルール / 6 行**、すべて `tests/` に
+ある。1 ルールごとに sub-issue を立てて撤去する（サイズを小さく分けるため）。
+
+| ルール | 場所 | なぜ必要か | 撤去 issue |
+| ---- | ---- | ---- | ---- |
+| `SC2329` | `tests/ensure-pr-body.sh:49,60,63` | source したドライバ関数をスタブで上書きしているが、このファイルからは直接呼ばれない（実際の呼び出しは `ensure_pr` 本体の中） | #96 |
+| `SC2317` | `tests/ensure-pr-body.sh:50,61` | 上の「never invoked」判定で、スタブ本体のコマンドも到達不能扱いになる | #97 |
+| `SC2119` | `tests/gh-api-issue.sh:4`（ファイル全体） | `gh_api_unb64` は dual-mode（引数あり / piped）だが、このテストは piped 呼び出ししかしていない | #95 |
+
+- 新しい disable を足すのは最終手段。足すときは「なぜ必要か」を同じ表に追記する。
+- 撤去するときは、そのルールの sub-issue で **disable を消すだけで終わらせない**。
+  SC2119 の実体は「`$1` 形式のテストが漏れている」ような、disable が隠していた
+  欠陥であることが多い（#95 がその例）。
+- `# shellcheck source=...` は `-x` の追跡用ディレクティブであり disable ではない。
+  これを消すと `app.env.example` や `lib/*.sh` の解析が落ちる。
+
 ## 変更時の注意
 
 - `install.ps1` や `plugins/` を変更したら、実機のグローバル設定（`~/.config/opencode/`）にも反映が必要：
