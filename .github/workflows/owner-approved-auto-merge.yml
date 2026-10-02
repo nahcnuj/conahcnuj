@@ -56,10 +56,12 @@ jobs:
           set -euo pipefail
 
           # required secret として宣言しても、caller 側の repository secret が未設定だと
-          # 空文字で渡るため明示的に弾く（空の token は gh が exit 4 で落とすだけ）
+          # 空文字で渡る。auto-merge は「設定されているリポジトリだけ」有効になる機能なので、
+          # 未設定は異常ではなく未構成として warning でスキップする（空の token を gh に
+          # 渡すと exit 4 になるだけで、原因がログに残らない）。
           if [ -z "$GH_TOKEN" ]; then
-            echo "auto-merge-token is empty: set the caller's user token (PAT) secret" >&2
-            exit 1
+            echo "::warning title=auto-merge not configured::no user token secret; add the repository secret named by the caller (e.g. AUTO_MERGE_TOKEN) to enable auto-merge"
+            exit 0
           fi
 
           case "$MERGE_METHOD" in
