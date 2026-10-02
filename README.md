@@ -104,6 +104,17 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
 すべて省略可能です。
 
+### 作業継続コメント
+
+既存の PR に対して再開した run は、その PR に継続用のコメントを 1 回投稿します。
+コメント内のリンクは Issue auto-drive ワークフローの手動実行フォーム
+(`/actions/workflows/<ワークフロー>/dispatch`) を開き、`number` に入力すべき
+PR 番号と、そのまま実行できる `gh workflow run` コマンドを示します。
+GitHub の手動実行フォームは URL のクエリから入力を埋められない
+（`?inputs[number]=…` は無視される）ため、番号は本文で案内します。
+対象リポジトリでワークフロー名が `issue-driver.yml` と異なる場合は
+`CONAHCNUJ_WORKFLOW` で上書きしてください。
+
 ## issue の自動対応（GitHub Actions）
 
 このリポジトリの `.github/workflows/issue-driver.yml` は、issue が open される

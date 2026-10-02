@@ -3,7 +3,9 @@
 #
 # Regression test for the "malformed Closes #" bug: a resumed PR with no linked
 # issue must keep its body verbatim and must not be PATCHed. A PR that closes an
-# issue gets the "Closes #<n>\n\n<issue body>" body.
+# issue gets the "Closes #<n>\n\n<issue body>" body. Also covers the continuation
+# comment's manual-run link (issue #77): it must open the workflow's dispatch form
+# without the URL input prefill GitHub ignores, and name the number to run.
 #
 # Sources bin/conahcnuj.sh via CONAHCNUJ_IMPORT=1 (main() must not run) and
 # stubs gh_api_update_pr / gh_api_find_pr_by_head / gh_api_create_pr so the
@@ -75,7 +77,31 @@ echo "ensure_pr keeps no-issue PR body verbatim (no bogus 'Closes #'): passed"
 gh_api_post_comment() {
   printf 'COMMENT|%s|%s\n' "${3}" "$(printf '%s' "${4}" | tr '\n' ' ')" >> "${REPORT}"
 }
+
+# The continuation comment must let a human start the driver for this PR.
+# GitHub ignores workflow_dispatch inputs in the dispatch URL's query string
+# (community discussions #51159 / #168896), so a "?inputs[number]=123" link
+# opens the form with an empty required field and cannot start the run (#77).
+: > "${REPORT}"
 post_pr_continuation_comment "nahcnuj" "conahcnuj" "123"
-grep -q '^COMMENT|123|.*conahcnuj-continuation.*継続するにはこちらをクリック.*actions/workflows/issue-driver.yml/dispatch?inputs%5Bnumber%5D=123' "${REPORT}" || { echo "FAIL: continuation comment was not posted to the PR with a prefilled workflow link"; exit 1; }
+grep -q '^COMMENT|123|.*conahcnuj-continuation.*継続するにはこちらをクリック.*actions/workflows/issue-driver\.yml/dispatch)' "${REPORT}" || { echo "FAIL: continuation comment was not posted to the PR with a manual-run link"; exit 1; }
+if grep -q 'inputs%5Bnumber%5D\|inputs\[number\]' "${REPORT}"; then
+  echo "FAIL: continuation comment relies on URL input prefill, which GitHub ignores"
+  exit 1
+fi
+bt='`'
+grep -q "^COMMENT|123|.*${bt}number${bt} に ${bt}123${bt} を入力" "${REPORT}" || { echo "FAIL: continuation comment does not tell which number to enter"; exit 1; }
+grep -q '^COMMENT|123|.*gh workflow run issue-driver.yml --repo nahcnuj/conahcnuj -f number=123' "${REPORT}" || { echo "FAIL: continuation comment has no ready-to-run gh workflow run command"; exit 1; }
+echo "continuation comment links a working manual run (no URL prefill): passed"
+
+# The workflow file name is configurable for repositories that name it
+# differently; the link must follow it.
+: > "${REPORT}"
+DRIVER_WORKFLOW="driver.yml"
+post_pr_continuation_comment "nahcnuj" "conahcnuj" "123"
+grep -q '^COMMENT|123|.*actions/workflows/driver\.yml/dispatch)' "${REPORT}" || { echo "FAIL: continuation comment ignored CONAHCNUJ_WORKFLOW"; exit 1; }
+grep -q '^COMMENT|123|.*gh workflow run driver.yml --repo nahcnuj/conahcnuj -f number=123' "${REPORT}" || { echo "FAIL: gh workflow run command ignored CONAHCNUJ_WORKFLOW"; exit 1; }
+DRIVER_WORKFLOW="issue-driver.yml"
+echo "continuation comment follows CONAHCNUJ_WORKFLOW: passed"
 
 echo "All ensure_pr body tests passed"

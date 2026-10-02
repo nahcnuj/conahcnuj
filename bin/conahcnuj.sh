@@ -27,6 +27,9 @@
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
 #   CONAHCNUJ_POLL_REVIEWS_MIN/MAX     review poll window (default 30/3600 s)
+#   CONAHCNUJ_WORKFLOW        driver workflow file name in the target repository
+#                            (default: issue-driver.yml); the continuation
+#                            comment links to its manual-run form
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
 #   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
 #                            the OpenCode display name (plugin) or the model id
@@ -45,6 +48,10 @@ POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
 POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
 POLL_REVIEWS_MIN="${CONAHCNUJ_POLL_REVIEWS_MIN:-30}"
 POLL_REVIEWS_MAX="${CONAHCNUJ_POLL_REVIEWS_MAX:-3600}"
+# Workflow file name of the driver workflow in the target repository. The
+# continuation comment links to its manual-run form, so it must match the file
+# the repository actually runs (issue-driver.yml in this repository).
+DRIVER_WORKFLOW="${CONAHCNUJ_WORKFLOW:-issue-driver.yml}"
 START_TIME="$(date +%s)"
 # Snapshot a caller-supplied trailer label. apply_driver_commit_model exports
 # CONAHCNUJ_COMMIT_MODEL for api-commit.sh, so a later commit must not treat
@@ -617,12 +624,28 @@ implement() {
 
 # --- PR lifecycle -----------------------------------------------------------
 
+# Resume instructions for a PR the driver is working on. GitHub's manual-run form
+# cannot be pre-filled from the URL: workflow_dispatch inputs in the query string
+# (/dispatch?inputs[number]=7) are ignored and the form opens with an empty,
+# required field, so such a link cannot start the run (issue #77). The link
+# therefore points at the form itself and the comment carries the number to type
+# plus the equivalent `gh workflow run` command, which starts the run as-is.
 post_pr_continuation_comment() {
-  local owner="${1}" repo="${2}" pr="${3}"
-  if gh_api_post_comment "${owner}" "${repo}" "${pr}" "<!-- conahcnuj-continuation -->
+  local owner="${1}" repo="${2}" pr="${3}" bt='`' body
+  body="$(cat <<EOF
+<!-- conahcnuj-continuation -->
 PR #${pr} の処理を継続するには、Issue auto-drive を手動実行してください。
 
-[継続するにはこちらをクリック](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml/dispatch?inputs%5Bnumber%5D=${pr})" >/dev/null; then
+[継続するにはこちらをクリック](https://github.com/${owner}/${repo}/actions/workflows/${DRIVER_WORKFLOW}/dispatch)
+
+GitHub の実行フォームは URL から入力を埋められません。${bt}number${bt} に ${bt}${pr}${bt} を入力して **Run workflow** を押してください。入力せずに起動する場合は次のコマンドを実行します。
+
+${bt}${bt}${bt}bash
+gh workflow run ${DRIVER_WORKFLOW} --repo ${owner}/${repo} -f number=${pr}
+${bt}${bt}${bt}
+EOF
+)"
+  if gh_api_post_comment "${owner}" "${repo}" "${pr}" "${body}" >/dev/null; then
     return 0
   fi
   echo "WARNING: could not post the continuation comment for PR #${pr}." >&2
