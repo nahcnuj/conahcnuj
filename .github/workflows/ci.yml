@@ -105,6 +105,13 @@ jobs:
             Write-Error "app.env was not created from example"
             exit 1
           }
+          # The permission policy is version controlled as the project-level
+          # opencode.json (issue #11). One source of truth: it must not be
+          # duplicated into the global config, where it would go stale.
+          if (Test-Path -LiteralPath (Join-Path $dest "opencode.json")) {
+            Write-Error "opencode.json must not be deployed: the policy is version controlled in the repo"
+            exit 1
+          }
           # Only gh-app-token.ts may live in the deployed plugins dir:
           # package.json/lock, tsconfig, node_modules are local typecheck
           # tooling and must never be deployed. @( ) because a single
@@ -182,11 +189,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Cache npm
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
       # opencode.json is version controlled so agents get the same permission
-      # policy on every machine. The test only checks the config's shape (valid
-      # JSON, keys and actions the schema accepts), not the policy itself.
-      - name: Validate opencode.json
-        run: node test/opencode-config.js
+      # policy on every machine. The check validates it against the JSON Schema
+      # named by its own $schema (Ajv, fetched at run time) and asserts nothing
+      # about the policy itself.
+      - name: Validate opencode.json against its schema
+        run: |
+          npm ci --no-audit --no-fund
+          node test/opencode-config.js
 
   lint-ts:
     name: Typecheck opencode plugin

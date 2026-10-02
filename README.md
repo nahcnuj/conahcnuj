@@ -223,9 +223,20 @@ cd <repo>
 `ask` は使いません。ドライバは `opencode run` を**非対話**で起動するため、`ask` は
 「自動拒否」になり、モデルが作業を終えられなくなるためです。
 
-変更したら `node test/opencode-config.js`（CI の `config-test` ジョブ）を
-実行してください。テストは設定の**形**（JSONとして妥当か、スキーマのキーと
-`allow`/`ask`/`deny` だけを使っているか）のみを検証し、ポリシー自体は固定しません。
+この設定は `~/.config/opencode/opencode.json` ではなくリポジトリに置くので、
+`install.ps1` はデプロイしません（project config は global config より優先されるため）。
+
+変更したら次を実行してください（CI の `config-test` ジョブもこれを行います）。
+
+```bash
+npm ci --no-audit --no-fund
+node test/opencode-config.js
+```
+
+検証するのは `opencode.json` が**自前の `$schema`（`https://opencode.ai/config.json`）の
+定義に沿っているかだけ**です。判定は Ajv が出し、スキーマは実行時に取得して
+`.cache/schema/` にキャッシュします（ネットワークが無くても再実行可）。
+ポリシーの中身はテストで固定していません。
 
 ## トラブルシューティング
 

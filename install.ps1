@@ -19,6 +19,11 @@
 # app.env.example. plugins/package.json, package-lock.json, tsconfig.json and
 # node_modules are local typecheck tooling and are never deployed; gh-app/tests
 # and other test code is never deployed either.
+#
+# The opencode permission policy is NOT deployed: it is version controlled as
+# the project-level opencode.json in the repository root (issue #11), and a
+# project config takes precedence over the global one this script writes to.
+# Editing <Destination>/opencode.json by hand is not needed either.
 
 [CmdletBinding()]
 param(

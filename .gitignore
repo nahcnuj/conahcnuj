@@ -2,6 +2,7 @@ gh-app/token.cache
 gh-app/bot-id.cache
 gh-app/app.env
 node_modules/
+.cache/
 .smoke/
 *.tmp
 *.log

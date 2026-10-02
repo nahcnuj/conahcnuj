@@ -1,0 +1,11 @@
+{
+  "name": "conahcnuj",
+  "private": true,
+  "description": "Tooling for the conahcnuj repository (opencode plugin + GitHub App git identity). Runtime code lives in bin/, lib/, gh-app/ and plugins/.",
+  "scripts": {
+    "test:config": "node test/opencode-config.js"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0"
+  }
+}

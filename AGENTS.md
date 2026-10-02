@@ -40,14 +40,15 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `.github/workflows/issue-driver.yml` | issue が open / reopen されたらドライバで自動対応を試みる（issue→PR まで。失敗時はバグ報告 issue） | タイムアウトは Actions 側で制御（`timeout-minutes: 60`）。`CONAHCNUJ_MAX_SECONDS=3540` でドライバが先に自己終了しバグ報告を残す。repo secrets `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY`（PEM）が必要。bot 名義の issue（`<slug>[bot]` 含む）は再帰防止のため `user.type` でスキップ（job レベルの `if` は `secrets` を参照できないため）。`GITHUB_TOKEN` は `contents: read` のみ（書き込みは全て App トークン） |
 | `.github/workflows/auto-merge.yml` | owner の PR 承認時に auto-merge を有効化 | 承認した head SHA と一致する場合だけ merge commit を要求。green 済みなら即時マージ。書き込みには `GITHUB_TOKEN` を使用 |
 | `.github/workflows/owner-approved-auto-merge.yml` | owner 承認後の auto-merge を `workflow_call` で再利用する workflow | 利用側は `pull_request_review` を購読し、必要な権限を渡す。secret は不要 |
-| `opencode.json` | リポジトリ単位の opencode 設定。**このリポジトリで禁止したい操作だけを `deny` で宣言する**（許可の明示はしない） | 設定は global → `OPENCODE_CONFIG` → project → `OPENCODE_CONFIG_CONTENT` の順にマージされ、`permission` は**最後に一致したパターンが勝つ**。したがってこのファイルはマシンごとの global 設定より優先される（#11）。`deny` は `gh-app/app.env`（秘密）、`* --force*` と `git push --force` / `-f`、`git config --global` の書き込み系。`external_directory` は既定が `ask` なので `allow` を明示。変更時は `node test/opencode-config.js` を実行 |
-| `test/opencode-config.js` | `opencode.json` がスキーマ（`$schema`）に沿っているかを**形の层面だけ**検証する（有効な JSON ・ `permission` のキーが既知 ・ 値が `allow`/`ask`/`deny` のいずれか）。ポリシーの中身は固定しない | node のみ。CI の `config-test` ジョブが実行。秘密鍵・ネットワーク不要 |
+| `opencode.json` | リポジトリ単位の opencode 設定。**このリポジトリで禁止したい操作だけを `deny` で宣言する**（許可の明示はしない） | 設定は remote → global → `OPENCODE_CONFIG` → project → `OPENCODE_CONFIG_CONTENT` → managed の順にマージされ、`permission` は**最後に一致したパターンが勝つ**。したがってこのファイルはマシンごとの global 設定より優先される（#11）。`deny` は `gh-app/app.env`（秘密）、`* --force*` と `git push --force` / `-f`、`git config --global` の書き込み系。`external_directory` は既定が `ask` なので `allow` を明示。変更時は `npm ci && node test/opencode-config.js` を実行 |
+| `test/opencode-config.js` | `opencode.json` が**自前の `$schema`（https://opencode.ai/config.json）の定義に沿っているかだけ**を Ajv で検証する。ポリシーの中身は固定しない | 実行時にスキーマを取得し `.cache/schema/` にキャッシュ（ネットワークが無くても再実行可）。`OPENCODE_CONFIG_SCHEMA` で取得先を差し替え可。node と `ajv`（ルート `package.json`）のみ。CI の `config-test` ジョブが実行 |
+| `package.json`・`package-lock.json` | ルート直下は**リポジトリのツール依存だけ**（`ajv`。`opencode.json` のスキーマ検証用）。プラグインの型チェックは `plugins/package.json` 側にあり、別物 | `npm ci --no-audit --no-fund` で取得。`install.ps1` はこの 2 ファイルを配置しない（CI 専用） |
 
 ## opencode の権限ポリシー（`opencode.json`）
 
 リポジトリルートに `opencode.json` を置いている。設定は
-global → `OPENCODE_CONFIG` → project → `OPENCODE_CONFIG_CONTENT` の順に
-**マージ**され、`permission` のパターンは**最後に一致したものが勝つ**。
+remote → global → `OPENCODE_CONFIG` → project → `OPENCODE_CONFIG_CONTENT` →
+managed の順に**マージ**され、`permission` のパターンは**最後に一致したものが勝つ**。
 マージは「キー単位」で、競合しない設定は全部が有効。
 
 このファイルは**禁止事项だけを宣言する**（許可の明示はしない）。
@@ -79,6 +80,11 @@ shellcheck -x gh-app/*.sh gh-app/tests/*.sh   # -x で app.env.example を追従
 
 # プラグイン型チェック（@types/node は plugins/package.json＋lock から取得）
 (cd plugins && npm ci --no-audit --no-fund && ./node_modules/.bin/tsc -p ../plugins --noEmit)
+
+# opencode.json のスキーマ検証（ajv はルート package.json から取得。
+# スキーマは実行時に https://opencode.ai/config.json から取得し .cache/schema/ にキャッシュ）
+npm ci --no-audit --no-fund
+node test/opencode-config.js
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/tests/run.sh
