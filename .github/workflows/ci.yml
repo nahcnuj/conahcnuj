@@ -173,6 +173,21 @@ jobs:
       - name: Run driver test suite
         run: bash test.sh
 
+  config-test:
+    name: Repository opencode config
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # opencode.json is version controlled so agents (and the driver's
+      # non-interactive `opencode run`) get the same permission policy on every
+      # machine. The test pins the safety denies.
+      - name: Validate opencode.json permission policy
+        run: bash test/opencode-config.sh
+
   lint-ts:
     name: Typecheck opencode plugin
     runs-on: ubuntu-latest

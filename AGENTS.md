@@ -40,6 +40,30 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `.github/workflows/issue-driver.yml` | issue が open / reopen されたらドライバで自動対応を試みる（issue→PR まで。失敗時はバグ報告 issue） | タイムアウトは Actions 側で制御（`timeout-minutes: 60`）。`CONAHCNUJ_MAX_SECONDS=3540` でドライバが先に自己終了しバグ報告を残す。repo secrets `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY`（PEM）が必要。bot 名義の issue（`<slug>[bot]` 含む）は再帰防止のため `user.type` でスキップ（job レベルの `if` は `secrets` を参照できないため）。`GITHUB_TOKEN` は `contents: read` のみ（書き込みは全て App トークン） |
 | `.github/workflows/auto-merge.yml` | owner の PR 承認時に auto-merge を有効化 | 承認した head SHA と一致する場合だけ merge commit を要求。green 済みなら即時マージ。書き込みには `GITHUB_TOKEN` を使用 |
 | `.github/workflows/owner-approved-auto-merge.yml` | owner 承認後の auto-merge を `workflow_call` で再利用する workflow | 利用側は `pull_request_review` を購読し、必要な権限を渡す。secret は不要 |
+| `opencode.json` | リポジトリ単位の opencode 設定。**権限ポリシーだけを管理し、全ツールを許可する** | 設定は global → `OPENCODE_CONFIG` → project → `OPENCODE_CONFIG_CONTENT` の順にマージされ、`permission` は**最後に一致したパターンが勝つ**。したがってこのファイルはマシンごとの global 設定より優先される（#11）。`bash` の既定は `allow`（`ask` は `opencode run` の非対話では自動拒否になり、モデルが作業を終えられない）。`deny` は `gh-app/app.env`（秘密）、`git push --force` / `-f`、`git config --global` の書き込み系。`external_directory` と `doom_loop` は既定が `ask` なので明示的に `allow`。変更時は `test/opencode-config.sh` を実行 |
+| `test/opencode-config.sh` / `opencode-config.js` | `opencode.json` の権限ポリシーを検証（deny が残っていないか、既定 allow が壊れていないか） | node のみ。CI の `config-test` ジョブが実行。秘密鍵・ネットワーク不要 |
+
+## opencode の権限ポリシー（`opencode.json`）
+
+リポジトリルートに `opencode.json` を置いている。ドライバは `opencode run` を
+**非対話**で起動するため、`ask` は「自動拒否」になる。よってここを `ask` にすると、
+モデルは権限要求で止まって `.commit-msg` を書けず、ドライバは
+「no available model completed the work」として次のモデルへ引き継ぐ
+（Issue #77 の実行ログがまさにこの状態）。
+
+設定の優先順位（後勝ち）: remote → global (`~/.config/opencode/opencode.json`)
+→ `OPENCODE_CONFIG` → **project (`opencode.json`)** → `.opencode/` →
+`OPENCODE_CONFIG_CONTENT`。マージは「キー単位」で、競合しない設定は全部が有効。
+
+- 通常の作業（`bash` / `edit` / 外部ディレクトリ）はすべて許可する。理由:
+  issue 駆動の自律開発では Diff の読み書き・テスト実行・`git fetch` が普通に必要で、
+  それらを `ask` にすると無人で回せない。
+- 安全側の `deny` は残す: `gh-app/app.env`（App の秘密鍵）、`git push --force` /
+  `git push -f`、`git config --global` への**書き込み**（`--set` / `--add` /
+  `--unset` / `--remove-section`）。読み取り（`--get` 系）は許可する。排障
+  （どの credential helper が有効か等）に必要だから。
+- より厳しくしたい場合は、このファイルにルールを追加するか global 側を編集する。
+  どちらでもこのリポジトリでは project config が勝つ。
 
 ## ローカル検証手順
 

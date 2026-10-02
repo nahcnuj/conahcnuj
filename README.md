@@ -210,6 +210,21 @@ cd <repo>
 
 `gh-app/app.env` に実値を入れてから OpenCode を再起動する。
 
+## エージェントの権限設定（opencode.json）
+
+リポジトリルートに `opencode.json` を置き、このリポジトリで動く opencode
+エージェントの権限ポリシーをバージョン管理しています（マシンごとの
+`~/.config/opencode/opencode.jsonc` より優先されます）。
+
+- 通常の作業（`bash` / `edit` / 外部ディレクトリ）は許可。ドライバは
+  `opencode run` を**非対話**で起動するため、`ask` は「自動拒否」になり、
+  モデルが作業を終えられなくなるためです。
+- 安全のため `deny` を残しています: `gh-app/app.env`（App の秘密鍵）、
+  `git push --force` / `-f`、`git config --global` への書き込み。
+
+変更したら `bash test/opencode-config.sh`（CI の `config-test` ジョブ）を
+実行してください。
+
 ## トラブルシューティング
 
 - **`gh auth status` が 自分のアカウントを表示する**
