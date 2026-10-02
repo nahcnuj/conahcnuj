@@ -244,6 +244,44 @@ apply_driver_commit_model() {
   fi
 }
 
+# Set by commit_changes: "true" when the feature branch was gone from the
+# remote and had to be re-created from the default branch before the commit.
+# Read by stop_when_base_has_the_work, which stops the run instead of opening an
+# empty pull request when the re-created branch turns out to be identical to the
+# base (the work reached the default branch by another route, e.g. a concurrent
+# run's merged PR).
+COMMIT_BRANCH_RECREATED="false"
+
+# True when the current branch still carries something a pull request could
+# show, i.e. its tree differs from <base>'s. Compares trees, not commit counts:
+# a commit that lands on top of the base without changing a single byte is not
+# reviewable (GitHub rejects such a PR) and would only send the driver back into
+# the implementation loop. Fails open: when the base cannot be fetched or
+# compared, assume there is something to review so the run keeps going.
+branch_has_diff_from_base() {
+  local base="${1}" rc
+  git fetch origin "${base}" >/dev/null 2>&1 || return 0
+  git diff --quiet "origin/${base}" HEAD >/dev/null 2>&1
+  rc=$?
+  # 0 = identical, 1 = differs, >1 = git could not compare.
+  [[ "${rc}" -eq 0 ]] && return 1
+  return 0
+}
+
+# Decide whether a run that just committed onto a re-created feature branch has
+# anything left to do. The branch had to be re-created because it vanished under
+# the run; if the default branch already carries the implementation, whoever got
+# it there first merged it and the issue is resolved. Say so and stop cleanly
+# instead of opening an empty pull request and letting drive loop over the
+# models again. Returns 0 when the run should stop.
+stop_when_base_has_the_work() {
+  local base="${1}"
+  [[ "${COMMIT_BRANCH_RECREATED}" == "true" ]] || return 1
+  branch_has_diff_from_base "${base}" && return 1
+  echo "The implementation is already in ${base}; nothing left to review." >&2
+  return 0
+}
+
 # Commit every working-tree change as a Verified commit, then sync the local
 # branch to the remote head api-commit.sh created. The commit message always
 # comes from the coding agent (.commit-msg); the driver never invents a fixed
@@ -252,7 +290,8 @@ apply_driver_commit_model() {
 # offline. api-commit.sh appends the Model trailer from CONAHCNUJ_COMMIT_MODEL;
 # test mode adds the same trailer with a second -m paragraph.
 commit_changes() {
-  local message
+  local message branch
+  COMMIT_BRANCH_RECREATED="false"
   # .branch-name is metadata, never part of the implementation.
   rm -f .branch-name
   if [[ ! -f ".commit-msg" ]]; then
@@ -277,9 +316,19 @@ commit_changes() {
     fi
     return 0
   fi
-  bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
-  local branch
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  # The feature branch can disappear while the model works: GitHub deletes the
+  # head branch of a merged pull request, and a concurrent run of this driver
+  # (another workflow job, a local run) can merge and clean up the very branch
+  # this run is working on. api-commit.sh refuses to commit to a missing branch,
+  # which would throw away a finished implementation (issue #93), so ask for
+  # --create-branch: the ref is recreated from the default branch head, with no
+  # unsigned commit involved, and the Verified commit lands on it.
+  if [[ -n "${branch}" ]] && ! git ls-remote --exit-code --heads origin "${branch}" >/dev/null 2>&1; then
+    COMMIT_BRANCH_RECREATED="true"
+    echo "Remote branch ${branch} is gone; it will be re-created from the default branch for this commit." >&2
+  fi
+  bash "${HERE}/../gh-app/api-commit.sh" -m "${message}" --create-branch
   git fetch origin "${branch}" >/dev/null 2>&1 || true
   git reset --hard "origin/${branch}" >/dev/null 2>&1 || true
 }
@@ -892,6 +941,13 @@ start_issue() {
     fi
     branch="$(resolve_agent_branch_name "${owner}" "${repo}" "${default_oid}" "${branch}")"
     commit_changes
+    # The branch may have had to be re-created because it vanished under this
+    # run (see commit_changes). If the implementation is already in the default
+    # branch, the work reached it by another route and there is nothing left to
+    # review.
+    if stop_when_base_has_the_work "${default_branch}"; then
+      exit 0
+    fi
   fi
 
   drive "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}"

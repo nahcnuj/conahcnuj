@@ -25,13 +25,13 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/bot-user-id.sh` | bot アカウントの user ID を出力（app.env 優先、無ければ公開 API から自動解決） | ネットワーク不要なのは app.env 設定済みの場合のみ |
 | `gh-app/tests/run.sh` | offline モックテストのランナー（同ディレクトリの観点別テストを順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする。`BOT_USER_ID` は書かない（公開 API から自動解決。手動上書き時のみ追加） |
-| `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `api-commit-trailer` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`run.sh` から実行 |
+| `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `api-commit-trailer` / `api-commit-create-branch` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`run.sh` から実行 |
 | `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`tool.execute.before` で `git commit` をブロック。セッションのモデル表示名と variant を `CONAHCNUJ_COMMIT_MODEL` に入れる | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決。`CONAHCNUJ_SESSION_MODEL`（`provider/model`）が設定されているときはそのモデルだけを記録する |
 | `test/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約と commit 誘導を検証。`plugins/` 外に置くのは opencode の自動ロード対象外にするため） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
 | `plugins/package.json`・`tsconfig.json`・`plugin-stub.d.ts` | 型チェック基盤（`@types/node` 実物＋ `@opencode-ai/plugin` 最小 stub） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
 | `bin/conahcnuj.sh` | issue駆動自律開発ドライバ（issue→フィーチャーブランチ→PR→レビュー対応→ready to merge まで） | `lib/`・`tests/`・`test.sh` とセット。実行は `conahcnuj <issue番号>`（PR番号なら自動で再開）。ブランチ名・コミットメッセージはコーディングエージェントが決める（`.branch-name` / `.commit-msg`）。環境変数上書き・offline テストモードはヘッダーコメント参照。異常終了時はバグ報告 issue を対象リポジトリへ自動作成（`gh_api_create_issue`） |
 | `lib/` | ドライバ用ライブラリ（`gh-api.sh` / `opencode.sh` / `rate-limit.sh`） | `opencode.sh` は失敗したモデルから `sessionID` と作業ツリーを次モデルへ引き継ぐ。`gh-api.sh` は `GH_API_TEST_MODE=1` で stdin からモック応答を 1 コール 1 行読み、ネットワーク I/O をしない |
-| `tests/`・`test.sh` | ドライバの offline モックテスト（モック API tape ＋ モック opencode でフロー検証） | 秘密鍵・ネットワーク不要。CI の `mock-test` で `test.sh` を実行 |
+| `tests/`・`test.sh` | ドライバの offline モックテスト（モック API tape ＋ モック opencode でフロー検証） | 秘密鍵・ネットワーク不要。CI の `mock-test` で `test.sh` を実行。`conahcnuj-vanished-branch.sh` は `api-commit.sh` をスタブ化し、ローカル bare リポジトリだけでブランチ消失の復旧を検証する |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置。加えて `conahcnuj` バイナリ（既定 `~/.local/bin`）と bin 側 `gh-app/`・`lib/` を配置 | gh-app は**2 箇所**へ配備（opencode 設定用とドライバ用）。実 `app.env` があればそれを、無ければ example から作成 |
 | `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
 | `docker-run.sh` | 上記イメージでドライバを実行するラッパー（対象リポジトリを `/work` へマウント、コンテナ用 `app.env` を生成し秘密鍵を読み取り専用マウント） | テストではなく**実走行**用（実キー・ネットワーク・opencode 設定が必要） |
@@ -101,6 +101,8 @@ bash gh-app/api-commit.sh -m "message" -a --dry-run   # owner/repo/branch 自動
   - 1 実行でブランチ先端に Verified コミットを **1 件だけ**作る（author は bot、committer は GitHub・署名付き）。`git add -A`＋`git commit -m` と収集内容は同じだが、作成場所（GitHub サーバー側）が違うため署名付きになる。
   - 無印は staged の内容を index（`git show :path`）から読む（`git commit` 相当。新規ファイルは `git add` でステージする）。`-a` は tracked の作業ツリー変更を読む（untracked 除外。`git commit -a` 相当。削除・リネーム対応）。
   - 注意: `-a` はコミット操作であり、ステージングでは無い。収集と Verified コミット作成を1実行で行う（中間ステージは作らない）。
-  - `--delete <path>`（明示削除）、`--create-branch`（デフォルトブランチ起点で ref を作成。新規ブランチ用）、`--dry-run`（API を呼ばず収集結果のみ表示。token/network 不要）。
+  - `--delete <path>`（明示削除）、`--create-branch`（デフォルトブランチ起点で ref を作成。新規ブランチ用。作成と同時に別の実行が ref を作っていた場合はその head を引き継ぐ）、`--dry-run`（API を呼ばず収集結果のみ表示。token/network 不要）。
+  - 存在しないブランチの判定は 404 を「答え」として扱い、`curl` のエラー行は出さない。無印なら 이유を明示して終了し、`--create-branch` があれば作成する。
   - 既存ブランチへの追記のみ。履歴の書き換え・force-push はしない。unsigned コミットが既にあるブランチは、先に `git fetch` → `git reset --hard` で作り直してから使うこと。
+- ドライバはコミット時に常に `--create-branch` を付ける。モデルが作業している間にフィーチャーブランチが消えることがあるため（マージ済み PR の head 削除、別の同時実行による merge と cleanup）。消えた場合はデフォルトブランチの head から ref を作り直し、Verified コミットを載せる。それでもベースと差分が無い（＝同時実行が実装を merge 済み）なら PR を作らず正常終了する。
 - `git push` で unsigned コミットを送らない。`api-commit.sh` はコミットを直接リモートブランチに作成するため push 不要。ローカル同期は `git fetch origin` → `git reset --hard origin/<branch>`。
