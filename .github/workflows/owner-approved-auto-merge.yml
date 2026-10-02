@@ -55,6 +55,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          # required secret として宣言しても、caller 側の repository secret が未設定だと
+          # 空文字で渡るため明示的に弾く（空の token は gh が exit 4 で落とすだけ）
+          if [ -z "$GH_TOKEN" ]; then
+            echo "auto-merge-token is empty: set the caller's user token (PAT) secret" >&2
+            exit 1
+          fi
+
           case "$MERGE_METHOD" in
             merge) MERGE_FLAG=--merge ;;
             squash) MERGE_FLAG=--squash ;;
