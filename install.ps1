@@ -13,6 +13,7 @@
 #                                       (resolves gh-app relative to itself)
 # plus:
 #   - <Destination>/plugins/gh-app-token.ts   opencode plugin
+#   - <Destination>/opencode.json              opencode permission policy
 #   - <InstallPath>/conahcnuj                driver binary
 #   - <InstallPathParent>/lib/*.sh           driver runtime libs
 # If the config destination has no app.env yet, it is created from
@@ -20,10 +21,15 @@
 # node_modules are local typecheck tooling and are never deployed; gh-app/tests
 # and other test code is never deployed either.
 #
-# The opencode permission policy is NOT deployed: it is version controlled as
-# the project-level opencode.json in the repository root (issue #11), and a
-# project config takes precedence over the global one this script writes to.
-# Editing <Destination>/opencode.json by hand is not needed either.
+# opencode.json is the user-level config (issue #11): the permission policy is
+# version controlled in the repository root, and the driver runs opencode in
+# *other* repositories, where a project config in this repository would not
+# apply at all. It is deployed as opencode.json rather than opencode.jsonc on
+# purpose: opencode merges the global config.json, opencode.json and
+# opencode.jsonc in that order, so writing opencode.json leaves a hand-written
+# opencode.jsonc in place (it simply wins where the two overlap) instead of
+# overwriting the user's own file. A pre-existing opencode.json that is not the
+# policy from this repository is kept as opencode.json.bak.
 
 [CmdletBinding()]
 param(
@@ -52,6 +58,7 @@ $SrcLib = Join-Path $RepoRoot "lib"
 # and lib relative to its own location, so those are mirrored beside it.
 $DstGhAppConfig = Join-Path $Destination "gh-app"
 $DstPlugins = Join-Path $Destination "plugins"
+$DstPolicy = Join-Path $Destination "opencode.json"
 $DstBinDir = $InstallPath
 $DstGhAppBin = Join-Path (Split-Path $InstallPath -Parent) "gh-app"
 $DstLibBin = Join-Path (Split-Path $InstallPath -Parent) "lib"
@@ -134,7 +141,24 @@ $PluginName = "gh-app-token.ts"
 Copy-Item -LiteralPath (Join-Path $SrcPlugins $PluginName) -Destination (Join-Path $DstPlugins $PluginName) -Force
 Write-Host "  copied $PluginName"
 
-# 3. driver runtime beside the binary (gh-app + lib).
+# 3. user-level opencode config (issue #11). This is the file opencode reads as
+# the global config, so the permission policy applies to every session - most
+# importantly to the driver's own `opencode run` in other repositories.
+Write-Host "Deploying opencode.json to $DstPolicy"
+$SrcPolicy = Join-Path $RepoRoot "opencode.json"
+if (Test-Path -LiteralPath $SrcPolicy) {
+    $policy = Get-NormalizedText $SrcPolicy
+    if ((Test-Path -LiteralPath $DstPolicy) -and ((Get-NormalizedText $DstPolicy) -ne $policy)) {
+        Copy-Item -LiteralPath $DstPolicy -Destination "$DstPolicy.bak" -Force
+        Write-Host "  kept the previous opencode.json as opencode.json.bak"
+    }
+    Write-NormalizedText $DstPolicy $policy
+    Write-Host "  copied opencode.json"
+} else {
+    Write-Host "  opencode.json not found in the repository; skipped"
+}
+
+# 4. driver runtime beside the binary (gh-app + lib).
 Write-Host "Deploying gh-app to $DstGhAppBin"
 Deploy-GhApp $DstGhAppBin
 New-Item -ItemType Directory -Force -Path $DstLibBin | Out-Null
@@ -144,7 +168,7 @@ Get-ChildItem -Path $SrcLib -Filter "*.sh" -File | ForEach-Object {
     Write-Host "  copied lib/$($_.Name)"
 }
 
-# 4. conahcnuj binary
+# 5. conahcnuj binary
 New-Item -ItemType Directory -Force -Path $DstBinDir | Out-Null
 $BinName = "conahcnuj"
 $SrcBinScript = Join-Path $SrcBin "conahcnuj.sh"
@@ -153,5 +177,5 @@ Write-NormalizedText (Join-Path $DstBinDir $BinName) $content
 Write-Host "  copied $BinName to $DstBinDir"
 
 Write-Host ""
-Write-Host "Done. Restart opencode to load the plugin (plugins/*.ts is auto-loaded)."
+Write-Host "Done. Restart opencode to pick up the plugin and the permission policy (plugins/*.ts and opencode.json are auto-loaded)."
 Write-Host "Add $DstBinDir to your PATH to use 'conahcnuj' command."

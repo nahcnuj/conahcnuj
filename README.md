@@ -212,9 +212,9 @@ cd <repo>
 
 ## エージェントの権限設定（opencode.json）
 
-リポジトリルートに `opencode.json` を置き、このリポジトリで opencode エージェント
-に**禁止したい操作だけ**を宣言しています（許可の明示はしません。指定していない
-ツール・コマンドは既定値に従います）。
+リポジトリルートに `opencode.json` を置き、エージェントに**禁止したい操作だけ**
+を宣言しています（許可の明示はしません。指定していないツール・コマンドは既定値に
+従います）。`install.ps1` が `~/.config/opencode/opencode.json` へ配置します。
 
 - `deny`: `gh-app/app.env`（App の秘密鍵）、`* --force*` と
   `git push --force` / `-f`、`git config --global` への書き込み
@@ -223,10 +223,17 @@ cd <repo>
 `ask` は使いません。ドライバは `opencode run` を**非対話**で起動するため、`ask` は
 「自動拒否」になり、モデルが作業を終えられなくなるためです。
 
-この設定は `~/.config/opencode/opencode.json` ではなくリポジトリに置くので、
-`install.ps1` はデプロイしません（project config は global config より優先されるため）。
+**ユーザーレベルに置く理由:** ドライバは**対象リポジトリ**を `--dir` にして
+`opencode run` を起動するので、このリポジトリの project config はの中では読まれ
+ません。ユーザーレベルに置けば、対象リポジトリでもコンテナ実行でも同じポリシーが
+効きます。opencode は global 設定を `config.json` → `opencode.json` →
+`opencode.jsonc` の順にマージするので、自分の設定を `opencode.jsonc` に書いて
+いても壊しません（上書きはしません。別内容の `opencode.json` が既にあった場合は
+`opencode.json.bak` に退避されます）。
 
-変更したら次を実行してください（CI の `config-test` ジョブもこれを行います）。
+変更したら次を実行してください。`install.ps1` を再実行し、opencode を再起動します
+（CI の `config-test` ジョブは検証だけ、CI の `install-test` ジョブは配置まで
+確認します）。
 
 ```bash
 npm ci --no-audit --no-fund
@@ -235,7 +242,8 @@ node test/opencode-config.js
 
 検証するのは `opencode.json` が**自前の `$schema`（`https://opencode.ai/config.json`）の
 定義に沿っているかだけ**です。判定は Ajv が出し、スキーマは実行時に取得して
-`.cache/schema/` にキャッシュします（ネットワークが無くても再実行可）。
+`.cache/schema/schemas.json` にキャッシュします（ネットワークが無くても再実行可。
+取得先 URL は `OPENCODE_CONFIG_SCHEMA` で差し替え可）。
 ポリシーの中身はテストで固定していません。
 
 ## トラブルシューティング

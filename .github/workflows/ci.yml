@@ -74,6 +74,11 @@ jobs:
         shell: pwsh
         run: |
           $dest = Join-Path $env:RUNNER_TEMP "opencode-deploy-test"
+          # Seed a user-level opencode.json that is not the policy from this
+          # repository: install.ps1 must not discard it silently.
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          '{"$schema":"https://opencode.ai/config.json","theme":"system"}' |
+            Set-Content -LiteralPath (Join-Path $dest "opencode.json") -NoNewline
           & ./install.ps1 -Destination $dest
 
       - name: Verify deployed files
@@ -105,11 +110,35 @@ jobs:
             Write-Error "app.env was not created from example"
             exit 1
           }
-          # The permission policy is version controlled as the project-level
-          # opencode.json (issue #11). One source of truth: it must not be
-          # duplicated into the global config, where it would go stale.
-          if (Test-Path -LiteralPath (Join-Path $dest "opencode.json")) {
-            Write-Error "opencode.json must not be deployed: the policy is version controlled in the repo"
+          # The permission policy is version controlled as opencode.json in the
+          # repository root and installed as the user-level config (issue #11),
+          # so the driver's `opencode run` in other repositories inherits it.
+          $policy = Join-Path $dest "opencode.json"
+          if (-not (Test-Path -LiteralPath $policy)) {
+            Write-Error "opencode.json was not deployed"
+            exit 1
+          }
+          $policyHash = (Get-FileHash -LiteralPath $policy).Hash
+          if ($policyHash -ne (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "opencode.json")).Hash) {
+            Write-Error "deployed opencode.json does not match the repository source"
+            exit 1
+          }
+          # The user's own opencode.jsonc must survive the install: the policy
+          # is deployed as opencode.json precisely to avoid overwriting it.
+          if (Test-Path -LiteralPath (Join-Path $dest "opencode.jsonc")) {
+            Write-Error "opencode.jsonc must not be deployed: it belongs to the user"
+            exit 1
+          }
+          # An opencode.json that was already there and was not the policy from
+          # this repository is kept as opencode.json.bak.
+          $bak = Join-Path $dest "opencode.json.bak"
+          if (-not (Test-Path -LiteralPath $bak)) {
+            Write-Error "the pre-existing opencode.json was not backed up to opencode.json.bak"
+            exit 1
+          }
+          $bakText = (Get-Content -LiteralPath $bak -Raw).Trim()
+          if ($bakText -notmatch '"theme"') {
+            Write-Error "opencode.json.bak does not hold the previous opencode.json: $bakText"
             exit 1
           }
           # Only gh-app-token.ts may live in the deployed plugins dir:
@@ -198,9 +227,10 @@ jobs:
             npm-${{ runner.os }}-
 
       # opencode.json is version controlled so agents get the same permission
-      # policy on every machine. The check validates it against the JSON Schema
-      # named by its own $schema (Ajv, fetched at run time) and asserts nothing
-      # about the policy itself.
+      # policy on every machine, and install.ps1 installs it as the user-level
+      # config. The check validates it against the JSON Schema named by its own
+      # $schema (Ajv, fetched at run time) and asserts nothing about the policy
+      # itself.
       - name: Validate opencode.json against its schema
         run: |
           npm ci --no-audit --no-fund
@@ -300,12 +330,11 @@ jobs:
           # Seed the bot-ID cache: the public lookup shares runner IPs and
           # gets rate-limited; the ID itself is immutable public info.
           printf '331119074' > "$RUNNER_TEMP/e2e-inst/gh-app/bot-id.cache"
-          cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<'EOF'
-          {
-            "$schema": "https://opencode.ai/config.json",
-            "model": "opencode/mimo-v2.5-free"
-          }
-          EOF
+          # Pin a free model *into* the deployed policy instead of replacing
+          # it, so the e2e run also exercises the config install.ps1 ships.
+          jq '.model = "opencode/mimo-v2.5-free"' \
+            "$RUNNER_TEMP/e2e-inst/opencode.json" > "$RUNNER_TEMP/e2e-inst/opencode.json.tmp"
+          mv "$RUNNER_TEMP/e2e-inst/opencode.json.tmp" "$RUNNER_TEMP/e2e-inst/opencode.json"
 
       # Fixture repo (no AGENTS.md, no remote): the agent can only discover
       # `git vc` through the plugin hook, not repo docs. A repo without a

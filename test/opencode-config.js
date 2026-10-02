@@ -1,7 +1,8 @@
 // Validate opencode.json against the JSON Schema its own $schema points at.
 //
-// Issue #11 version-controls the opencode permission policy so agents get the
-// same rules on every machine. The rules themselves are a human decision (see
+// Issue #11 version-controls the opencode permission policy and installs it as
+// the user-level config, so the same rules apply on every machine and in every
+// repo the driver works on. The rules themselves are a human decision (see
 // AGENTS.md), so nothing about them is asserted here - a test that pinned them
 // would only produce merge conflicts and false failures. This check does one
 // thing: prove that opencode.json is valid JSON and conforms to the schema it
@@ -10,8 +11,14 @@
 // hand-written validation logic to review against the schema.
 //
 // The schema lives at https://opencode.ai/config.json. It is fetched at run
-// time and cached under .cache/schema, so repeat runs work offline. Override
-// the source with OPENCODE_CONFIG_SCHEMA (a URL or a local file path).
+// time and cached in .cache/schema/schemas.json, so a run without network still
+// works. Override the root schema source with OPENCODE_CONFIG_SCHEMA (a URL).
+//
+// Two fixed paths are read and one is written: opencode.json and the cache
+// file. A schema URL - which is data, not code: it comes from opencode.json or
+// from an external $ref inside a downloaded schema - is only ever handed to
+// fetch(), never spliced into a path, so neither a hostile $schema nor a
+// hostile $ref can pick which file this script reads or writes.
 //
 // Run: node test/opencode-config.js   (or: npm run test:config)
 "use strict"
@@ -23,6 +30,9 @@ const Ajv2020 = require("ajv/dist/2020").default
 const repoRoot = path.join(__dirname, "..")
 const configPath = path.join(repoRoot, "opencode.json")
 const cacheDir = path.join(repoRoot, ".cache", "schema")
+// One cache file for every schema this run needs: the root schema plus the
+// $refs Ajv resolves while compiling it. Keys are URLs, values are documents.
+const cachePath = path.join(cacheDir, "schemas.json")
 
 function fail(message) {
   console.error(`opencode-config: ${message}`)
@@ -43,37 +53,47 @@ function readJsonFile(file, what) {
   }
 }
 
-function cacheFile(uri) {
-  return path.join(cacheDir, uri.replace(/[^\w.-]+/g, "_"))
+function readCache() {
+  if (!fs.existsSync(cachePath)) return {}
+  const cache = readJsonFile(cachePath, "the schema cache")
+  if (!cache || typeof cache !== "object" || Array.isArray(cache)) {
+    fail(`the schema cache (${cachePath}) is not a JSON object; delete it and rerun`)
+  }
+  return cache
 }
 
-// A schema document from a URL or a local path. Remote documents are cached
-// under .cache/schema; if the network is down the cached copy is used so the
-// check still runs.
-async function loadSchema(uri) {
-  if (!/^https?:\/\//i.test(uri)) return readJsonFile(path.resolve(repoRoot, uri), uri)
+function writeCache(cache) {
+  fs.mkdirSync(cacheDir, { recursive: true })
+  fs.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}\n`)
+}
 
-  const cached = cacheFile(uri)
-  let body
+// A schema document by URL, from the cache when it is there (so a run without
+// network keeps working) and from the network otherwise. Anything downloaded
+// is added to `cache` for the next run.
+async function loadSchema(uri, cache) {
+  if (Object.prototype.hasOwnProperty.call(cache, uri)) return cache[uri]
+  let res
   try {
     if (typeof fetch !== "function") throw new Error("node 18 or newer is required to fetch the schema")
-    const res = await fetch(uri)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    res = await fetch(uri)
+  } catch (err) {
+    fail(`cannot fetch ${uri}: ${err.message} (no cached copy under ${cachePath})`)
+  }
+  if (!res.ok) fail(`cannot fetch ${uri}: HTTP ${res.status} (no cached copy under ${cachePath})`)
+  let body
+  try {
     body = await res.text()
   } catch (err) {
-    if (!fs.existsSync(cached)) fail(`cannot load ${uri}: ${err.message} (no cached copy under ${cacheDir})`)
-    console.warn(`warning: cannot load ${uri} (${err.message}); using the cached copy`)
-    return readJsonFile(cached, uri)
+    fail(`cannot read ${uri}: ${err.message} (no cached copy under ${cachePath})`)
   }
-
+  let schema
   try {
-    JSON.parse(body)
+    schema = JSON.parse(body)
   } catch (err) {
     fail(`${uri} did not return JSON: ${err.message}`)
   }
-  fs.mkdirSync(cacheDir, { recursive: true })
-  fs.writeFileSync(cached, body)
-  return JSON.parse(body)
+  cache[uri] = schema
+  return schema
 }
 
 // Ajv reports every failing `anyOf` branch. The opencode schema is full of
@@ -104,11 +124,13 @@ async function main() {
     fail('opencode.json needs a "$schema" URL (or set OPENCODE_CONFIG_SCHEMA to override the source)')
   }
 
-  const schema = await loadSchema(schemaUri)
+  const cache = readCache()
+  const cachedBefore = JSON.stringify(cache)
+  const schema = await loadSchema(schemaUri, cache)
   // strict: false - the published schema carries opencode's own annotations
   // (allowComments, allowTrailingCommas) that are not JSON Schema keywords.
   // loadSchema resolves the remote $refs it does contain, on demand.
-  const ajv = new Ajv2020({ strict: false, loadSchema })
+  const ajv = new Ajv2020({ strict: false, loadSchema: (uri) => loadSchema(uri, cache) })
   let validate
   try {
     validate = await ajv.compileAsync(schema)
@@ -116,7 +138,9 @@ async function main() {
     fail(`${schemaUri} could not be used as a JSON Schema: ${err.message}`)
   }
 
-  if (!validate(config)) {
+  const conform = validate(config)
+  if (JSON.stringify(cache) !== cachedBefore) writeCache(cache)
+  if (!conform) {
     console.error(`opencode.json does not conform to ${schemaUri}:`)
     for (const err of specificErrors(validate.errors)) {
       console.error(`  ${err.instancePath || "/"}: ${err.message}`)
