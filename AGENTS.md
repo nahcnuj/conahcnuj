@@ -30,7 +30,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `test/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約と commit 誘導を検証。`plugins/` 外に置くのは opencode の自動ロード対象外にするため） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
 | `plugins/package.json`・`tsconfig.json`・`plugin-stub.d.ts` | 型チェック基盤（`@types/node` 実物＋ `@opencode-ai/plugin` 最小 stub） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
 | `bin/conahcnuj.sh` | issue駆動自律開発ドライバ（issue→フィーチャーブランチ→PR→レビュー対応→ready to merge まで） | `lib/`・`tests/`・`test.sh` とセット。実行は `conahcnuj <issue番号>`（PR番号なら自動で再開）。ブランチ名・コミットメッセージはコーディングエージェントが決める（`.branch-name` / `.commit-msg`）。環境変数上書き・offline テストモードはヘッダーコメント参照。異常終了時はバグ報告 issue を対象リポジトリへ自動作成（`gh_api_create_issue`） |
-| `lib/` | ドライバ用ライブラリ（`gh-api.sh` / `opencode.sh` / `rate-limit.sh`） | `opencode.sh` は失敗したモデルから `sessionID` と作業ツリーを次モデルへ引き継ぐ。`gh-api.sh` は `GH_API_TEST_MODE=1` で stdin からモック応答を 1 コール 1 行読み、ネットワーク I/O をしない |
+| `lib/` | ドライバ用ライブラリ（`gh-api.sh` / `opencode.sh` / `opencode-render.sh` / `rate-limit.sh`） | `opencode.sh` は失敗したモデルから `sessionID` と作業ツリーを次モデルへ引き継ぐ。`gh-api.sh` は `GH_API_TEST_MODE=1` で stdin からモック応答を 1 コール 1 行読み、ネットワーク I/O をしない |
+| `lib/opencode-render.sh` | opencode の JSONL ストリームを人が読むログへ整形（issue #45）。`opencode.sh` のパイプ下流で 1 イベントずつ即時出力する（バッファせず逐次表示） | 依存は bash + awk のみ（`Dockerfile` に node/python を足さない）。`awk` は JSON パーサではなくスキャナで、`part` → `state` と入れ子で辿って値を取り出し、`IFS=$'\x1f'` のレコードで行全体を引き渡すので埋め込み JSON のパースに依存しない。ツールの引数オブジェクトが同名キーで `state.output` を隠さないよう `input` より後ろだけを探す。見出しは `model@owner/repo:cwd  SHA [branch] +n/-n`（`CONAHCNUJ_RENDER_MAX_LINES` / `CONAHCNUJ_RENDER_MAX_COLS` / `CONAHCNUJ_MODEL_LABEL_FILE` / `CONAHCNUJ_REPO` で調整）。整形は `bash lib/opencode-render.sh --model <id> [--repo o/r] --dir <dir> <<< '<jsonl>'` で単体確認できる |
 | `tests/`・`test.sh` | ドライバの offline モックテスト（モック API tape ＋ モック opencode でフロー検証） | 秘密鍵・ネットワーク不要。CI の `mock-test` で `test.sh` を実行 |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置。加えて `conahcnuj` バイナリ（既定 `~/.local/bin`）と bin 側 `gh-app/`・`lib/` を配置 | gh-app は**2 箇所**へ配備（opencode 設定用とドライバ用）。実 `app.env` があればそれを、無ければ example から作成 |
 | `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
@@ -54,6 +55,9 @@ shellcheck -x gh-app/*.sh gh-app/tests/*.sh   # -x で app.env.example を追従
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/tests/run.sh
 bash test.sh   # ドライバの offline テスト（bin/・lib/・tests/）
+
+# ログ整形だけを单独に確認（opencode 不要）
+bash lib/opencode-render.sh --model <model> --dir . <<< '{"type":"text","part":{"type":"text","text":"hi"}}'
 
 # e2e は CI の `e2e-opencode` ジョブで実行（手順は ci.yml に直接記載）。
 # ローカルで流す場合は opencode 本体・node・pwsh を用意し、ジョブの手順をなぞる

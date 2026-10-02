@@ -128,6 +128,52 @@ EOF
   unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID
 }
 
+test_opencode_run_renders_log() {
+  local tmp old_path out
+  tmp="$(mktemp -d)"
+  old_path="${PATH}"
+  mkdir -p "${tmp}/bin"
+  # Stand in for opencode: emit the JSON events a real run produces.
+  cat > "${tmp}/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
+printf '{"type":"step_start","sessionID":"ses_render"}\n'
+printf '{"type":"reasoning","part":{"type":"reasoning","text":"thinking about it"}}\n'
+printf '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi\\n","metadata":{"exit":0},"title":"echo hi"}}}\n'
+printf '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"false"},"output":"","metadata":{"exit":2},"title":"false"}}}\n'
+printf '{"type":"text","part":{"type":"text","text":"all done"}}\n'
+EOF
+  chmod +x "${tmp}/bin/opencode"
+  PATH="${tmp}/bin:${PATH}"
+  export PATH
+  OPENCODE_ARGS_FILE="${tmp}/args.txt"
+  export OPENCODE_ARGS_FILE
+  # --thinking is what makes opencode emit the reasoning events the log shows.
+  # Not in a command substitution: opencode_run exports the session id for the
+  # next model, and a subshell would swallow it.
+  opencode_run "Issue" "Body" "${tmp}" "opencode/render-model" > "${tmp}/log.txt" 2>/dev/null
+  out="$(cat "${tmp}/log.txt")"
+  args="$(cat "${OPENCODE_ARGS_FILE}")"
+  [[ "${args}" == *"--thinking"* ]]
+  # The JSON stream is rendered, not dumped.
+  [[ "${out}" != *'"type":"tool_use"'* ]]
+  [[ "${out}" != *'"sessionID"'* ]]
+  [[ "${out}" == *"opencode/render-model@"* ]]
+  [[ "${out}" == *"  thinking about it"* ]]
+  [[ "${out}" == *'$ echo hi'* ]]
+  [[ "${out}" == *"  hi"* ]]
+  [[ "${out}" == *"✅ echo hi"* ]]
+  [[ "${out}" == *"❌️ false (exit 2)"* ]]
+  [[ "${out}" == *"  all done"* ]]
+  # The raw stream is still kept for the session id, so a later model can
+  # continue the same session.
+  [[ "${OPENCODE_SESSION_ID:-}" == "ses_render" ]]
+  PATH="${old_path}"
+  rm -rf "${tmp}"
+  unset OPENCODE_ARGS_FILE OPENCODE_SESSION_ID
+  echo "opencode_run (rendered log) passed"
+}
+
 test_opencode_run_timeout() {
   local tmp old_path rc
   tmp="$(mktemp -d)"
@@ -155,6 +201,7 @@ test_opencode_build_handoff_prompt
 test_opencode_run
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
+test_opencode_run_renders_log
 test_opencode_run_timeout
 
 echo "All opencode tests passed"

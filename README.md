@@ -20,7 +20,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
-├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / レートリミット）
+├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / ログ整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
 ├── tests/                     # ドライバの offline モックテスト
@@ -103,6 +103,40 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
 すべて省略可能です。
+
+### 実行ログ
+
+ドライバが呼び出す opencode は `--format json` で動くため、そのままでは
+JSON 1 イベント 1 行が延々と流れるだけです。`lib/opencode-render.sh` が
+パイプ下流で 1 イベントずつ読み、人が読むログへ整形します（逐次表示なので
+バッファしません）:
+
+```
+Space Bunny (medium)@owner/repo:.           a1b2c3d [feature/issue-45] +3/-0
+  まず差分を確認する。
+Space Bunny (medium)@owner/repo:.           a1b2c3d [feature/issue-45] +3/-0
+$ git diff
+
+  --- a/lib/x.sh
+  +++ b/lib/x.sh
+
+✅ git diff
+
+Space Bunny (medium)@owner/repo:.           a1b2c3d [feature/issue-45] +5/-0 +1 new
+  テストも更新した。
+```
+
+- 見出し行は「モデル / effort・`owner/repo`・作業ディレクトリ」「HEAD の SHA・
+  ブランチ」「作業ツリーの差分（`+n/-n`。未追跡ファイルは `+n new`）」です。
+  ブロック（思考・本文・ツール実行）ごとに見出しを付けて表示するので、
+  どこで做了什么かが追いやすく、モデルが途中で固まったときの切り分けにも
+  使えます。
+- ツール実行は `$ コマンド` → 出力（インデント）→ `✅ コマンド` / `❌️ コマンド (exit n)`
+  の形で、終了コードが非 0 なら失敗として表示します。
+- 長い出力は `CONAHCNUJ_RENDER_MAX_LINES`（既定 400 行）と
+  `CONAHCNUJ_RENDER_MAX_COLS`（既定 400 桁）で切り詰め、
+  省略した行数・桁数を `... (N more lines truncated)` / `... [+N cols]` と
+  明示します。
 
 ## issue の自動対応（GitHub Actions）
 
