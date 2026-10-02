@@ -26,7 +26,11 @@
 #                     files, staged or not; untracked files excluded).
 #   --delete path     Delete path from the branch.
 #   --create-branch   Create <branch> from the default branch if it does not
-#                     exist yet (no unsigned commits involved).
+#                     exist yet (no unsigned commits involved). Lets a caller
+#                     recover when the branch disappeared under it (GitHub
+#                     deletes a merged PR's head branch, a concurrent run may
+#                     have re-created it, ...). When the ref shows up while it
+#                     is being created, that head is reused.
 #   --dry-run         Print what would be committed without calling the API
 #                     (no token/network needed; usable for offline tests).
 #
@@ -53,6 +57,8 @@ set +a
 
 API_BASE="${GH_APP_API_BASE:-https://api.github.com}"
 GRAPHQL="${API_BASE}/graphql"
+# Set by the token step below; needed by remote_ref_sha().
+TOKEN=""
 
 # Usage: <owner>/<repo> or empty.
 auto_repo() {
@@ -293,13 +299,24 @@ fi
 TOKEN="$(bash "${DIR}/get-token.sh")"
 API="${API_BASE}/repos/${REPO}"
 
-# 2) Current HEAD sha of the branch (|| true: a missing branch must fall
-#    through to the --create-branch handling instead of tripping set -e).
-HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
-HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
+# Head sha of a branch ref, or empty when the ref does not exist. curl's own
+# error is dropped on purpose: "no such ref" is an answer, not a failure, and
+# the caller decides what to do about it (--create-branch recreates it). Without
+# this, every missing branch printed a bare "curl: (22) ... 404" line that read
+# like a broken API before the real explanation arrived (issue #93).
+# (|| true: a 404 must not trip set -e either.)
+remote_ref_sha() {
+  local json
+  json="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+    "${API}/git/refs/heads/${1}" 2>/dev/null || true)"
+  printf '%s' "${json}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p'
+}
+
+# 2) Current HEAD sha of the branch.
+HEAD_SHA="$(remote_ref_sha "${BRANCH}")"
 if [[ -z "${HEAD_SHA}" ]]; then
   if [[ "${CREATE_BRANCH}" != true ]]; then
-    echo "ERROR: branch ${BRANCH} not found (does it exist? use --create-branch to create it from the default branch)" >&2
+    echo "ERROR: branch ${BRANCH} not found on ${REPO} (does it exist? use --create-branch to create it from the default branch)" >&2
     exit 1
   fi
   # 2b) Create the branch ref from the default branch head (no commits pushed).
@@ -315,9 +332,21 @@ if [[ -z "${HEAD_SHA}" ]]; then
     exit 1
   fi
   BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
-  echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
-  HEAD_SHA="${BASE_SHA}"
+  if curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null 2>&1; then
+    echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
+    HEAD_SHA="${BASE_SHA}"
+  else
+    # The POST failed: the usual reason is that the ref appeared meanwhile
+    # (another run created it, or the same branch name was taken between the
+    # probe and here). Adopt the head that exists now instead of failing, so a
+    # lost race never costs the caller its commit.
+    HEAD_SHA="$(remote_ref_sha "${BRANCH}")"
+    if [[ -z "${HEAD_SHA}" ]]; then
+      echo "ERROR: could not create branch ${BRANCH} on ${REPO} from ${DEFAULT_BRANCH}" >&2
+      exit 1
+    fi
+    echo "Branch ${BRANCH} already existed; committing on it at ${HEAD_SHA:0:7}." >&2
+  fi
 fi
 
 ADD_LIST="$(IFS=,; echo "${ADDITIONS[*]}")"
@@ -355,6 +384,9 @@ if [[ -z "${COMMIT_SHA}" ]]; then
   exit 1
 fi
 
-git pull origin "${BRANCH}"
+# Local sync only: the Verified commit already exists on the remote, so a
+# failure here (no usable remote, ref not fetchable, ...) must not turn a
+# successful commit into a failed run.
+git pull origin "${BRANCH}" >/dev/null 2>&1 || echo "WARNING: could not pull ${BRANCH} into the local branch; the commit is on the remote." >&2
 
 printf '%s' "${COMMIT_SHA}"
