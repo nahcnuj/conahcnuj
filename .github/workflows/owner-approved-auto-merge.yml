@@ -70,15 +70,11 @@ jobs:
           fi
           pull_request_id="$(printf '%s' "$pull_request" | jq -r .node_id)"
 
-          # shellcheck disable=SC2016 # GraphQL の変数は bash ではなく GraphQL 側で解決する
-          gh api graphql \
-            -f query='
-              mutation($pullRequest: ID!, $method: PullRequestMergeMethod!) {
-                enablePullRequestAutoMerge(
-                  input: { pullRequestId: $pullRequest, mergeMethod: $method }
-                ) {
-                  clientMutationId
-                }
-              }' \
-            -F pullRequest="$pull_request_id" \
-            -F method="$MERGE_METHOD_ENUM"
+          gh api graphql -f query="
+            mutation {
+              enablePullRequestAutoMerge(
+                input: { pullRequestId: \"$pull_request_id\", mergeMethod: $MERGE_METHOD_ENUM }
+              ) {
+                clientMutationId
+              }
+            }"
