@@ -39,9 +39,9 @@
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
 # jitter within their configured windows.
 
-# The console output is a log for a person, not for the agent: opencode's JSON
-# events are formatted as they arrive (lib/opencode-render.sh, one context
-# header per block) onto stderr, which the bug report above carries the tail of.
+# opencode's JSON events are formatted as they arrive (lib/opencode-render.sh,
+# one context header per block) onto stderr, so the console output stays
+# readable and the bug report above carries that text.
 
 set -euo pipefail
 
