@@ -471,10 +471,17 @@ gh_api_update_pr() {
   gh_api_call PATCH "https://api.github.com/repos/${owner}/${repo}/pulls/${number}" "${payload}" >/dev/null
 }
 
-# Request reviewers on a PR (empty list = ask for review). Args: owner repo pr
+# Request review on a PR. Args: owner repo pr [reviewer]
+# A named reviewer assigns the request to that account; omitting it asks for
+# review without naming anyone.
 gh_api_request_review() {
-  local owner="${1}" repo="${2}" number="${3}"
-  local body='{"reviewers":[]}'
+  local owner="${1}" repo="${2}" number="${3}" reviewer="${4:-}"
+  local body
+  if [[ -n "${reviewer}" ]]; then
+    body="{\"reviewers\":[\"$(gh_api_escape "${reviewer}")\"]}"
+  else
+    body='{"reviewers":[]}'
+  fi
   gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/requested_reviewers" "${body}"
 }
 
