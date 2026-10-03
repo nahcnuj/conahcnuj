@@ -22,6 +22,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
+├── opencode/AGENTS.md         # opencode グローバルルール（コミットは git vc。install.ps1 が配置）
 ├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
 ├── tests/                     # ドライバの offline モックテスト
 ├── test.sh                    # tests/ のランナー
@@ -42,9 +43,23 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
    `POST /app/installations/{id}/access_tokens` でインストールトークン（1時間有効）を取得。
    取得済みなら有効期限内はキャッシュ（`gh-app/token.cache`）を返す。
 2. opencode プラグイン `plugins/gh-app-token.ts` が `shell.env` フックで
-   `GH_TOKEN` と `GIT_CONFIG_*`（user.name / user.email / credential.helper / commit.gpgsign）を注入。
+   `GH_TOKEN` と `GIT_CONFIG_*`（user.name / user.email / credential.helper /
+   commit.gpgsign / alias.vc）を注入。
+3. `experimental.chat.system.transform` フックで「コミットは `git vc`」という
+   規則を全セッションのシステムプロンプトへ常時注入し、`tool.execute.before`
+   で `git commit` と `api-commit.sh` の直接実行を検知して `git vc` へ誘導する。
+4. `install.ps1` は `opencode/AGENTS.md` を `~/.config/opencode/AGENTS.md` へ
+   管理ブロックとしてマージし、リポジトリごとの指示が無い場合でも
+   エージェントが `git vc` を選べるようにする（既存の内容は保持）。
 
-## Verified コミットを作る（api-commit.sh）
+## Verified コミットを作る（`git vc`）
+
+コーディングエージェントは `git vc` でコミットする。`git vc` はプラグインが
+注入する git alias で、`gh-app/api-commit.sh` を正しい owner/repo/branch 付きで
+呼び出すラッパー。`git add` でステージしてから `git vc -m "<message>"`、
+tracked の作業ツリー変更をまとめるなら `git vc -m "<message>" -a`
+（`git commit` / `git commit -a` と収集内容は同じ）。`api-commit.sh` の直接実行は
+プラグインの `tool.execute.before` がブロックし、`git vc` へ誘導する。
 
 `gh-app/api-commit.sh` は GitHub GraphQL の `createCommitOnBranch` を使い、ブランチに
 **Verified 署名のついたコミット**を 1 件作成する。コミットは GitHub 側が作成するため、

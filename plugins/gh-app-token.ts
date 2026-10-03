@@ -300,6 +300,90 @@ function isGitCommitCommand(cmd: string): boolean {
   return /(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)
 }
 
+// The one sanctioned way to create a commit here: `git vc` is a git alias
+// this plugin injects into every shell (see shell.env), so it already wraps
+// api-commit.sh with owner/repo/branch auto-detection. Kept as a constant so
+// the hook redirects and the system-prompt rules never drift apart, and never
+// name api-commit.sh as an alternative to run.
+const VC_USAGE = 'git vc -m "<message>" [-a]'
+
+/**
+ * Commit rules appended to every system prompt, so a model reaches for `git vc`
+ * on its own instead of having to trip a hook first. Kept short and in the
+ * imperative: it is read on every single session.
+ */
+const COMMIT_RULES = [
+  "Git commits in this environment: this machine's git runs as a GitHub App,",
+  "so `git commit` can only create unsigned commits and branch rules reject",
+  `them. Commit with the \`git vc\` alias instead (${VC_USAGE}): it collects the`,
+  "same content as `git commit` (add files with `git add` first; `-a` for",
+  "tracked worktree changes) but GitHub creates and verifies the commit.",
+  "Do not run `git commit`, and do not run gh-app/api-commit.sh or any other",
+  "gh-app script directly: `git vc` is the supported wrapper around it.",
+  "Commit only when the task asks for a commit; otherwise leave the change in",
+  "the working tree.",
+].join(" ")
+
+const API_COMMIT_SCRIPT = "api-commit.sh"
+const SHELL_NAMES = new Set(["bash", "sh", "zsh", "ksh", "dash"])
+
+function unquote(token: string): string {
+  if (token.length >= 2) {
+    const quote = token[0]
+    if ((quote === '"' || quote === "'") && token.endsWith(quote)) {
+      return token.slice(1, -1)
+    }
+  }
+  return token
+}
+
+function basename(token: string): string {
+  const slash = Math.max(token.lastIndexOf("/"), token.lastIndexOf("\\"))
+  return slash >= 0 ? token.slice(slash + 1) : token
+}
+
+/**
+ * True when one command segment (no separators) runs api-commit.sh as its
+ * command word, with or without a shell wrapper.
+ */
+function segmentRunsApiCommit(segment: string): boolean {
+  const tokens = segment
+    .trim()
+    .split(/\s+/)
+    .map(unquote)
+    .filter((token) => token.length > 0)
+  let i = 0
+  // Leading VAR=value assignments do not change the command word.
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) {
+    i += 1
+  }
+  const command = tokens[i]
+  if (command === undefined) {
+    return false
+  }
+  if (!SHELL_NAMES.has(basename(command).toLowerCase())) {
+    return basename(command) === API_COMMIT_SCRIPT
+  }
+  // Shell wrapper: skip its options; `-c <script>` runs the script inline.
+  i += 1
+  while (i < tokens.length && tokens[i].startsWith("-")) {
+    if (/^-[a-z]*c[a-z]*$/i.test(tokens[i])) {
+      return segmentRunsApiCommit(tokens[i + 1] ?? "")
+    }
+    i += 1
+  }
+  return basename(tokens[i] ?? "") === API_COMMIT_SCRIPT
+}
+
+/**
+ * True when a command line runs api-commit.sh itself instead of going through
+ * `git vc`. Only the command word counts, so reading the script (`cat
+ * api-commit.sh`) keeps working.
+ */
+function isDirectApiCommitCommand(cmd: string): boolean {
+  return cmd.split(/[;&|()\n]/).some(segmentRunsApiCommit)
+}
+
 interface ShellIdentity {
   botName: string
   botEmail: string
@@ -340,13 +424,6 @@ async function injectShellEnv(
   })
 }
 
-/**
- * `tool.execute.before` hook body: `git commit` under the App identity is
- * always unsigned (commit.gpgsign is forced to false above) and fails
- * "Commits must have verified signatures" branch rules. Git aliases cannot
- * shadow the `commit` builtin, so block it here and point at the Verified
- * path instead. Throws to block, returns silently to allow.
- */
 interface SeenModel {
   name: string
   variant: string
@@ -445,20 +522,36 @@ function labelForSession(sessionID: string | undefined): string {
   return formatModelLabel(seen.name, seen.variant)
 }
 
-function blockUnsignedCommit(
+/**
+ * `tool.execute.before` hook body: `git commit` under the App identity is
+ * always unsigned (commit.gpgsign is forced to false above) and fails
+ * "Commits must have verified signatures" branch rules, and api-commit.sh is
+ * an implementation detail behind the `git vc` alias. Git aliases cannot
+ * shadow the `commit` builtin, so both paths are blocked here and redirected
+ * to `git vc`. Throws to block, returns silently to allow.
+ */
+function redirectToVerifiedCommit(
   tool: string,
   args: unknown,
-  botName: string,
-  vcUsage: string
+  botName: string
 ): void {
   if (tool !== "bash") {
     return
   }
   const cmd = parseBashCommand(args)
-  if (cmd !== null && isGitCommitCommand(cmd)) {
+  if (cmd === null) {
+    return
+  }
+  if (isGitCommitCommand(cmd)) {
     throw new Error(
       `Do not use \`git commit\`: commits made as ${botName} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
-        `Create a Verified commit instead: ${vcUsage}`
+        `Create a Verified commit instead: ${VC_USAGE} (the \`git vc\` alias collects staged changes, or tracked ones with -a, and lets GitHub sign the commit).`
+    )
+  }
+  if (isDirectApiCommitCommand(cmd)) {
+    throw new Error(
+      `Do not run ${API_COMMIT_SCRIPT} directly: its owner/repo/branch detection and the App identity are already wired up behind \`git vc\`. ` +
+        `Use ${VC_USAGE} instead.`
     )
   }
 }
@@ -473,7 +566,6 @@ export const GhAppTokenPlugin: Plugin = async () => {
   // `git vc` (verified-commit): commit staged changes, or `-a` for tracked.
   // owner/repo/branch are auto-detected, so it works in any repo.
   const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
-  const vcUsage = `git vc -m "<message>" [-a] (or: bash "${apiCommitSh}" -m "<message>" [-a])`
 
   return {
     "chat.message": async (input) => {
@@ -509,8 +601,15 @@ export const GhAppTokenPlugin: Plugin = async () => {
         }
       }
     },
+    // Rules up front, so a model in any repository commits with `git vc`
+    // without having to trip the hook below first.
+    "experimental.chat.system.transform": async (_input, output) => {
+      if (!output.system.includes(COMMIT_RULES)) {
+        output.system.push(COMMIT_RULES)
+      }
+    },
     "tool.execute.before": async (input, output) => {
-      blockUnsignedCommit(input.tool, output.args, botName, vcUsage)
+      redirectToVerifiedCommit(input.tool, output.args, botName)
     },
   }
 }
