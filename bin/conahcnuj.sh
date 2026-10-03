@@ -30,6 +30,10 @@
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
 #   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
 #                            the OpenCode display name (plugin) or the model id
+#   CONAHCNUJ_OPENCODE_LOG_LEVEL  opencode --log-level for the run
+#                            (default: WARN; DEBUG to debug a failing model)
+#   CONAHCNUJ_RENDER_MAX_LINES/COLS  per-block caps for the rendered log
+#                            (defaults: 200 lines / 400 cols)
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with

@@ -67,13 +67,16 @@ grep -q "filing a bug report issue in nahcnuj/conahcnuj" "${LOG}" || { echo "FAI
 grep -q "Bug report issue #25 created" "${LOG}" || { echo "FAIL: bug report issue #25 was not created"; exit 1; }
 grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAIL: bug report URL is missing"; exit 1; }
 
+# Set once for the whole file: the unit blocks below source the driver, which
+# would otherwise run main() on source.
+export CONAHCNUJ_IMPORT=1
+
 # --- unit: the bug report body carries a detailed error log -----------------
 # Source the driver (CONAHCNUJ_IMPORT=1, so main() is not run) and stub
 # gh_api_create_issue to capture the body it would send. Assert the report
 # includes the tail of the run log and no longer repeats the self-evident
 # repository name (reviewer: the report is filed in that very repository).
 (
-  export CONAHCNUJ_IMPORT=1
   unset CONAHCNUJ_REPO
   # Source the driver so its functions (plus our stub) run in one shell.
   # shellcheck source=bin/conahcnuj.sh
@@ -97,5 +100,43 @@ grep -q "## Error log" "${ROOT}/captured-body.txt" || { echo "FAIL: bug report h
 grep -q "ERROR: could not implement issue #14 with any available model." "${ROOT}/captured-body.txt" || { echo "FAIL: the error log does not carry the failing message"; exit 1; }
 grep -q "Exit code: 1" "${ROOT}/captured-body.txt" || { echo "FAIL: exit code is missing from the report"; exit 1; }
 grep -q "Repository:" "${ROOT}/captured-body.txt" && { echo "FAIL: self-evident repository line is still in the report"; exit 1; }
+
+# --- unit: the rendered model log reaches the run log -----------------------
+# The run log only captures stderr, so the renderer writes there. Assert that a
+# tool block from a real opencode_run call lands in RUN_LOG_FILE: without this
+# the bug report would show driver progress but nothing the model did.
+(
+  export CONAHCNUJ_TEST_MODE=1
+  export OPENCODE_TEST_MODE=0
+  mkdir -p "${ROOT}/fakebin"
+  # printf '%s' (not printf) so the \n inside the JSON string stays escaped and
+  # the event arrives as the single line opencode actually writes.
+  cat > "${ROOT}/fakebin/opencode" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"make check"},"output":"ok\n","metadata":{"exit":0},"title":"make check"}}}'
+EOF
+  chmod +x "${ROOT}/fakebin/opencode"
+  PATH="${ROOT}/fakebin:${PATH}"
+  export PATH
+  # shellcheck source=bin/conahcnuj.sh
+  source "${DRIVER}"
+  run_log_start
+  # Only stdout is sent to /dev/null: stderr must keep flowing into the FIFO
+  # run_log_start installed, or there is nothing to capture.
+  opencode_run "Issue" "Body" "${WORK}" "opencode/first" >/dev/null || true
+  run_log_finalize
+  cp "${RUN_LOG_FILE}" "${ROOT}/runlog-copy.txt"
+  run_log_cleanup
+)
+
+grep -q '✅ make check' "${ROOT}/runlog-copy.txt" || {
+  echo "FAIL: the rendered tool block is missing from the run log" >&2
+  cat "${ROOT}/runlog-copy.txt" >&2
+  exit 1
+}
+grep -q '{"type":"tool_use"' "${ROOT}/runlog-copy.txt" && {
+  echo "FAIL: the raw JSON stream leaked into the run log" >&2
+  exit 1
+}
 
 echo "conahcnuj abnormal-exit bug report passed"
