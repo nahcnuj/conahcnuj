@@ -399,7 +399,9 @@ render_event() {
     '{'*) ;;
     '') return 0 ;;
     *)
-      # Not JSON: opencode's own --print-logs output shares stdout.
+      # Not a JSON object: pass it through so a stray line on the stream is
+      # never silently dropped. opencode's own --print-logs output is not such
+      # a line -- that goes to stderr, beside the rendered log, not into here.
       printf '%s\n' "${line}"
       return 0
       ;;
