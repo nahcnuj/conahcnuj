@@ -79,6 +79,10 @@ fi
 # up by `git add -A`.
 PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
 PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
+# Where a captured .pr-title / .pr-body is kept. Like PR_BODY_SYNCED_FILE these
+# live outside the work tree so they are never picked up by `git add -A`.
+PR_TITLE_OVERRIDE_FILE="${PR_TITLE_OVERRIDE_FILE:-$(mktemp)}"
+PR_BODY_OVERRIDE_FILE="${PR_BODY_OVERRIDE_FILE:-$(mktemp)}"
 
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
@@ -92,6 +96,49 @@ pr_continuation_commented() {
 }
 pr_continuation_mark_commented() {
   printf '1\n' > "${PR_CONTINUATION_COMMENTED_FILE}"
+}
+
+# --- PR title / body overrides ----------------------------------------------
+#
+# The coding agent owns how the work is presented: it writes .commit-msg and
+# may choose .branch-name, so it must also be able to correct the PR title and
+# body (an issue with an empty body produces "Closes #n\n\n", which is not a
+# usable description; a review round may change what the PR is about).
+#
+# capture_pr_overrides moves .pr-title / .pr-body out of the work tree into
+# PR_TITLE_OVERRIDE_FILE / PR_BODY_OVERRIDE_FILE, so the metadata never ends up
+# in a commit and never counts as "work". Called before the agent's changes are
+# committed and again on every drive() iteration, which is what makes a review
+# round able to re-word the PR.
+capture_pr_overrides() {
+  local file
+  for file in .pr-title .pr-body; do
+    [[ -f "${file}" ]] || continue
+    if [[ ! -s "${file}" ]]; then
+      echo "WARNING: ${file} is empty; ignoring it." >&2
+      rm -f "${file}"
+      continue
+    fi
+  done
+  if [[ -s .pr-title ]]; then
+    head -n 1 .pr-title | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' > "${PR_TITLE_OVERRIDE_FILE}"
+    echo "Captured PR title from .pr-title: $(cat "${PR_TITLE_OVERRIDE_FILE}")" >&2
+  fi
+  if [[ -s .pr-body ]]; then
+    tr -d '\r' < .pr-body > "${PR_BODY_OVERRIDE_FILE}"
+    echo "Captured PR body from .pr-body ($(wc -c < "${PR_BODY_OVERRIDE_FILE}" | tr -d ' ') bytes)." >&2
+  fi
+  rm -f .pr-title .pr-body
+}
+
+pr_title_override() {
+  [[ -s "${PR_TITLE_OVERRIDE_FILE}" ]] || return 0
+  head -n 1 "${PR_TITLE_OVERRIDE_FILE}"
+}
+
+pr_body_override() {
+  [[ -s "${PR_BODY_OVERRIDE_FILE}" ]] || return 0
+  cat "${PR_BODY_OVERRIDE_FILE}"
 }
 
 # --- Windows relaunch -------------------------------------------------------
@@ -191,12 +238,12 @@ check_timeout() {
 }
 
 # True when the working tree holds real changes. The coding agent's
-# .commit-msg and .branch-name are metadata, not code changes, so they are
-# ignored: a model that writes nothing but a commit message or a branch name
-# must not count as having produced work.
+# .commit-msg, .branch-name, .pr-title and .pr-body are metadata, not code
+# changes, so they are ignored: a model that writes nothing but a commit
+# message, a branch name or PR wording must not count as having produced work.
 workdir_changed() {
   local dir="${1}" changes
-  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' || true)"
+  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' | grep -v '\.pr-title' | grep -v '\.pr-body' || true)"
   [[ -n "${changes}" ]]
 }
 
@@ -263,6 +310,9 @@ commit_changes() {
   local message
   # .branch-name is metadata, never part of the implementation.
   rm -f .branch-name
+  # .pr-title / .pr-body are PR metadata; capture_pr_overrides already moved
+  # them out of the work tree, this is the belt-and-braces path.
+  rm -f .pr-title .pr-body
   if [[ ! -f ".commit-msg" ]]; then
     echo "ERROR: the coding agent left no .commit-msg; refusing to commit with a fixed message." >&2
     return 1
@@ -644,7 +694,27 @@ PR #${pr} の処理を継続するには、Issue auto-drive を手動実行し�
 # a PATCH on every poll iteration. Outputs PR number.
 ensure_pr() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
-  local pr_body
+  local pr_body pr_title want_sync
+  # The coding agent's .pr-body wins over the issue text; without it the issue
+  # body is used, and an empty issue body falls back to the issue title so the
+  # PR never ships a bare "Closes #n" description.
+  local override_body
+  override_body="$(pr_body_override)"
+  local override_title
+  override_title="$(pr_title_override)"
+  if [[ -n "${override_body}" ]]; then
+    body="${override_body}"
+  elif [[ -z "${closes}" || -n "${body//[[:space:]]/}" ]]; then
+    : # keep the body as given
+  else
+    echo "WARNING: issue #${closes} has no body; using its title as the PR description. Write .pr-body to describe the change properly." >&2
+    body="${title}"
+  fi
+  if [[ -n "${override_title}" ]]; then
+    pr_title="${override_title}"
+  else
+    pr_title="${title}"
+  fi
   # A resumed PR that is not linked to any issue must keep its body verbatim;
   # prefixing it with a bare "Closes #" would produce a malformed description.
   if [[ -n "${closes}" ]]; then
@@ -656,10 +726,20 @@ ${body}"
   else
     pr_body="${body}"
   fi
+  # Sync when the agent supplied wording, or (as before) when the PR is linked to
+  # an issue and its body still has to be derived. The marker keeps this at one
+  # PATCH per driver process, so a poll loop does not rewrite it every time.
+  if [[ -n "${override_body}" || -n "${override_title}" ]]; then
+    want_sync="true"
+  elif [[ -n "${closes}" ]]; then
+    want_sync="true"
+  else
+    want_sync="false"
+  fi
   if [[ -n "${pr}" ]]; then
-    if [[ -n "${closes}" ]] && ! pr_body_synced; then
-      echo "Syncing body of PR #${pr} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}"
+    if [[ "${want_sync}" == "true" ]] && ! pr_body_synced; then
+      echo "Applying PR metadata to PR #${pr}." >&2
+      gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}" "${override_title}"
       pr_body_mark_synced
     fi
     printf '%s\n' "${pr}"
@@ -669,20 +749,24 @@ ${body}"
   existing="$(gh_api_find_pr_by_head "${owner}" "${repo}" "${branch}")"
   if [[ -n "${existing}" ]]; then
     echo "Reusing open PR #${existing} for ${branch}." >&2
-    if [[ -n "${closes}" ]] && ! pr_body_synced; then
-      echo "Syncing body of PR #${existing} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}"
+    if [[ "${want_sync}" == "true" ]] && ! pr_body_synced; then
+      echo "Applying PR metadata to PR #${existing}." >&2
+      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}" "${override_title}"
       pr_body_mark_synced
     fi
     printf '%s\n' "${existing}"
     return 0
   fi
   local num
-  num="$(gh_api_create_pr "${owner}" "${repo}" "${title}" "${pr_body}" "${branch}" "${base}")"
+  num="$(gh_api_create_pr "${owner}" "${repo}" "${pr_title}" "${pr_body}" "${branch}" "${base}")"
   if [[ -z "${num}" ]]; then
     echo "ERROR: PR creation failed for ${branch} -> ${base}." >&2
     return 1
   fi
+  # pr_body_mark_synced is deliberately not called here: the next drive()
+  # iteration keeps syncing once per process (the long-standing contract the
+  # driver tests' mock tapes encode), and a PATCH of an identical body is
+  # cheaper than re-baselining every tape.
   echo "Created PR #${num} (${branch} -> ${base})." >&2
   printf '%s\n' "${num}"
 }
@@ -728,6 +812,10 @@ drive() {
 
   while true; do
     check_timeout
+
+    # Take the agent's PR title / body wording before anything can commit or
+    # clean the work tree, so a review round can re-word the PR.
+    capture_pr_overrides
 
     # Commit leftovers from a previously interrupted run. Only possible while
     # the interrupted run's agent had already written its .commit-msg: the
@@ -888,6 +976,9 @@ start_issue() {
   # model fall-through and go straight to opening the PR for review. This is
   # what keeps the driver from spinning through every model asking for work
   # that is already done.
+  # Capture the PR wording first: the agent may have written it next to the
+  # commit message, and commit_changes removes these files from the work tree.
+  capture_pr_overrides
   if branch_has_commits "${default_oid}" "${default_branch}"; then
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
   elif workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
