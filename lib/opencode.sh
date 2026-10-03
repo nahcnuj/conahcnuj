@@ -4,10 +4,10 @@
 # model when the current model cannot complete the work.
 #
 # opencode's own output is a stream of JSON events; lib/opencode-render.sh
-# turns it into the log the driver prints (one context header per block).
-# The stream is filtered as it arrives instead of being dumped at the end, so
-# the SHA / branch / diff in every header describe the moment that block was
-# produced.
+# turns it into the driver's run log, one context header per block. That log is
+# read by a person working out why a run went the way it did. The stream is
+# filtered as it arrives instead of being dumped at the end, so the SHA / branch
+# / diff in every header describe the moment that block was produced.
 
 set -euo pipefail
 
