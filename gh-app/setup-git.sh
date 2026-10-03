@@ -17,13 +17,21 @@ set -a
 . "${ENV_FILE}"
 set +a
 
+# shellcheck source=gh-app/bash-exe.sh
+. "${HERE}/bash-exe.sh"
+
 # Bot user ID: app.env value wins, otherwise auto-resolved from the API.
 BOT_USER_ID="$(bash "${HERE}/bot-user-id.sh")"
 BOT_NAME="${APP_SLUG}[bot]"
 BOT_EMAIL="${BOT_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
 HELPER="${HERE}/git-credential-helper.sh"
-BASH_EXE="${BASH_EXE:-C:/Program Files/Git/bin/bash.exe}"
+# git runs the credential helper through this bash. A fresh clone only has the
+# app.env.example placeholder, which is not a path, so fall back to the
+# platform default (Git for Windows under MSYS/MinGW, a system bash elsewhere).
+if bash_exe_is_placeholder "${BASH_EXE:-}"; then
+  BASH_EXE="$(default_bash_exe)"
+fi
 HELPER_CMD="!\"${BASH_EXE}\" \"${HELPER//\\//}\""
 
 SCOPE="--local"

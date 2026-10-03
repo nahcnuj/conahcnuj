@@ -13,7 +13,7 @@ trap 'rm -rf "${TMP}"' EXIT
 # The cache path returns before any JWT signing, so no real values are needed.
 mkdir -p "${TMP}/gh-app"
 cd "${REPO_SCRIPTS}" || exit 1
-cp get-token.sh git-credential-helper.sh api-commit.sh bot-user-id.sh "${TMP}/gh-app/"
+cp get-token.sh git-credential-helper.sh api-commit.sh bot-user-id.sh bash-exe.sh setup-git.sh "${TMP}/gh-app/"
 cd "${HERE}" || exit 1
 cat > "${TMP}/gh-app/app.env" <<'EOF'
 APP_ID=00000

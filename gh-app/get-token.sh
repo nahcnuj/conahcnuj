@@ -89,9 +89,14 @@ if [[ -z "${TOKEN}" ]]; then
   exit 1
 fi
 
-# Cache until 10 min before expiry.
+# Cache until 10 min before expiry. `date -d` parses the ISO timestamp on GNU
+# coreutils (Linux); elsewhere the conservative lifetime below is used.
+expires_at_epoch=""
 if [[ -n "${EXPIRES_AT}" ]]; then
-  CACHE_EXPIRES="$(( $(date -d "${EXPIRES_AT}" +%s) - 600 ))"
+  expires_at_epoch="$(date -u -d "${EXPIRES_AT}" +%s 2>/dev/null || true)"
+fi
+if [[ -n "${expires_at_epoch}" ]]; then
+  CACHE_EXPIRES="$((expires_at_epoch - 600))"
 else
   CACHE_EXPIRES="$((NOW + 3000))"
 fi

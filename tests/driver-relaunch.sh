@@ -55,12 +55,15 @@ echo "driver_bash_exe (app.env) passed"
 
 fake_env "<your-bash-exe>"
 out="$(driver_bash_exe)"
-[[ "${out}" == "C:/Program Files/Git/bin/bash.exe" ]] || { echo "FAIL: placeholder must fall back to Git for Windows, got ${out}" >&2; exit 1; }
+# shellcheck source=gh-app/bash-exe.sh
+. "${REPO}/gh-app/bash-exe.sh"
+default="$(default_bash_exe)"
+[[ "${out}" == "${default}" ]] || { echo "FAIL: placeholder must fall back to the platform default (${default}), got ${out}" >&2; exit 1; }
 echo "driver_bash_exe (placeholder -> default) passed"
 
 rm -f "${GH_APP_DIR}/app.env"
 out="$(driver_bash_exe)"
-[[ "${out}" == "C:/Program Files/Git/bin/bash.exe" ]] || { echo "FAIL: example fallback expected default, got ${out}" >&2; exit 1; }
+[[ "${out}" == "${default}" ]] || { echo "FAIL: example fallback expected the platform default (${default}), got ${out}" >&2; exit 1; }
 echo "driver_bash_exe (example fallback) passed"
 
 # --- driver_needs_relaunch --------------------------------------------------

@@ -8,12 +8,16 @@ const GH_APP_DIR = path.join(__dirname, "..", "gh-app")
 const TOKEN_CACHE_FILE = path.join(GH_APP_DIR, "token.cache")
 const CREDENTIAL_HELPER_SH = path.join(GH_APP_DIR, "git-credential-helper.sh")
 
-// Git Bash on Windows; plain PATH lookup everywhere else (an explicit
+// Git Bash on Windows; plain PATH lookup everywhere else. An explicit
 // app.env value always wins, even when it does not exist yet: smoke tests
-// stage a bogus path on purpose and must still load).
+// stage a bogus path on purpose and must still load. The committed
+// app.env.example ships the "<your-bash-exe>" placeholder, which is not a
+// path, so a fresh clone (or a Linux install that copied the example) falls
+// back to the platform default instead of baking a broken helper command.
 const BASH_EXE_WINDOWS = "C:/Program Files/Git/bin/bash.exe"
+const BASH_EXE_PLACEHOLDER = "<your-bash-exe>"
 function resolveBashExe(explicit: string | undefined): string {
-  if (explicit) {
+  if (explicit && explicit !== BASH_EXE_PLACEHOLDER) {
     return explicit
   }
   return process.platform === "win32" ? BASH_EXE_WINDOWS : "bash"

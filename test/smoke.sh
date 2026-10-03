@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Plugin runtime smoke test, end to end from install.ps1:
+# Plugin runtime smoke test, end to end from the platform installer:
 # install to a temp dir, stage the INSTALLED files (not the repo files),
 # compile the installed plugin, load it against the installed gh-app dir
 # (fake app.env overlaid), and assert the shell.env contract (GIT_CONFIG
 # identity + alias.vc) plus the git-commit redirect via smoke-run.js.
-# Needs node/npm (typescript from plugins/package.json) and pwsh/powershell
-# for install.ps1. No secrets, no GitHub network.
+# Needs node/npm (typescript from plugins/package.json). install.sh runs on
+# Linux/macOS, install.ps1 needs pwsh/powershell on Windows.
+# No secrets, no GitHub network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,18 +16,27 @@ TMP="$(mktemp -d)"
 STAGE="${HERE}/.smoke"
 trap 'rm -rf "${TMP}" "${STAGE}"' EXIT
 
-if command -v pwsh >/dev/null 2>&1; then
-  PS=pwsh
-elif command -v powershell >/dev/null 2>&1; then
-  PS=powershell
-else
-  echo "ERROR: pwsh/powershell not found (needed to run install.ps1)" >&2
-  exit 1
-fi
-
 # 1) Install exactly like a user would, into a temp dir.
-"${PS}" -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-  -File "${REPO}/install.ps1" -Destination "${TMP}/inst" >/dev/null
+case "$(uname -s 2>/dev/null || printf 'unknown')" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    if command -v pwsh >/dev/null 2>&1; then
+      PS=pwsh
+    elif command -v powershell >/dev/null 2>&1; then
+      PS=powershell
+    else
+      echo "ERROR: pwsh/powershell not found (needed to run install.ps1)" >&2
+      exit 1
+    fi
+    INSTALL=("${PS}" -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File "${REPO}/install.ps1"
+      -Destination "${TMP}/inst" -InstallPath "${TMP}/bin")
+    ;;
+  *)
+    INSTALL=(bash "${REPO}/install.sh"
+      --destination "${TMP}/inst" --install-path "${TMP}/bin")
+    ;;
+esac
+"${INSTALL[@]}" >/dev/null
 INST="${TMP}/inst"
 
 (cd "${PLUGINS_DIR}" && npm ci --no-audit --no-fund)
