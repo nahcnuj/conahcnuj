@@ -8,8 +8,8 @@
 # implement again would just spin forever.
 #
 #   issue #10 read -> existing feature branch (already has a commit) ->
-#   implement skipped -> PR #124 created -> constraints pass -> review
-#   requested -> APPROVED -> "ready to merge" -> exit 0
+#   implement skipped -> PR #124 created -> constraints pass -> APPROVED ->
+#   "ready to merge" -> exit 0
 #
 # No secrets, no network.
 set -euo pipefail
@@ -42,8 +42,7 @@ git -C "${WORK}" commit -qm "existing implementation"
 
 # Mocked response tape, in call order:
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
-#   repo id, create_pr (124), conditions (SUCCESS), request_review,
-#   fetch_reviews (APPROVED), conditions.
+#   repo id, create_pr (124), conditions (SUCCESS), fetch_reviews (APPROVED).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "issue駆動自律開発", "body": "# 背景\n動作確認用のダミー issue です。", "labels": [{"name": "enhancement"}], "state": "open"}
@@ -54,9 +53,7 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"createPullRequest":{"pullRequest":{"number":124}}}}
 {"id":776}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -82,6 +79,7 @@ grep -q "already has commits; skipping implement" "${LOG}" || { echo "FAIL: impl
 grep -q "Implementing with available models" "${LOG}" && { echo "FAIL: the driver still ran the model fall-through"; exit 1; }
 grep -q "Created PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
+grep -q "Assigned nahcnuj as reviewer" "${LOG}" && { echo "FAIL: an approved PR must not be handed to a reviewer again"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }
 # Here-string, not `git log | grep -q`: under `set -o pipefail` an early

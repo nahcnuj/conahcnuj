@@ -10,12 +10,15 @@
 #      opencode (handing the same session and working tree to another model
 #      when one fails), committing only with the agent's .commit-msg
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
-#      mergeability) passes, then requests review
-#   3. polls the review status; addresses comments / requested changes /
-#      security-review threads, pushes and re-verifies non-reviewer
-#      constraints, then replies on the PR
-#   4. exits only when the PR is ready to merge
-#   5. on an abnormal exit (timeout, no model completed the work, unexpected
+#      mergeability) passes, then assigns the repository owner as reviewer.
+#      That hand-off to a human is the last thing a run owes the PR, so the
+#      driver exits there; an already APPROVED PR exits earlier as "ready to
+#      merge". Never auto-merges.
+#   3. when the run was resumed with fresh review feedback (comments /
+#      requested changes / security-review threads), addresses it, pushes a
+#      Verified commit, re-verifies the non-reviewer constraints, replies on
+#      the PR and re-requests review before exiting
+#   4. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the repository so a
 #      run the driver could not resolve is never silently lost. The report
 #      carries the tail of the run's console output as a detailed error log
@@ -26,7 +29,6 @@
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
-#   CONAHCNUJ_POLL_REVIEWS_MIN/MAX     review poll window (default 30/3600 s)
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
 #   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
 #                            the OpenCode display name (plugin) or the model id
@@ -51,8 +53,6 @@ TEST_MODE="${CONAHCNUJ_TEST_MODE:-0}"
 MAX_DURATION="${CONAHCNUJ_MAX_SECONDS:-259200}"
 POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
 POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
-POLL_REVIEWS_MIN="${CONAHCNUJ_POLL_REVIEWS_MIN:-30}"
-POLL_REVIEWS_MAX="${CONAHCNUJ_POLL_REVIEWS_MAX:-3600}"
 START_TIME="$(date +%s)"
 # Snapshot a caller-supplied trailer label. apply_driver_commit_model exports
 # CONAHCNUJ_COMMIT_MODEL for api-commit.sh, so a later commit must not treat
@@ -717,14 +717,40 @@ poll_conditions() {
   done
 }
 
+# Hand the PR over to a human: the repository owner is assigned as reviewer,
+# which is the last deliverable of a run. A reviewer who cannot be assigned
+# (GitHub refuses e.g. the author of the PR) or a request that is already
+# pending must not fail the run, so fall back to the unnamed ask-for-review;
+# only when that fails too is the hand-off reported as an error.
+# Args: owner repo pr
+request_review_from_owner() {
+  local owner="${1}" repo="${2}" pr="${3}"
+  if gh_api_request_review "${owner}" "${repo}" "${pr}" "${owner}" >/dev/null 2>&1; then
+    echo "Assigned ${owner} as reviewer on PR #${pr}." >&2
+    return 0
+  fi
+  if gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null 2>&1; then
+    echo "Review requested on PR #${pr} (${owner} is not assignable; asked for review instead)." >&2
+    return 0
+  fi
+  echo "ERROR: could not request review on PR #${pr}." >&2
+  return 1
+}
+
+# Final line of a run whose PR now waits on a human reviewer.
+log_review_handoff() {
+  local owner="${1}" repo="${2}" pr="${3}" reviewer="${4}"
+  echo "Review requested on PR #${pr} (reviewer: ${reviewer}): https://github.com/${owner}/${repo}/pull/${pr}" >&2
+}
+
 # --- review fingerprint -----------------------------------------------------
 
-# Main state machine. Handles both the fresh-issue path and the resume path;
-# never exits until the PR is approved and every non-reviewer constraint
-# passes ("ready to merge"). Never auto-merges.
+# Main state machine. Handles both the fresh-issue path and the resume path.
+# Never auto-merges, and never waits for an approval: it exits once the review
+# request is on the PR ("ready to merge" when the PR is already APPROVED).
 drive() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
-  local last_sig="" review_requested="false"
+  local last_sig=""
 
   while true; do
     check_timeout
@@ -793,12 +819,12 @@ drive() {
     fi
 
     echo "PR #${pr}: non-reviewer constraints satisfied." >&2
-    if [[ "${review_requested}" != "true" ]]; then
-      gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null 2>&1 || echo "WARNING: could not request review on PR #${pr} (may already be requested)." >&2
-      review_requested="true"
-    fi
 
     # --- review phase ---
+    # Asking for review is what a run hands over to a human, so the review
+    # request (not an approval) is the last thing the driver produces. The
+    # approval, and the merge owner-approved-auto-merge chains off it, are the
+    # reviewer's part to give: the driver reports and exits instead of polling.
     local rv decision payload raw summary sig actionable
     rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
     decision="$(printf '%s' "${rv}" | cut -d'|' -f1)"
@@ -809,13 +835,8 @@ drive() {
     echo "reviewDecision: ${decision:-NONE}" >&2
 
     if [[ "${decision}" == "APPROVED" ]]; then
-      if poll_conditions "${owner}" "${repo}" "${pr}"; then
-        echo "PR #${pr} is APPROVED and every non-reviewer constraint passes." >&2
-        echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
-        exit 0
-      fi
-      echo "PR approved but constraints regressed; re-checking." >&2
-      continue
+      echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
+      exit 0
     fi
 
     actionable="false"
@@ -826,38 +847,35 @@ drive() {
     if [[ "${actionable}" == "true" && -n "${sig}" && "${sig}" != "${last_sig}" ]]; then
       last_sig="${sig}"
       echo "New review feedback detected; addressing it." >&2
-      if ! implement "${title}" "${body}" "Address the pull request review feedback:
+      local addressed="false"
+      if implement "${title}" "${body}" "Address the pull request review feedback:
 
 ${summary}"; then
-        if ! workdir_changed "$(pwd)"; then
-          echo "No changes could be produced for this feedback; continuing to poll." >&2
+        addressed="true"
+      fi
+      if workdir_changed "$(pwd)"; then
+        commit_changes
+        addressed="true"
+      fi
+      if [[ "${addressed}" == "true" ]]; then
+        if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
+          echo "Constraints failing after addressing feedback; fixing next cycle." >&2
           continue
         fi
-      fi
-      commit_changes
-      if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
-        echo "Constraints failing after addressing feedback; fixing next cycle." >&2
-        continue
-      fi
-      gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null 2>&1 || echo "WARNING: could not request review on PR #${pr} (may already be requested)." >&2
-      review_requested="true"
-      gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
+        request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
+        gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
 
 ${summary}" >/dev/null || echo "WARNING: could not post the review-feedback reply on PR #${pr}." >&2
-      echo "Replied on PR #${pr} after addressing review feedback." >&2
-      # The reply is itself a new comment and would change the review payload,
-      # so re-fingerprint the payload as it appears AFTER the reply. Otherwise
-      # the next poll would treat our own comment as fresh reviewer feedback
-      # and loop forever addressing the same thread.
-      rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
-      payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
-      sig="$(gh_api_review_fingerprint "$(gh_api_unb64 "${payload}")")"
-      last_sig="${sig}"
-      continue
+        echo "Replied on PR #${pr} after addressing review feedback." >&2
+        log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
+        exit 0
+      fi
+      echo "No changes could be produced for this feedback; leaving the review request as it is." >&2
     fi
 
-    echo "No new review feedback; waiting for reviewers..." >&2
-    rate_limit_poll_sleep "${POLL_REVIEWS_MIN}" "${POLL_REVIEWS_MAX}"
+    request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
+    log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
+    exit 0
   done
 }
 
