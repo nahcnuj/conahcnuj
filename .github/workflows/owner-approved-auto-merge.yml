@@ -108,7 +108,7 @@ jobs:
               gh api "repos/$REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" \
                 | jq -r --arg self "$SELF_RUN" --argjson own "${own_check_names}" '
                     [(.check_runs // [])[]
-                     | select((.name as $n | ($own | index($n))) == null)
+                     | select((.name as $n | ($own | any(. as $on | ($n == $on) or ($n | test("/\\s*"+$on+"\\s*$")) or ($n | test("^\\s*"+$on+"\\s*/")) or ($n | contains($on+" / ")) or ($n | contains(" / "+$on)))) | not))
                      | select(((((.details_url // "") + (.html_url // "")) | contains($self)) | not))
                      | (if .status != "completed" then "pending"
                         elif ((.conclusion // "") | IN("success", "neutral", "skipped")) then ""
@@ -161,7 +161,7 @@ jobs:
             # しておく。次回同じ失敗が起きても原因を追えるようにする。
             { gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" \
                 | jq -c '{mergeable, merge_state, draft, merged}' || true; } >&2
-            echo "if 'enable / enable' is a required status check, remove it from the branch protection rules" >&2
+            echo "if the workflow's check run (e.g. 'enable' or 'enable / enable') is a required status check, remove it from the branch protection rules" >&2
             exit 1
           fi
           printf '%s\n' "$merge_output"
