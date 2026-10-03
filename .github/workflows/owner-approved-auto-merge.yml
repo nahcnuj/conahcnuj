@@ -84,16 +84,31 @@ jobs:
           #
           # gh pr checks --watch で待つと、このジョブ自身の check run（承認された
           # head SHA に紐付いたまま pending）が永久に終わらないため自己デッドロック
-          # する。check runs を API で直接読み、この run のものだけ除外して待つ。
-          CHECK_INTERVAL=30
-          CHECK_TIMEOUT=1500
+          # する。check runs を API で直接読み、このワークフローの check run を
+          # 除外して待つ。
+          #
+          # 除外するのは「job 名が一致するもの」= 同じチェック名を持つ全実行。
+          # owner が承認するたびにこのワークフローは実行され、同じ head SHA に
+          # 前実行の failure（あるいは concurrency でキャンセルされた実行の
+          # cancelled）が残り続ける。branch rules はこの check を required に
+          # していないので、除外しないと 2 回目以降の承認が毎回
+          # "checks did not pass" で失敗する（issue #119）。
+          CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
+          CHECK_TIMEOUT="${CHECK_TIMEOUT:-1500}"
           SELF_RUN="/actions/runs/${GITHUB_RUN_ID}/"
+          own_check_names='[]'
+          if own_jobs="$(gh api "repos/$REPOSITORY/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null \
+            | jq -c '[.jobs[]? | .name // empty]')"; then
+            own_check_names="${own_jobs:-[]}"
+          fi
+          echo "ignoring own check runs while waiting: ${own_check_names}"
 
           outstanding_checks() {
             {
               gh api "repos/$REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" \
-                | jq -r --arg self "$SELF_RUN" '
+                | jq -r --arg self "$SELF_RUN" --argjson own "${own_check_names}" '
                     [(.check_runs // [])[]
+                     | select((.name as $n | ($own | index($n))) == null)
                      | select(((((.details_url // "") + (.html_url // "")) | contains($self)) | not))
                      | (if .status != "completed" then "pending"
                         elif ((.conclusion // "") | IN("success", "neutral", "skipped")) then ""
@@ -141,6 +156,11 @@ jobs:
             --match-head-commit "$HEAD_SHA" 2>&1)"; then
             printf '%s\n' "$merge_output" >&2
             echo "merge failed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
+            # branch rules の内容は API から読めないので、どの制約で止まったか
+            # （未解決のスレッド・レビュー不足・必須 check など）をログに dump
+            # しておく。次回同じ失敗が起きても原因を追えるようにする。
+            { gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" \
+                | jq -c '{mergeable, merge_state, draft, merged}' || true; } >&2
             echo "if 'enable / enable' is a required status check, remove it from the branch protection rules" >&2
             exit 1
           fi

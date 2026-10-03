@@ -163,6 +163,13 @@ Reusable Workflow は利用側Workflowの `GITHUB_TOKEN` を使い、secret の
 `pull-requests: write` を許可し、対象リポジトリの **Settings → General →
 Pull Requests** で **Allow auto-merge** を有効にしてください。
 
+この Workflow の check run（既定の呼び出し方では `enable / enable`）は、
+マージ条件の確認から除外されます。この Workflow は承認されるたびに実行され、
+前の実行の failure も同じコミットに紐付いたまま残るため、除外しないと
+2 回目以降の承認が必ず失敗します。**この check を branch rules の required
+status check には追加しないでください。** 追加すると、自分自身の pending
+チェックを待つ自己デッドロックになります。
+
 `merge-method` は省略すると `merge` です。Merge commitを許可しないリポジトリでは、
 `with` に `merge-method: squash` または `merge-method: rebase` を指定します。
 
