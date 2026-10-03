@@ -97,14 +97,6 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
-
-opencode の出力（`--format json` のイベント列）は `lib/opencode-render.sh` が
-読みやすい形に整形して stderr へ出す（ブロックごとに 1 行のヘッダが付き、
-思考・ツール実行・セッションエラーを区切る）。表示量と細かさは
-`CONAHCNUJ_OPENCODE_LOG_LEVEL` と `CONAHCNUJ_RENDER_MAX_LINES` /
-`CONAHCNUJ_RENDER_MAX_COLS` で調整でき、省略した分は必ずその場で明示される。
-仕様と既定値は `AGENTS.md` を参照する。
-
 ドライバ自身は自動マージを行わない。環境変数の上書き（時間予算・ポーリング幅）や
 offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `bin/conahcnuj.sh` のヘッダーコメントを参照。
