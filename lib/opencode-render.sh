@@ -27,8 +27,11 @@
 # exit status is ignored by the caller for the same reason.
 #
 # Overridable: CONAHCNUJ_RENDER_MAX_LINES (per-block line cap, default 200),
-# CONAHCNUJ_RENDER_MAX_COLS (per-line column cap, default 400). Truncation is
-# always announced in place so nothing disappears silently.
+# CONAHCNUJ_RENDER_MAX_COLS (per-line column cap, default 400). Both cap tool
+# output only: what a command printed is machine data and a runaway build log
+# must not bury the rest of the run, while the agent's own text and reasoning
+# are always printed in full. Nothing the model wrote is ever dropped from the
+# log, and every truncation is announced in place.
 
 set -uo pipefail
 
@@ -316,19 +319,30 @@ render_header() {
 
 # --- block bodies -----------------------------------------------------------
 
-# Print text indented under its block, capped so one runaway payload cannot
-# bury the log. Both caps announce what was dropped.
+# Print text indented under its block.
+#
+# The second argument picks the cap policy. "capped" applies both caps and
+# announces whatever was dropped; "full" prints every line exactly as the
+# model wrote it. Tool output is "capped" because it is machine data (a failed
+# build can print a megabyte); the model's own text and reasoning are "full"
+# because they are the point of the log -- a model wraps its prose at a few
+# hundred columns, so the column cap would only ever cut a sentence in half.
 render_indent() {
+  local value="${1:-}" policy="${2:-capped}"
   local -a lines=()
   local line total limit i
-  [[ -n "${1:-}" ]] || return 0
-  mapfile -t lines <<< "${1}"
+  [[ -n "${value}" ]] || return 0
+  mapfile -t lines <<< "${value}"
   total="${#lines[@]}"
-  limit="${MAX_LINES}"
-  [[ "${limit}" -le "${total}" ]] || limit="${total}"
+  if [[ "${policy}" == "capped" ]]; then
+    limit="${MAX_LINES}"
+    [[ "${limit}" -le "${total}" ]] || limit="${total}"
+  else
+    limit="${total}"
+  fi
   for ((i = 0; i < limit; i++)); do
     line="${lines[i]}"
-    if [[ "${#line}" -gt "${MAX_COLS}" ]]; then
+    if [[ "${policy}" == "capped" && "${#line}" -gt "${MAX_COLS}" ]]; then
       printf '%s%s ...[+%s cols]\n' "${INDENT}" "${line:0:MAX_COLS}" "$(( ${#line} - MAX_COLS ))"
     else
       printf '%s%s\n' "${INDENT}" "${line}"
@@ -340,11 +354,11 @@ render_indent() {
 }
 
 # Assistant text and reasoning read the same way: the header says which step
-# this is, the body is just the model's words.
+# this is, the body is just the model's words, printed in full.
 render_block_text() {
   [[ -n "${F[text]}" ]] || return 0
   render_header
-  render_indent "${F[text]}"
+  render_indent "${F[text]}" full
 }
 
 # A tool call: the command line, whatever it printed, and whether it worked.
