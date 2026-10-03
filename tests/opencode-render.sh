@@ -246,6 +246,7 @@ test_truncation_is_announced() {
   local tmp out
   tmp="$(mktemp -d)"
   fixture_repo "${tmp}/repo"
+  # Tool output is machine data, so it stays capped.
   out="$(printf '%s\n' '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"big"},"output":"line0001\nline0002\nline0003\nline0004\nline0005","metadata":{"exit":0},"title":"big"}}}' |
     CONAHCNUJ_RENDER_MAX_LINES=2 CONAHCNUJ_RENDER_MAX_COLS=6 \
     bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
@@ -254,6 +255,30 @@ test_truncation_is_announced() {
   assert_contains "${out}" "3 more lines truncated" "dropped line count announced"
   rm -rf "${tmp}"
   echo "render truncation passed"
+}
+
+test_agent_text_is_never_truncated() {
+  local tmp out long
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  long="$(printf 'word%.0s' $(seq 1 20))"
+  # A model writes prose wrapped at a few hundred columns and thinks in
+  # paragraphs longer than any cap, so its own text and reasoning are the one
+  # thing that must never be clipped: the run log exists to show what the
+  # agent was thinking.
+  out="$(cat <<EOF |
+{"type":"reasoning","part":{"type":"reasoning","text":"${long}\nsecond thought"}}
+{"type":"text","part":{"type":"text","text":"first answer\nsecond answer\nthird answer"}}
+EOF
+    CONAHCNUJ_RENDER_MAX_LINES=1 CONAHCNUJ_RENDER_MAX_COLS=10 \
+    bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  assert_contains "${out}" "  ${long}" "long reasoning line kept in full"
+  assert_contains "${out}" "  second thought" "reasoning paragraph not cut short"
+  assert_contains "${out}" "  third answer" "text block not cut short"
+  assert_not_contains "${out}" "cols]" "no column truncation on agent text"
+  assert_not_contains "${out}" "truncated" "no line truncation on agent text"
+  rm -rf "${tmp}"
+  echo "render agent text not truncated passed"
 }
 
 test_outside_git_tree() {
@@ -295,6 +320,7 @@ test_session_error
 test_escapes_are_decoded
 test_non_json_passthrough
 test_truncation_is_announced
+test_agent_text_is_never_truncated
 test_outside_git_tree
 test_empty_and_unknown_events
 
