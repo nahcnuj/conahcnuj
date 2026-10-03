@@ -53,6 +53,14 @@ MOCK_CONDITIONS_NO_SUITE='{"data":{"repository":{"pullRequest":{"mergeable":"MER
 # computed from an incomplete list, so the rollup's own state wins.
 MOCK_CONDITIONS_PAGINATED='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}}],"pageInfo":{"hasNextPage":true}}}}}]}}}}}'
 
+# The statusCheckRollup the API really returned for PR #113's head commit
+# during the driver run reported in issue #115, replayed verbatim: the
+# driver's own run sits there as CANCELLED (that run was still polling when
+# the log was captured), every other workflow is green, and the rollup's own
+# aggregate state is FAILURE. Kept as one payload so the exclusion is checked
+# against real data, not only hand-written mocks.
+MOCK_CONDITIONS_REAL='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"CANCELLED","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"COMPLETED","conclusion":"SKIPPED","checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Analyze (actions)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CodeQL"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (windows-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Analyze (javascript-typescript)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CodeQL"}}}},{"__typename":"CheckRun","name":"Check install.ps1 syntax","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"install.ps1 deployment test","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Mock tests (no secrets / no network) (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Mock tests (no secrets / no network) (windows-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Typecheck opencode plugin","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Plugin runtime smoke test (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Plugin runtime smoke test (windows-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"E2E opencode run (opencode free model)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"CodeQL","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":null}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}}'
+
 MOCK_REVIEWS='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Nice work so far!","author":{"login":"reviewer"}}]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Inline note on line 10"}]}},{"isResolved":true,"comments":{"nodes":[{"body":"Resolved thread"}]}}]}}}}}'
 
 MOCK_PR_BY_HEAD_EMPTY='{"data":{"repository":{"pullRequests":{"nodes":[]}}}}'
@@ -179,6 +187,36 @@ test_fetch_pr_conditions() {
   )"
   state="$(printf '%s' "${out}" | cut -d'|' -f1)"
   [[ "${state}" == "PENDING" ]]
+
+  # Replaying the payload the API really returned for PR #113 in the run
+  # from issue #115: the cancelled own run must not keep the driver
+  # polling, so the aggregate FAILURE has to come out as SUCCESS.
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_REAL}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 113)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "SUCCESS" ]]
+
+  # The very same payload without the exclusion is the FAILURE that run
+  # kept looping on.
+  out="$(
+    CONAHCNUJ_OWN_WORKFLOWS=""
+    export CONAHCNUJ_OWN_WORKFLOWS
+    printf '%s\n' "${MOCK_CONDITIONS_REAL}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 113
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "FAILURE" ]]
+
+  # An empty value coming from the environment (a workflow env block, for
+  # instance) has to disable the exclusion too, not fall back to the
+  # default: re-sourced here so the default assignment sees it.
+  out="$(
+    CONAHCNUJ_OWN_WORKFLOWS=""
+    export CONAHCNUJ_OWN_WORKFLOWS
+    # shellcheck source=lib/gh-api.sh
+    . "${LIB}"
+    printf '%s\n' "${MOCK_CONDITIONS_REAL}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 113
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "FAILURE" ]]
 
   echo "gh_api_fetch_pr_conditions passed"
 }

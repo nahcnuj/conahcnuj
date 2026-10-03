@@ -287,7 +287,9 @@ gh_api_fetch_pr_state() {
 # stays on the head commit as a failure no code change can ever fix. Both leave
 # the driver looping (issue #115: a requested-changes review was never
 # addressed). Comma separated; empty disables the filter.
-CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS:-Issue auto-drive}"
+# `-` (not `:-`) so an explicitly empty value really disables the filter: the
+# caller has to be able to turn it off from the environment alone.
+CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive}"
 
 # Aggregate a statusCheckRollup payload (stdin) into SUCCESS / PENDING /
 # FAILURE, leaving out the checks that belong to the workflows named in $1.

@@ -486,6 +486,25 @@ next_free_branch() {
   printf '%s\n' "${branch}"
 }
 
+# Fetch <branch> from origin and check out its head. A failed fetch stops the
+# run instead of falling back to whatever origin/<branch> happens to hold: such
+# a checkout "succeeds" at a stale commit, the driver then reads the branch as
+# "not implemented yet" and hands a fresh implementation round to a model, which
+# re-implements what is already committed and commits that second copy on top of
+# the real branch head. A lost branch head is far more expensive than a stopped
+# run (the stopped run files a bug report, issue #115).
+checkout_branch_head() {
+  local branch="${1}"
+  # git's own output goes to stderr: callers capture this script's stdout, and
+  # `git checkout -B <b> origin/<b>` prints "branch '<b>' set up to track ..."
+  # to stdout, which would be captured as part of a branch name.
+  if ! git fetch origin "${branch}" 1>&2; then
+    echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
+    return 1
+  fi
+  git checkout -B "${branch}" "origin/${branch}" 1>&2
+}
+
 # Create (or reuse) the feature branch off the default branch and check it out.
 ensure_issue_branch() {
   local owner="${1}" repo="${2}" num="${3}" title="${4}" default_branch="${5}" default_oid="${6}" branch_override="${7:-}"
@@ -504,18 +523,17 @@ ensure_issue_branch() {
   fi
 
   # This function's stdout is captured by the caller to obtain the branch
-  # name, so every git command must keep its own output off stdout (send it to
-  # stderr): `git checkout -B <branch> <remote>/<branch>` prints
-  # "branch '<b>' set up to track ..." to stdout, which would otherwise be
-  # captured as part of the branch name and break PR creation.
-  git fetch origin "${branch}" >/dev/null 2>&1 || true
+  # name, so every git command must keep its own output off stdout (checkout_branch_head
+  # sends git's output to stderr).
   if git rev-parse --verify -q "origin/${branch}" >/dev/null 2>&1; then
-    git checkout -B "${branch}" "origin/${branch}" 1>&2
+    # `|| return 1` rather than relying on errexit: this function runs inside a
+    # command substitution, where bash does not honour it, and every command
+    # after the checkout would otherwise run on the stale head.
+    checkout_branch_head "${branch}" || return 1
     echo "Using existing feature branch ${branch} (resume)." >&2
   else
     gh_api_create_branch "${owner}" "${repo}" "${branch}" "${default_oid}" >/dev/null 2>&1 || echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
-    git fetch origin "${branch}" 1>&2
-    git checkout -B "${branch}" "origin/${branch}" 1>&2
+    checkout_branch_head "${branch}" || return 1
     echo "Created feature branch ${branch}." >&2
   fi
   printf '%s\n' "${branch}"
@@ -529,9 +547,7 @@ ensure_pr_branch_head() {
     git checkout -B "${head}" >/dev/null 2>&1 || git checkout -b "${head}"
     return 0
   fi
-  # Keep git's own output off stdout; callers capture this function's stdout.
-  git fetch origin "${head}" 1>&2
-  git checkout -B "${head}" "origin/${head}" 1>&2
+  checkout_branch_head "${head}"
 }
 
 # Let the coding agent choose the feature branch. If the implementation round
