@@ -3,7 +3,7 @@ name: Issue auto-drive
 # When an issue is created or reopened, or a non-approval review is submitted,
 # edited, or dismissed, attempt to resolve it with the conahcnuj driver
 # end-to-end (feature branch -> PR -> review feedback) and end with a
-# ready-to-merge PR, or file a bug-report issue on failure.
+# ready-to-merge PR, or file a bug-report discussion on failure.
 #
 # The timeout is controlled on the Actions side: "timeout-minutes" below is
 # the hard cap for the whole job, and CONAHCNUJ_MAX_SECONDS is kept just under
@@ -12,9 +12,11 @@ name: Issue auto-drive
 #
 # Least privilege for GITHUB_TOKEN: contents: read is all the runner needs for
 # checkout and the opencode install. Every write the driver performs (feature
-# branch, Verified commits, PR, review requests, comments, bug-report issues)
-# goes through the GitHub App installation token from gh-app/get-token.sh,
-# exactly like a local run.
+# branch, Verified commits, PR, review requests, comments, bug-report
+# discussions) goes through the GitHub App installation token from
+# gh-app/get-token.sh, exactly like a local run. A discussion never fires the
+# `issues` trigger above, so the driver's own bug reports cannot recurse into
+# another driver run.
 
 on:
   issues:
@@ -41,12 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: conahcnuj
-    # Do not chase the driver's own outputs: its bug-report issues are
-    # authored by bots, and running the driver on them would loop forever.
-    # A job-level `if` cannot read the `secrets` context (and APP_SLUG is
-    # not needed here), so any bot-authored issue is skipped by type. Missing
-    # secrets are not pre-checked either: the run fails loudly and the driver
-    # files its own bug report (no silent skip).
+    # Do not chase bot-authored issues: other automations file issues too, and
+    # running the driver on them would loop forever. (The driver's own bug
+    # reports are discussions now and never fire the `issues` trigger; this
+    # guard stays as defense in depth.) A job-level `if` cannot read the
+    # `secrets` context (and APP_SLUG is not needed here), so any bot-authored
+    # issue is skipped by type. Missing secrets are not pre-checked either:
+    # the run fails loudly and the driver files its own bug report (no silent
+    # skip).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
