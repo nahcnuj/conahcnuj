@@ -93,7 +93,7 @@ grep -q "Implementing with available models" "${LOG}" && { echo "FAIL: the drive
 grep -q "Created PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 grep -q "left no .commit-msg" "${LOG}" && { echo "FAIL: the driver still crashed on the missing commit message"; exit 1; }
-grep -q "Bug report issue" "${LOG}" && { echo "FAIL: the driver filed a bug report"; exit 1; }
+grep -q "filing a bug report" "${LOG}" && { echo "FAIL: the driver filed a bug report"; exit 1; }
 
 # The scratch files must be untouched and must not have been committed.
 # Capture command output first, then grep via here-string: `cmd | grep -q`

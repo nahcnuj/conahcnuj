@@ -16,9 +16,13 @@
 #      constraints, then replies on the PR
 #   4. exits only when the PR is ready to merge
 #   5. on an abnormal exit (timeout, no model completed the work, unexpected
-#      errors) automatically files a bug report issue in the repository so a
-#      run the driver could not resolve is never silently lost. The report
-#      carries the tail of the run's console output as a detailed error log
+#      errors) automatically files a bug report in the repository's
+#      "Bug report" discussion category so a run the driver could not resolve
+#      is never silently lost. The report carries the tail of the run's console
+#      output as a detailed error log. A discussion, not an issue: an issue
+#      would re-trigger this driver's workflow. Failures of the same kind
+#      (same thread title) are appended to the existing thread instead of
+#      opening a new one
 #
 # Usage: conahcnuj <issue-or-pr-number>
 #
@@ -34,6 +38,8 @@
 #                            (default: WARN; DEBUG to debug a failing model)
 #   CONAHCNUJ_RENDER_MAX_LINES/COLS  per-block caps for the rendered log
 #                            (defaults: 200 lines / 400 cols)
+#   CONAHCNUJ_BUG_REPORT_CATEGORY  discussion category for bug reports
+#                            (default: Bug report)
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
@@ -294,14 +300,20 @@ commit_changes() {
 
 # --- bug reporting ----------------------------------------------------------
 
-# When the driver terminates abnormally it files a bug report issue in the
-# repository it was working on, so a failed run is never silently lost and the
-# next driver invocation can pick the report up (the driver resolves issues).
-# Best-effort only: the report must never change the exit code, never trigger
-# an extra API call on a successful run, and must not recurse into another
-# report (a failed report files nothing further).
+# When the driver terminates abnormally it files a bug report in the
+# repository's discussion category, so a failed run is never silently lost.
+# Discussions rather than issues on purpose: an issue created by the driver
+# re-triggers issue-driver.yml, which then tries to "resolve" the driver's own
+# failure report as if it were planned work (that recursion produced the report
+# chain of issues #33/#34). A discussion is also the right home for an unplanned
+# failure report. Best-effort only: the report must never change the exit code,
+# never trigger an extra API call on a successful run, and must not recurse
+# into another report (a failed report files nothing further).
 BUG_REPORT_INPUT=""
 BUG_REPORTED="0"
+# Discussion category the reports are filed in. Its name and slug are matched
+# case-insensitively, so both "Bug report" and "bug-report" work.
+BUG_REPORT_CATEGORY="${CONAHCNUJ_BUG_REPORT_CATEGORY:-Bug report}"
 # Exit code captured by the EXIT trap at runtime ($? is not preserved across a
 # function call). Pre-declared so the trap string's reference is valid.
 bug_exit_code=""
@@ -365,18 +377,24 @@ run_log_cleanup() {
   fi
 }
 
+# Thread title of a bug report. Deliberately free of per-run details (exit
+# code, timestamp): the title is what groups reports, so the same kind of
+# failure always lands in the same thread and a repeat becomes a reply. Every
+# per-run detail lives in the body instead.
 report_bug_title() {
-  local code="${1}" input="${2:-}"
+  local input="${1:-}"
   if [[ -n "${input}" ]]; then
-    printf 'conahcnuj: failed to resolve #%s (exit %s)\n' "${input}" "${code}"
+    printf 'conahcnuj: failed to resolve #%s\n' "${input}"
   else
-    printf 'conahcnuj: driver terminated abnormally (exit %s)\n' "${code}"
+    printf 'conahcnuj: driver terminated abnormally\n'
   fi
 }
 
+# Body of a bug report, posted as the first entry of a thread or as a reply.
+# Args: code owner repo input branch oid occurrence ("first" | "again")
 report_bug_body() {
-  local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}"
-  local ended label log_tail log_block
+  local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}" occurrence="${7:-first}"
+  local ended label log_tail log_block intro
   ended="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)"
   label=""
   if [[ -n "${input}" ]]; then
@@ -385,6 +403,11 @@ report_bug_body() {
     label="${owner}/${repo}#${input} (invoked as \`conahcnuj ${input}\`)"
   else
     label="unknown (no issue/PR number was given; repository: ${owner}/${repo})"
+  fi
+  if [[ "${occurrence}" == "again" ]]; then
+    intro="The conahcnuj driver terminated abnormally again on this failure, so this occurrence is appended to the existing thread instead of opening a new one (re-run: \`conahcnuj ${input}\`)."
+  else
+    intro="The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This report was filed automatically so the driver bug can be fixed (re-run: \`conahcnuj ${input}\`)."
   fi
   log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
   if [[ -n "${log_tail}" ]]; then
@@ -395,21 +418,24 @@ ${log_tail}
     log_block="_No driver output was captured before the exit._"
   fi
   cat <<EOF
-The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This issue was filed automatically so the driver bug can be fixed (re-run: conahcnuj ${input}).
+${intro}
+
+## Occurrence
+
+- Exit code: ${code} (how the conahcnuj driver process itself exited)
+- Ended at: ${ended:-unknown}
 
 ## Context
 
 - Issue/PR: ${label}
 - Branch: ${branch:-unknown}
 - HEAD: ${oid:-unknown}
-- Exit code: ${code} (how the conahcnuj driver process itself exited)
-- Ended at: ${ended:-unknown}
 
 ## Error log
 
 ${log_block}
 
-The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick this report up.
+This thread collects every occurrence of the same failure: a repeat is appended as a reply. The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick the report up.
 EOF
 }
 
@@ -420,7 +446,7 @@ EOF
 report_bug_on_exit() {
   local code="${1:-}"
   local owner="nahcnuj" repo="conahcnuj" input="${BUG_REPORT_INPUT:-}"
-  local branch oid title body num
+  local branch oid title body existing created number url discussion_id
   # Complete the run log (close the FIFO, reap the reader) so report_bug_body
   # sees the whole console output, then always clean up, successful run or not.
   run_log_finalize
@@ -436,18 +462,40 @@ report_bug_on_exit() {
   fi
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
-  title="$(report_bug_title "${code}" "${input}")"
-  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
-  echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
-  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
-    if [[ -n "${num}" ]]; then
-      echo "Bug report issue #${num} created: https://github.com/${owner}/${repo}/issues/${num}" >&2
+  title="$(report_bug_title "${input}")"
+  echo "Driver exited abnormally (code ${code}); filing a bug report in ${owner}/${repo} discussions (category: ${BUG_REPORT_CATEGORY})." >&2
+
+  # Same kind of failure => same thread. An identical title means this failure
+  # was already reported, so append the occurrence instead of starting a second
+  # thread on the same bug.
+  existing="$(gh_api_find_discussion_by_title "${owner}" "${repo}" "${BUG_REPORT_CATEGORY}" "${title}" || true)"
+  if [[ -n "${existing}" ]]; then
+    number="${existing%%|*}"
+    discussion_id="$(printf '%s' "${existing}" | cut -d'|' -f2)"
+    url="$(printf '%s' "${existing}" | cut -d'|' -f3)"
+    body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}" "again")"
+    if gh_api_reply_discussion "${owner}" "${repo}" "${discussion_id}" "${body}" >/dev/null; then
+      echo "Bug report appended to discussion #${number}: ${url}" >&2
       BUG_REPORTED="1"
       run_log_cleanup
       return 0
     fi
+    echo "WARNING: could not append the bug report to discussion #${number} (exit code ${code})." >&2
+    BUG_REPORTED="1"
+    run_log_cleanup
+    return 0
   fi
-  echo "WARNING: could not file a bug report issue (exit code ${code})." >&2
+
+  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}" "first")"
+  if created="$(gh_api_create_discussion "${owner}" "${repo}" "${BUG_REPORT_CATEGORY}" "${title}" "${body}")" && [[ -n "${created}" ]]; then
+    number="${created%%|*}"
+    url="${created#*|}"
+    echo "Bug report discussion #${number} created: ${url}" >&2
+    BUG_REPORTED="1"
+    run_log_cleanup
+    return 0
+  fi
+  echo "WARNING: could not file a bug report discussion (exit code ${code})." >&2
   BUG_REPORTED="1"
   run_log_cleanup
   return 0
@@ -747,8 +795,8 @@ drive() {
       # PR creation failed (GitHub refuses a PR with no diff between base and
       # head, a vanished head ref, ...). There is nothing to gain by retrying
       # as-is, so run an implementation round to give the branch real work and
-      # loop back. Dying here would just file the recursive "failed to resolve
-      # #N" bug report chain (issues #33/#34).
+      # loop back. Dying here would just file another "failed to resolve #N"
+      # bug report on the same failure.
       echo "PR could not be created for ${branch} -> ${base}; running an implementation round." >&2
       local produced_change="false"
       if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created."; then
@@ -973,9 +1021,9 @@ main() {
   repo="${repo_info#*/}"
   echo "Repository: ${owner}/${repo}" >&2
 
-  # File a bug report issue when the run terminates abnormally. Registered only
-  # once owner/repo and the input are known: a usage error or a failed repo
-  # detection has no target to report to and stays quiet.
+  # File a bug report discussion when the run terminates abnormally. Registered
+  # only once owner/repo and the input are known: a usage error or a failed
+  # repo detection has no target to report to and stays quiet.
   BUG_REPORT_INPUT="${input}"
   trap 'bug_exit_code=$?; report_bug_on_exit "${bug_exit_code}"' EXIT
 

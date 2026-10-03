@@ -3,9 +3,9 @@
 #
 # When GitHub refuses to create the PR (e.g. createPullRequest UNPROCESSABLE
 # because there is no diff between base and head), the driver must NOT die and
-# file the recursive "failed to resolve #N" bug report. It runs an
-# implementation round and retries; the branch ends up with real work and the
-# PR is eventually created.
+# file another "failed to resolve #N" bug report on the same failure. It runs
+# an implementation round and retries; the branch ends up with real work and
+# the PR is eventually created.
 #
 #   issue read -> branch -> implement -> create_pr (UNPROCESSABLE) ->
 #   re-implement -> create_pr (#125) -> constraints pass -> review requested
@@ -80,6 +80,6 @@ echo "-----------------------------"
 grep -q "PR could not be created for conahcnuj/18-fix-racing-driver -> main; running an implementation round." "${LOG}" || { echo "FAIL: the driver did not recover from the PR creation failure"; exit 1; }
 grep -q "Created PR #125" "${LOG}" || { echo "FAIL: PR #125 was not created on the retry"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
-grep -q "filing a bug report issue" "${LOG}" && { echo "FAIL: a failed PR creation must not trigger the bug report"; exit 1; }
+grep -q "filing a bug report" "${LOG}" && { echo "FAIL: a failed PR creation must not trigger the bug report"; exit 1; }
 
 echo "conahcnuj PR-creation-failure recovery passed"

@@ -181,11 +181,24 @@ test_post_comment() {
   echo "gh_api_post_comment passed"
 }
 
-test_create_issue() {
+test_list_issue_numbers() {
   local out
-  out="$(printf '%s\n' '{"number":25}' | gh_api_create_issue "nahcnuj" "conahcnuj" "Bug report" "details")"
-  [[ "${out}" == "25" ]]
-  echo "gh_api_create_issue passed"
+  # A short page ends the walk: one number per line, PRs included (the caller
+  # filters them with gh_api_fetch_issue).
+  out="$(printf '%s\n' '[{"number":10},{"number":11}]' | gh_api_list_issue_numbers "nahcnuj" "conahcnuj")"
+  [[ "${out}" == "10
+11" ]]
+  echo "gh_api_list_issue_numbers passed"
+}
+
+test_close_issue() {
+  local out
+  # gh_api_close_issue discards the response (must not leak into stdout).
+  out="$(printf '%s\n' '{}' | gh_api_close_issue "nahcnuj" "conahcnuj" 25 "not_planned")"
+  [[ -z "${out}" ]]
+  out="$(printf '%s\n' '{}' | gh_api_close_issue "nahcnuj" "conahcnuj" 25)"
+  [[ -z "${out}" ]]
+  echo "gh_api_close_issue passed"
 }
 
 test_merge_pr() {
@@ -195,6 +208,7 @@ test_merge_pr() {
 
 test_fetch_issue
 test_fetch_issue_is_pr
+test_list_issue_numbers
 test_get_repo
 test_fetch_pr_state
 test_fetch_pr_conditions
@@ -205,7 +219,7 @@ test_create_pr
 test_update_pr
 test_request_review
 test_post_comment
-test_create_issue
+test_close_issue
 test_merge_pr
 
 echo "All gh-api tests passed"

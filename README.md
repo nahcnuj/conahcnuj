@@ -91,9 +91,15 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 3. PR が「Approved かつ全制約通過（ready to merge）」になるまで終了しない。
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開など
    で PR を解決できずに終了コード非 0 で終わる場合）は、ドライバが対象
-   リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
-   `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
-   実行ログ末尾を含む）。
+   リポジトリの Bug report ディスカッションカテゴリへバグ報告を自動投稿する
+   （`lib/gh-api.sh` の discussion ヘルパー。終了コード・対象 #番号・
+   ブランチ・HEAD・実行ログ末尾を含む）。issue ではなく discussion へ書く:
+   issue は issue-driver ワークフローを再発火させ、ドライバ自身の報告を
+   「解決すべき作業」として追いかけてしまうため（報告チェーン issues
+   #33/#34 の反省）。同じタイトル（＝同種の失敗）の報告は既存スレッドへ
+   返信として追記され、新規スレッドは作られない。カテゴリは
+   `CONAHCNUJ_BUG_REPORT_CATEGORY` で変更できる（既定 `Bug report`）。
+   報告の投稿には App の **Discussions 権限（読み書き）** が必要。
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
@@ -104,6 +110,19 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
 すべて省略可能です。
 
+### 旧バグ報告 issue の移行
+
+ドライバが issue へ報告していた時代の残骸（タイトルが `conahcnuj:` で始まる
+issue）は、`bin/migrate-bug-reports.sh` で Bug report カテゴリへ移せます。
+元の本文を discussion へ投稿（同名スレッドがあれば返信として追記）し、
+元の issue へ discussion の URL をコメントして `not_planned` で閉じます。
+書き込みは他の操作と同じく App のインストールトークンで行われます。
+
+```sh
+bash bin/migrate-bug-reports.sh --dry-run   # 投稿内容の確認（何も変えない）
+bash bin/migrate-bug-reports.sh             # 実行（対象は既定で nahcnuj/conahcnuj）
+```
+
 ## issue の自動対応（GitHub Actions）
 
 このリポジトリの `.github/workflows/issue-driver.yml` は、issue が open される
@@ -111,8 +130,10 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 open 中の draft でない同一リポジトリの PR に `approved` 以外の review が
 submit・編集・dismiss された場合も、PR 番号でドライバを再開します。
 同じ PR で実行中の場合は、concurrency により新しい実行を待機させます。
-失敗時はドライバがバグ報告 issue を自動作成し、その issue（bot が開いたもの）
-は再帰防止のためワークフローから除外されます。
+失敗時はドライバが Bug report カテゴリへバグ報告 discussion を自動投稿します
+（discussion は `issues` イベントを発火しないため、再帰実行の心配はありません。
+bot が開いた issue を除外する条件は、他の自動化が作った issue への
+念のためのガードとして残しています）。
 
 - **タイムアウトは Actions 側で制御**します（ジョブの `timeout-minutes: 60`）。
   `CONAHCNUJ_MAX_SECONDS=3540` をその直下に設定し、ジョブが強制終了される前に
