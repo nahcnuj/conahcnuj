@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # opencode-render - turn the raw `opencode run --format json` event stream into
-# a console log a human can read.
+# the driver's own run log.
 #
 # Usage:
 #   bash lib/opencode-render.sh [--model provider/model] [--repo owner/repo]
 #                              [--dir <work tree>] < events.jsonl > log
 #
-# opencode writes one JSON event per line. Dumped raw into a CI log it says
-# nothing about what happened, so every content-bearing event (assistant text,
-# reasoning, a tool call, a session error) becomes a block introduced by a
-# single context header:
+# Who reads it: the person who has to work out why a run went wrong -- either
+# watching as the run proceeds (a CI log page) or reading it afterwards (the
+# copy attached to a bug report). The model that emitted the events never reads
+# this back, so the job here is legibility, not machine parsing.
+#
+# opencode writes one JSON event per line. Raw, it says nothing about what
+# happened, so every content-bearing event (assistant text, reasoning, a tool
+# call, a session error) becomes a block introduced by a single context header:
 #
 #   Space Bunny (medium)@owner/repo:.  1a2b3c4 [main] +12/-3 +2 new
 #   $ git status --short

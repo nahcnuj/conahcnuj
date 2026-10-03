@@ -98,10 +98,37 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
 
-opencode の出力（`--format json` のイベント列）は `lib/opencode-render.sh`
-が読みやすい形に整形して stderr へ出します。ログの細かさや量は
-`--log-level` と 1 ブロックあたりの行数・桁数上限で調整できます。
-詳細な仕様と既定値は `AGENTS.md` を参照してください。
+### 実行ログの読みやすさ
+
+この実行ログを読むのは、**失敗した実行の原因を人が追うとき**です（手元で
+`conahcnuj` を走らせたターミナル、または GitHub Actions の実行ログページ）。
+読むのはエージェントではなく人なので、opencode の出力（`--format json` の
+イベント列）をそのまま垂れ流しても何が起きているかは分かりません。
+`lib/opencode.sh` は `lib/opencode-render.sh` にパイプで流し、実行中にそのまま
+整形して stderr へ出します。
+
+ブロック（思考 / ツール実行 / セッションエラー）ごとに 1 行のヘッダが付きます。
+ヘッダはそのブロックが作られた瞬間の状態（モデル・owner/repo・作業ディレクトリ・
+HEAD SHA・ブランチ・作業ツリーの差分）を表すので、読む側は 1 ブロックだけで
+「どのモデルが・何をしたか・成功したか」が分かります。ツール実行は
+コマンドライン・出力・成否で閉じます。
+
+```
+Space Bunny (medium)@nahcnuj/conahcnuj:.  1a2b3c4 [main] +12/-3 +2 new
+$ sh -c "make check"
+
+  ok - everything passes
+
+✅ sh -c "make check"
+```
+
+整形ログは stderr へ出るため、ドライバの実行ログにそのまま残り、異常終了時の
+バグ報告 issue にも添付されます。ログの量と細かさは
+`CONAHCNUJ_OPENCODE_LOG_LEVEL`（既定 `WARN`。`DEBUG` にすると opencode の起動
+ログまで出る）と `CONAHCNUJ_RENDER_MAX_LINES` /
+`CONAHCNUJ_RENDER_MAX_COLS`（既定 200 行 / 400 桁）で調整します。省略した行・桁
+は必ずその場で明示されます。整形は awk だけで行うため `jq` や node は不要です。
+実装の詳細は `AGENTS.md` にまとめてあります。
 
 ドライバ自身は自動マージを行わない。環境変数の上書き（時間予算・ポーリング幅）や
 offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
