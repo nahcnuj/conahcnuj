@@ -26,10 +26,15 @@ git -C "${WORK}" commit -qm init
 git -C "${WORK}" branch -M main
 oid="$(git -C "${WORK}" rev-parse HEAD)"
 
-# A remote-tracking ref so the function takes the "resume" path with no fetch.
-git -C "${WORK}" update-ref "refs/remotes/origin/conahcnuj/10-issue" "${oid}"
-git -C "${WORK}" config "branch.conahcnuj/10-issue.remote" origin
-git -C "${WORK}" config "branch.conahcnuj/10-issue.merge" "refs/heads/conahcnuj/10-issue"
+# A local bare repository as origin: the resume path fetches the branch first
+# (a failed fetch must stop the run instead of falling back to a stale head),
+# so a fabricated remote-tracking ref alone is not enough. Local path remote,
+# so no network is needed.
+ORIGIN="${ROOT}/origin.git"
+git init -q --bare -b main "${ORIGIN}"
+git -C "${WORK}" remote add origin "${ORIGIN}"
+git -C "${WORK}" push -q origin "HEAD:refs/heads/main"
+git -C "${WORK}" push -q origin "HEAD:refs/heads/conahcnuj/10-issue"
 
 # A dirty tree makes git report local changes as well, which is part of what
 # used to leak into stdout.
