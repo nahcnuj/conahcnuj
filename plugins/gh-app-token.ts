@@ -292,12 +292,174 @@ function parseBashCommand(args: unknown): string | null {
   return typeof cmd === "string" ? cmd : null
 }
 
+// The one sanctioned way to create a commit here: `git vc` is a git alias
+// this plugin injects into every shell (see shell.env), so it already wraps
+// api-commit.sh with owner/repo/branch auto-detection. Kept as a constant so
+// the hook redirects and the system-prompt rules never drift apart, and never
+// name api-commit.sh as an alternative to run.
+const VC_USAGE = 'git vc -m "<message>" [-a]'
+
 /**
- * True when a command line invokes `git commit` (the unsigned path under
- * the App identity). Other git subcommands are left alone.
+ * Commit rules appended to every system prompt, so a model reaches for `git vc`
+ * on its own instead of having to trip a hook first. Kept short and in the
+ * imperative: it is read on every single session.
+ */
+const COMMIT_RULES = [
+  "Git commits in this environment: this machine's git runs as a GitHub App,",
+  "so `git commit` can only create unsigned commits and branch rules reject",
+  `them. Commit with the \`git vc\` alias instead (${VC_USAGE}): it collects the`,
+  "same content as `git commit` (add files with `git add` first; `-a` for",
+  "tracked worktree changes) but GitHub creates and verifies the commit.",
+  "Do not run `git commit`, and do not run gh-app/api-commit.sh or any other",
+  "gh-app script directly: `git vc` is the supported wrapper around it.",
+  "Commit only when the task asks for a commit; otherwise leave the change in",
+  "the working tree.",
+].join(" ")
+
+const API_COMMIT_SCRIPT = "api-commit.sh"
+const SHELL_NAMES = new Set(["bash", "sh", "zsh", "ksh", "dash"])
+// Everything that ends a command inside a command line.
+const SEPARATOR_CHARS_RE = /[;&|()\n]/
+// Leading `VAR=value` assignments do not change the command word.
+const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/
+// `-c`, `-lc`, ...: the flag that makes a shell run a script inline.
+const SHELL_SCRIPT_FLAG_RE = /^-[a-zA-Z]*c[a-zA-Z]*$/
+// git global options that take a value (`-c name=value`, `-C dir`).
+const GIT_OPTION_WITH_VALUE_RE = /^-[cC]$/
+
+/**
+ * Command segments of one command line, as word lists: split on `; & | ( )`
+ * and newlines with quoting honored throughout, so a quoted path
+ * (`bash "/x/gh-app/api-commit.sh"`) and an inline script
+ * (`bash -c "cd x && api-commit.sh"`) each stay in one piece.
+ */
+function commandWords(cmd: string): string[][] {
+  const segments: string[][] = []
+  let words: string[] = []
+  let word = ""
+  let quote: '"' | "'" | null = null
+  let quoted = false
+  const endWord = () => {
+    if (word || quoted) {
+      words.push(word)
+    }
+    word = ""
+    quoted = false
+  }
+  const endSegment = () => {
+    endWord()
+    if (words.length > 0) {
+      segments.push(words)
+    }
+    words = []
+  }
+  for (const char of cmd) {
+    if (quote) {
+      if (char === quote) {
+        quote = null
+      } else {
+        word += char
+      }
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      quoted = true
+      continue
+    }
+    if (SEPARATOR_CHARS_RE.test(char)) {
+      endSegment()
+      continue
+    }
+    if (/\s/.test(char)) {
+      endWord()
+      continue
+    }
+    word += char
+  }
+  endSegment()
+  return segments
+}
+
+function basename(token: string): string {
+  const slash = Math.max(token.lastIndexOf("/"), token.lastIndexOf("\\"))
+  return slash >= 0 ? token.slice(slash + 1) : token
+}
+
+/**
+ * Every command a shell would really run for this command line, as word
+ * lists: leading `VAR=value` assignments dropped, shell wrappers unwrapped to
+ * what they run, and the script behind `-c` walked as a command line of its
+ * own (otherwise `bash -c "git commit -m x"` would slip past the redirects
+ * below). Nesting ends with the text, so recursion is bounded.
+ */
+function* executedCommands(cmd: string): Generator<string[]> {
+  for (const words of commandWords(cmd)) {
+    let i = 0
+    while (i < words.length && ASSIGNMENT_RE.test(words[i])) {
+      i += 1
+    }
+    if (i >= words.length) {
+      continue
+    }
+    if (!SHELL_NAMES.has(basename(words[i]).toLowerCase())) {
+      yield words.slice(i)
+      continue
+    }
+    // Shell wrapper: either `-c <script>` (run inline) or a script path.
+    let j = i + 1
+    while (j < words.length && words[j].startsWith("-")) {
+      if (SHELL_SCRIPT_FLAG_RE.test(words[j])) {
+        const script = words[j + 1]
+        if (script !== undefined) {
+          yield* executedCommands(script)
+        }
+        // The wrapper ran the script, not its own flags.
+        j = words.length
+        break
+      }
+      j += 1
+    }
+    if (j < words.length) {
+      yield words.slice(j)
+    }
+  }
+}
+
+/**
+ * True when one command (word list) runs `git commit`, the unsigned path under
+ * the App identity. Plumbing commit creators (`git commit-tree`) are unsigned
+ * too, so they count as well; every other git subcommand is left alone.
+ */
+function isGitCommitInvocation(words: string[]): boolean {
+  const head = basename(words[0] ?? "").toLowerCase()
+  if (head !== "git" && head !== "git.exe") {
+    return false
+  }
+  let i = 1
+  // Skip git's global options, which may precede the subcommand.
+  while (i < words.length && words[i].startsWith("-")) {
+    i += GIT_OPTION_WITH_VALUE_RE.test(words[i]) ? 2 : 1
+  }
+  return /^commit(-|$)/.test(words[i] ?? "")
+}
+
+/**
+ * True when a command line invokes `git commit` anywhere in it.
  */
 function isGitCommitCommand(cmd: string): boolean {
-  return /(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)
+  return [...executedCommands(cmd)].some(isGitCommitInvocation)
+}
+
+/**
+ * True when a command line runs api-commit.sh itself instead of going through
+ * `git vc`. Only the command word counts, so reading the script (`cat
+ * api-commit.sh`) keeps working.
+ */
+function isDirectApiCommitCommand(cmd: string): boolean {
+  return [...executedCommands(cmd)].some(
+    (words) => basename(words[0] ?? "") === API_COMMIT_SCRIPT
+  )
 }
 
 interface ShellIdentity {
@@ -340,13 +502,6 @@ async function injectShellEnv(
   })
 }
 
-/**
- * `tool.execute.before` hook body: `git commit` under the App identity is
- * always unsigned (commit.gpgsign is forced to false above) and fails
- * "Commits must have verified signatures" branch rules. Git aliases cannot
- * shadow the `commit` builtin, so block it here and point at the Verified
- * path instead. Throws to block, returns silently to allow.
- */
 interface SeenModel {
   name: string
   variant: string
@@ -445,20 +600,36 @@ function labelForSession(sessionID: string | undefined): string {
   return formatModelLabel(seen.name, seen.variant)
 }
 
-function blockUnsignedCommit(
+/**
+ * `tool.execute.before` hook body: `git commit` under the App identity is
+ * always unsigned (commit.gpgsign is forced to false above) and fails
+ * "Commits must have verified signatures" branch rules, and api-commit.sh is
+ * an implementation detail behind the `git vc` alias. Git aliases cannot
+ * shadow the `commit` builtin, so both paths are blocked here and redirected
+ * to `git vc`. Throws to block, returns silently to allow.
+ */
+function redirectToVerifiedCommit(
   tool: string,
   args: unknown,
-  botName: string,
-  vcUsage: string
+  botName: string
 ): void {
   if (tool !== "bash") {
     return
   }
   const cmd = parseBashCommand(args)
-  if (cmd !== null && isGitCommitCommand(cmd)) {
+  if (cmd === null) {
+    return
+  }
+  if (isGitCommitCommand(cmd)) {
     throw new Error(
       `Do not use \`git commit\`: commits made as ${botName} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
-        `Create a Verified commit instead: ${vcUsage}`
+        `Create a Verified commit instead: ${VC_USAGE} (the \`git vc\` alias collects staged changes, or tracked ones with -a, and lets GitHub sign the commit).`
+    )
+  }
+  if (isDirectApiCommitCommand(cmd)) {
+    throw new Error(
+      `Do not run ${API_COMMIT_SCRIPT} directly: its owner/repo/branch detection and the App identity are already wired up behind \`git vc\`. ` +
+        `Use ${VC_USAGE} instead.`
     )
   }
 }
@@ -473,7 +644,6 @@ export const GhAppTokenPlugin: Plugin = async () => {
   // `git vc` (verified-commit): commit staged changes, or `-a` for tracked.
   // owner/repo/branch are auto-detected, so it works in any repo.
   const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
-  const vcUsage = `git vc -m "<message>" [-a] (or: bash "${apiCommitSh}" -m "<message>" [-a])`
 
   return {
     "chat.message": async (input) => {
@@ -509,8 +679,15 @@ export const GhAppTokenPlugin: Plugin = async () => {
         }
       }
     },
+    // Rules up front, so a model in any repository commits with `git vc`
+    // without having to trip the hook below first.
+    "experimental.chat.system.transform": async (_input, output) => {
+      if (!output.system.includes(COMMIT_RULES)) {
+        output.system.push(COMMIT_RULES)
+      }
+    },
     "tool.execute.before": async (input, output) => {
-      blockUnsignedCommit(input.tool, output.args, botName, vcUsage)
+      redirectToVerifiedCommit(input.tool, output.args, botName)
     },
   }
 }
