@@ -84,11 +84,6 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 1. PR を作成し、レビュアー以外の制約（status checks・mergeable）が通るまで
    待ってからレビューを依頼する。PR の本文はクローズ対象 issue の内容を基に
    `Closes #<番号>` と合わせて自動生成され、既存 PR を再利用した場合も同期される。
-   制約の判定は `lib/gh-api.sh` の `gh_api_fetch_pr_conditions` が行い、
-   **ドライバ自身の workflow（`Issue auto-drive`）が付ける check は除外する**。
-   自分の run は実行中ずっと PENDING で、キャンセルやタイムアウトはコード変更で
-   直せないため、制約に数えると自分を待ち続けるデッドロックになる
-   （issue #115）。除外対象は `CONAHCNUJ_OWN_WORKFLOWS`（カンマ区切り）で変えられる。
 2. レビューステータスをポーリングし、Comment / Request changes / 未解決の
    レビュースレッド（セキュリティレビューの指摘を含む）を検出したらモデルを
    使って対応し、api-commit.sh で Verified コミットを push して制約を再確認し、
