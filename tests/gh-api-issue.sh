@@ -26,6 +26,33 @@ MOCK_CONDITIONS_FAIL='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEAB
 
 MOCK_CONDITIONS_NOCHECKS='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[]}}}}}}'
 
+# Payloads that enumerate the check contexts, so the driver's own
+# workflow run can be told apart from real CI. Each CheckRun names the
+# workflow it belongs to through checkSuite.workflowRun.workflow.
+MOCK_CONDITIONS_CONTEXTS='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"COMPLETED","conclusion":"SKIPPED","checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# The driver's own run failed (a maintainer cancelled it, or it timed
+# out): no code change can ever fix that, so it must not count as a
+# constraint the driver tries to "fix" in a loop.
+MOCK_CONDITIONS_OWN_FAILED='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"CANCELLED","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# Real CI is still running: the driver must keep waiting for it.
+MOCK_CONDITIONS_CI_PENDING='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# Real CI failed: the driver must fix it.
+MOCK_CONDITIONS_CI_FAILED='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"FAILURE","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# A legacy StatusContext (not a CheckRun) that is still expected.
+MOCK_CONDITIONS_STATUS_PENDING='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"StatusContext","context":"continuous-integration/jenkins","state":"PENDING"}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# A CheckRun with no checkSuite (created outside a workflow run) cannot
+# be attributed to a workflow, so it is never skipped.
+MOCK_CONDITIONS_NO_SUITE='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"external linter","status":"COMPLETED","conclusion":"FAILURE","checkSuite":null}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# More contexts than one page holds: a filtered aggregate would be
+# computed from an incomplete list, so the rollup's own state wins.
+MOCK_CONDITIONS_PAGINATED='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}}],"pageInfo":{"hasNextPage":true}}}}}]}}}}}'
+
 MOCK_REVIEWS='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Nice work so far!","author":{"login":"reviewer"}}]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Inline note on line 10"}]}},{"isResolved":true,"comments":{"nodes":[{"body":"Resolved thread"}]}}]}}}}}'
 
 MOCK_PR_BY_HEAD_EMPTY='{"data":{"repository":{"pullRequests":{"nodes":[]}}}}'
@@ -107,6 +134,52 @@ test_fetch_pr_conditions() {
   out="$(printf '%s\n' "${MOCK_CONDITIONS_NOCHECKS}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
   state="$(printf '%s' "${out}" | cut -d'|' -f1)"
   [[ "${state}" == "SUCCESS" ]]
+
+  # The driver's own workflow run is excluded from the aggregate:
+  # a pending or failed "Issue auto-drive" check must not become a
+  # constraint the driver would loop over (issue #115).
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_CONTEXTS}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "SUCCESS" ]]
+
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_OWN_FAILED}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "SUCCESS" ]]
+
+  # Real CI still running or failing is still a real constraint.
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_CI_PENDING}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "PENDING" ]]
+
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_CI_FAILED}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "FAILURE" ]]
+
+  # Legacy status contexts and unattributed check runs still count.
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_STATUS_PENDING}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "PENDING" ]]
+
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_NO_SUITE}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "FAILURE" ]]
+
+  # A paginated context list cannot be filtered reliably, so the
+  # rollup's own aggregate state is trusted instead.
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_PAGINATED}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "FAILURE" ]]
+
+  # The exclusion is configurable; disabling it restores the
+  # unfiltered behaviour.
+  out="$(
+    CONAHCNUJ_OWN_WORKFLOWS=""
+    export CONAHCNUJ_OWN_WORKFLOWS
+    printf '%s\n' "${MOCK_CONDITIONS_CONTEXTS}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "PENDING" ]]
+
   echo "gh_api_fetch_pr_conditions passed"
 }
 

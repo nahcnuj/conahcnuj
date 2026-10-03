@@ -280,11 +280,97 @@ gh_api_fetch_pr_state() {
     "${is_draft}" "${mergeable}" "${mss}" "${decision}" "${head}" "${base}" "${head_oid}" "${linked}"
 }
 
+# Workflows whose checks the driver must not treat as a constraint. The driver's
+# own workflow attaches a check run to the PR head commit while it is still
+# running, so counting it makes the driver wait for its own run to finish before
+# it can do anything - and a run a maintainer cancelled (or that timed out)
+# stays on the head commit as a failure no code change can ever fix. Both leave
+# the driver looping (issue #115: a requested-changes review was never
+# addressed). Comma separated; empty disables the filter.
+CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS:-Issue auto-drive}"
+
+# Aggregate a statusCheckRollup payload (stdin) into SUCCESS / PENDING /
+# FAILURE, leaving out the checks that belong to the workflows named in $1.
+# Precedence follows GitHub's own rollup: a failing check beats a pending one,
+# and NEUTRAL / SKIPPED count as success.
+# A payload that carries no context list (an older response, or one that could
+# not be enumerated) cannot be filtered, so its own aggregate "state" is trusted
+# as-is; an empty result means "no checks at all", which the caller reads as
+# SUCCESS.
+gh_api_rollup_state() {
+  local skip="${1:-}" json contexts node type state status conclusion workflow result="" pending="false"
+
+  json="$(gh_api_read_line)"
+  if [[ "${json}" != *'"contexts"'* ]]; then
+    gh_api_json_str "${json}" "state"
+    return 0
+  fi
+  # More contexts than one page holds: the aggregate would be computed from an
+  # incomplete list, so trust the rollup's own state instead of guessing.
+  if printf '%s' "${json}" | grep -q '"contexts":{"nodes":\[.*\],"pageInfo":{"hasNextPage":true}'; then
+    gh_api_json_str "${json}" "state"
+    return 0
+  fi
+  # Every context is a flat object, so the only "},{" inside the array separates
+  # two of them: splitting there yields one context per line.
+  contexts="$(printf '%s' "${json}" | sed -n 's/.*"contexts":{"nodes":[[:space:]]*\(\[[^]]*\]\).*/\1/p')"
+  while IFS= read -r node; do
+    [[ -n "${node}" ]] || continue
+    type="$(gh_api_json_str "${node}" "__typename")"
+    case "${type}" in
+      StatusContext)
+        state="$(gh_api_json_str "${node}" "state")"
+        case "${state}" in
+          SUCCESS) ;;
+          PENDING|EXPECTED) pending="true" ;;
+          "") pending="true" ;;
+          *) result="FAILURE" ;;
+        esac
+        ;;
+      CheckRun)
+        # A check run that belongs to one of the skipped workflows is left out of
+        # the aggregate entirely: neither its pending nor its failed state may
+        # gate the run that is doing the polling.
+        workflow="$(printf '%s' "${node}" | sed -n 's/.*"workflow":{"name":"\([^"]*\)".*/\1/p')"
+        if [[ -n "${workflow}" && ",${skip}," == *",${workflow},"* ]]; then
+          continue
+        fi
+        status="$(gh_api_json_str "${node}" "status")"
+        if [[ "${status}" != "COMPLETED" ]]; then
+          pending="true"
+          continue
+        fi
+        conclusion="$(gh_api_json_str "${node}" "conclusion")"
+        case "${conclusion}" in
+          SUCCESS|NEUTRAL|SKIPPED) ;;
+          "") pending="true" ;;
+          null) pending="true" ;;
+          *) result="FAILURE" ;;
+        esac
+        ;;
+      *)
+        # Not a member we know how to read: wait rather than call it green.
+        pending="true"
+        ;;
+    esac
+  done < <(printf '%s\n' "${contexts}" | sed 's/},{/}\n{/g')
+
+  if [[ "${result}" == "FAILURE" ]]; then
+    printf '%s\n' "FAILURE"
+  elif [[ "${pending}" == "true" ]]; then
+    printf '%s\n' "PENDING"
+  else
+    printf '%s\n' "SUCCESS"
+  fi
+}
+
 # Non-reviewer merge constraints. Output: checks_state|mergeable|mergeStateStatus
-# checks_state is SUCCESS when there is no status check on the head commit.
+# checks_state is SUCCESS when there is no status check on the head commit, and
+# the driver's own workflow run (CONAHCNUJ_OWN_WORKFLOWS) never counts against
+# the run that is doing the polling.
 gh_api_fetch_pr_conditions() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state, contexts(first: 100) { nodes { __typename, ... on CheckRun { name, status, conclusion, checkSuite { workflowRun { workflow { name } } } }, ... on StatusContext { context, state } }, pageInfo { hasNextPage } } } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
@@ -292,7 +378,7 @@ gh_api_fetch_pr_conditions() {
   fi
 
   local state mergeable mss
-  state="$(gh_api_json_str "${json}" "state")"
+  state="$(printf '%s' "${json}" | gh_api_rollup_state "${CONAHCNUJ_OWN_WORKFLOWS}")"
   if [[ -z "${state}" ]]; then
     state="SUCCESS"
   fi
