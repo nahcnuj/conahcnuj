@@ -63,8 +63,13 @@ CI_RUN=37135435734
 
 # filter <payload> <self run id> <ignored workflows>
 filter() {
-  jq -r --arg owner nahcnuj --arg name conahcnuj --arg sha deadbeef \
-    --arg self_run "${2}" --arg ignore "${3}" -f "${FILTER}" "${1}" 2>&1
+  # jq for Windows emits CRLF; normalize so the comparison below is the same
+  # on every host.
+  local out rc
+  out="$(jq -r --arg owner nahcnuj --arg name conahcnuj --arg sha deadbeef \
+    --arg self_run "${2}" --arg ignore "${3}" -f "${FILTER}" "${1}" 2>&1)" && rc=0 || rc=1
+  printf '%s' "${out}" | tr -d '\r'
+  return "${rc}"
 }
 
 expect() {

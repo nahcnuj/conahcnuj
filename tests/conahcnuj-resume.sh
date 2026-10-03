@@ -63,6 +63,11 @@ export OPENCODE_TEST_MODE=1
 export MOCK_OPENCODE_MODELS="opencode/first"
 export CONAHCNUJ_REPO="nahcnuj/conahcnuj"
 
+# A wrapping agent session (the conahcnuj opencode plugin) exports these for
+# the real driver runs; the mock trailer check below must not see them.
+unset CONAHCNUJ_COMMIT_MODEL CONAHCNUJ_MODEL_LABEL_FILE CONAHCNUJ_SESSION_MODEL \
+  CONAHCNUJ_RUN_TIMEOUT_SECONDS OPENCODE_LAST_MODEL
+
 LOG="${ROOT}/run.log"
 RC=0
 (
