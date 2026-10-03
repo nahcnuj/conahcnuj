@@ -123,9 +123,60 @@ EOF
   args="$(cat "${OPENCODE_ARGS_FILE}")"
   [[ "${args}" == *"--model opencode/second"* ]]
   [[ "${args}" == *"--session ses_parsed"* ]]
+  # Thinking and a quiet log level are part of a readable log: --thinking makes
+  # the model show its reasoning, --log-level WARN drops the INFO boot chatter.
+  [[ "${args}" == *"--thinking"* ]]
+  [[ "${args}" == *"--log-level WARN"* ]]
+  CONAHCNUJ_OPENCODE_LOG_LEVEL=DEBUG opencode_run "Issue" "Body" "${tmp}" "opencode/third" >/dev/null || rc=$?
+  args="$(cat "${OPENCODE_ARGS_FILE}")"
+  [[ "${args}" == *"--log-level DEBUG"* ]]
   PATH="${old_path}"
   rm -rf "${tmp}"
   unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID
+}
+
+test_opencode_run_renders_log() {
+  local tmp old_path log
+  tmp="$(mktemp -d)"
+  old_path="${PATH}"
+  mkdir -p "${tmp}/bin"
+  # A fake opencode that emits the event shapes a real run produces.
+  cat > "${tmp}/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+cat <<'JSON'
+{"type":"reasoning","part":{"type":"reasoning","text":"thinking about it"}}
+{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"make check"},"output":"ok\n","metadata":{"exit":0},"title":"make check"}}}
+{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"make broken"},"output":"nope\n","metadata":{"exit":2},"title":"make broken"}}}
+{"type":"text","part":{"type":"text","text":"all done"}}
+JSON
+exit "${FAKE_OPENCODE_EXIT:-0}"
+EOF
+  chmod +x "${tmp}/bin/opencode"
+  PATH="${tmp}/bin:${PATH}"
+  export PATH
+  # The rendered log goes to stderr; stdout stays empty.
+  log="$(mktemp)"
+  opencode_run "Issue" "Body" "${tmp}" "opencode/first" >"${tmp}/stdout" 2>"${log}"
+  [[ ! -s "${tmp}/stdout" ]] || {
+    cat "${tmp}/stdout" >&2
+    echo "FAIL: the raw JSON stream must not reach stdout" >&2
+    exit 1
+  }
+  local out
+  out="$(cat "${log}")"
+  [[ "${out}" == *"opencode/first@"* ]] || { echo "FAIL: no model header"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *"  thinking about it"* ]] || { echo "FAIL: reasoning not rendered"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *'$ make check'* ]] || { echo "FAIL: command not rendered"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *'✅ make check'* ]] || { echo "FAIL: success verdict missing"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *'❌️ make broken (exit 2)'* ]] || { echo "FAIL: failure verdict missing"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *"  all done"* ]] || { echo "FAIL: final text not rendered"; echo "${out}" >&2; exit 1; }
+  # The raw stream is still kept well enough to recover the session id.
+  [[ "${OPENCODE_SESSION_ID:-}" =~ ^ses_ ]] || echo "note: no session id in the fake stream"
+  rm -f "${log}"
+  PATH="${old_path}"
+  rm -rf "${tmp}"
+  unset FAKE_OPENCODE_EXIT
+  echo "opencode_run renders the log passed"
 }
 
 test_opencode_run_timeout() {
@@ -155,6 +206,7 @@ test_opencode_build_handoff_prompt
 test_opencode_run
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
+test_opencode_run_renders_log
 test_opencode_run_timeout
 
 echo "All opencode tests passed"
