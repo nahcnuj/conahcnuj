@@ -2,8 +2,19 @@
 # opencode wrapper for conahcnuj
 # Provides model enumeration and hands the same opencode session to the next
 # model when the current model cannot complete the work.
+#
+# opencode's own output is a stream of JSON events; lib/opencode-render.sh
+# turns it into the driver's run log, one context header per block. The stream
+# is filtered as it arrives instead of being dumped at the end, so the SHA /
+# branch / diff in every header describe the moment that block was produced.
 
 set -euo pipefail
+
+# Not HERE: bin/conahcnuj.sh owns that name and resolves ../gh-app with it, so
+# overwriting it here would break the driver's api-commit.sh / setup-git.sh
+# paths. Sourcing a lib must not clobber the caller's variables.
+OPENCODE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OPENCODE_RENDER_SH="${OPENCODE_LIB_DIR}/opencode-render.sh"
 
 # List available models, one per line. Test mode: $MOCK_OPENCODE_MODELS.
 opencode_get_models() {
@@ -112,7 +123,13 @@ opencode_run() {
   if [[ -n "${CONAHCNUJ_RUN_TIMEOUT_SECONDS:-}" ]]; then
     executable=(timeout --signal=TERM --kill-after=30s "${CONAHCNUJ_RUN_TIMEOUT_SECONDS}s" opencode)
   fi
-  args=(run --print-logs --format json --model "${model}" --dir "${workdir}")
+  # --thinking makes opencode emit its reasoning parts as JSON events; without
+  # it the log shows only tool calls and final answers.
+  args=(run --print-logs --thinking --format json --model "${model}" --dir "${workdir}")
+  # --print-logs defaults to INFO, which is ~30 lines of boot/permission
+  # chatter per model and buries the rendered log. WARN keeps the diagnostics
+  # that matter without the noise; override to DEBUG when hunting a problem.
+  args+=(--log-level "${CONAHCNUJ_OPENCODE_LOG_LEVEL:-WARN}")
   if [[ -n "${session_id}" ]]; then
     args+=(--session "${session_id}")
   else
@@ -120,8 +137,23 @@ opencode_run() {
   fi
   args+=("${prompt}")
   status=0
-  "${executable[@]}" "${args[@]}" > "${output_file}" || status=$?
-  cat "${output_file}"
+  # tee keeps the raw stream for the session id, the renderer prints the log to
+  # stderr as the run proceeds (the header's SHA / diff only mean anything
+  # live, and stderr is what the driver captures into its bug-report log).
+  # The renderer's own exit status is deliberately ignored: a log filter must
+  # never change the outcome of a run.
+  local -a render
+  render=(--model "${model}" --dir "${workdir}")
+  if [[ -n "${CONAHCNUJ_REPO:-}" ]]; then
+    render+=(--repo "${CONAHCNUJ_REPO}")
+  fi
+  if [[ -f "${OPENCODE_RENDER_SH}" ]]; then
+    render=(bash "${OPENCODE_RENDER_SH}" "${render[@]}")
+  else
+    echo "WARNING: ${OPENCODE_RENDER_SH} is missing; printing the raw opencode output." >&2
+    render=(cat)
+  fi
+  "${executable[@]}" "${args[@]}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
   local detected_session
   detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
   if [[ "${detected_session}" =~ ^ses_[A-Za-z0-9_-]+$ ]]; then

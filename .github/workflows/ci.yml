@@ -132,6 +132,7 @@ jobs:
             @($binSide, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),
             @($binSide, "lib/gh-api.sh", "lib/gh-api.sh"),
             @($binSide, "lib/opencode.sh", "lib/opencode.sh"),
+            @($binSide, "lib/opencode-render.sh", "lib/opencode-render.sh"),
             @($binSide, "lib/rate-limit.sh", "lib/rate-limit.sh"),
             @($binDir, "conahcnuj", "bin/conahcnuj.sh")
           )

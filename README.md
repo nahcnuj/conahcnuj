@@ -20,7 +20,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
-├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / レートリミット）
+├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
 ├── tests/                     # ドライバの offline モックテスト
