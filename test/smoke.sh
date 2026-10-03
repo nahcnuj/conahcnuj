@@ -3,7 +3,9 @@
 # install to a temp dir, stage the INSTALLED files (not the repo files),
 # compile the installed plugin, load it against the installed gh-app dir
 # (fake app.env overlaid), and assert the shell.env contract (GIT_CONFIG
-# identity + alias.vc) plus the git-commit redirect via smoke-run.js.
+# identity + alias.vc), the system-prompt commit rules and the
+# tool.execute.before redirects (git commit / api-commit.sh) via
+# smoke-run.js.
 # Needs node/npm (typescript from plugins/package.json) and pwsh/powershell
 # for install.ps1. No secrets, no GitHub network.
 set -euo pipefail

@@ -64,6 +64,7 @@ async function main() {
     'bash "/opt/conahcnuj/gh-app/api-commit.sh" -m "x"',
     'cd repo && sh "$HOME/.config/opencode/gh-app/api-commit.sh"',
     'VAR=1 bash -lc "/tmp/gh-app/api-commit.sh -m x"',
+    'zsh -c "cd repo && api-commit.sh -m x"',
   ]) {
     let blocked = false
     try {
@@ -73,6 +74,26 @@ async function main() {
     }
     assert(blocked, `api-commit.sh was not redirected: ${command}`)
   }
+  // So is git commit, whatever wrapper or separator carries it.
+  for (const command of [
+    'git commit -m "x"',
+    "git -C /tmp/repo commit -m x",
+    'git add -A && git commit -m x',
+    'bash -c "git commit -m x"',
+  ]) {
+    let blocked = false
+    try {
+      await before({ tool: "bash" }, { args: { command }, env: {} })
+    } catch (err) {
+      blocked = /git vc/.test(String((err && err.message) || err))
+    }
+    assert(blocked, `git commit was not redirected: ${command}`)
+  }
+  // The sanctioned path stays open.
+  await before(
+    { tool: "bash" },
+    { args: { command: 'git vc -m "x" -a' }, env: {} }
+  )
   // Inspecting the script (grep/cat) must keep working.
   await before(
     { tool: "bash" },

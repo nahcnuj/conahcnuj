@@ -23,7 +23,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── opencode/AGENTS.md         # opencode グローバルルール（コミットは git vc。install.ps1 が配置）
-├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
+├── test/                      # プラグインのユニット/smoke テスト（opencode の自動ロード対象外）
 ├── tests/                     # ドライバの offline モックテスト
 ├── test.sh                    # tests/ のランナー
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）

@@ -26,9 +26,10 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/tests/run.sh` | offline モックテストのランナー（同ディレクトリの観点別テストを順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする。`BOT_USER_ID` は書かない（公開 API から自動解決。手動上書き時のみ追加） |
 | `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `api-commit-trailer` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`run.sh` から実行 |
-| `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`experimental.chat.system.transform` でコミット規則（`git vc` を使う）をシステムプロンプトへ常時注入、`tool.execute.before` で `git commit` と `api-commit.sh` の直接実行をブロックして `git vc` へ誘導。セッションのモデル表示名と variant を `CONAHCNUJ_COMMIT_MODEL` に入れる | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決。`CONAHCNUJ_SESSION_MODEL`（`provider/model`）が設定されているときはそのモデルだけを記録する |
+| `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`experimental.chat.system.transform` でコミット規則（`git vc` を使う）をシステムプロンプトへ常時注入、`tool.execute.before` で `git commit` と `api-commit.sh` の直接実行をブロックして `git vc` へ誘導（`&&` や `bash -c` 越しも検知。引用符・前方代入・シェルラッパを鑑みたうえでコマンドワードだけで判定するため、`cat gh-app/api-commit.sh` は通す）。セッションのモデル表示名と variant を `CONAHCNUJ_COMMIT_MODEL` に入れる | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決。`CONAHCNUJ_SESSION_MODEL`（`provider/model`）が設定されているときはそのモデルだけを記録する |
 | `opencode/AGENTS.md` | opencode のグローバルルール（`git commit` ではなく `git vc` でコミット）。`install.ps1` が `<!-- conahcnuj:begin -->` / `end` の管理ブロックとして `~/.config/opencode/AGENTS.md` へ配置し、既存ファイルは他の内容を保ったまま追記・更新する | グローバル AGENTS.md は全リポジトリへ効くため、nahcnuj の各リポジトリに同じ指示を個別に書かなくてよい。管理ブロックの外は保持される |
 | `test/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約・システムプロンプト規則・commit/api-commit.sh 誘導を検証。`plugins/` 外に置くのは opencode の自動ロード対象外にするため） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
+| `test/unit.sh` / `unit-run.js` | プラグイン内部のユニットテスト（`git vc` 誘導のコマンド判定・`app.env` / token cache の解析・モデルラベル・フック配線）。`unit.sh` は内部関数を再エクスポートした test ビルドを `test/.unit/` へコンパイルして使う | node/npm のみ（pwsh 不要）。CI の `plugin-unit` で実行。**プラグインの export は `GhAppTokenPlugin` だけ**（opencode のローダは全 export をプラグイン扱いする） |
 | `plugins/package.json`・`package-lock.json`・`tsconfig.json` | 型チェック基盤（`@types/node` と `@opencode-ai/plugin` は plugins/package.json＋lock から取得） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
 | `bin/conahcnuj.sh` | issue駆動自律開発ドライバ（issue→フィーチャーブランチ→PR→レビュー対応→ready to merge まで） | `lib/`・`tests/`・`test.sh` とセット。実行は `conahcnuj <issue番号>`（PR番号なら自動で再開）。ブランチ名・コミットメッセージはコーディングエージェントが決める（`.branch-name` / `.commit-msg`）。環境変数上書き・offline テストモードはヘッダーコメント参照。異常終了時はバグ報告 issue を対象リポジトリへ自動作成（`gh_api_create_issue`） |
 | `lib/` | ドライバ用ライブラリ（`gh-api.sh` / `opencode.sh` / `opencode-render.sh` / `rate-limit.sh`） | `opencode.sh` は失敗したモデルから `sessionID` と作業ツリーを次モデルへ引き継ぐ。`opencode-render.sh` は opencode の JSON イベント列を実行中に整形して stderr へ出す（`jq`/node 不要・純 awk）。出力はドライバの実行ログに入るので、異常終了時のバグ報告にもモデルの行動が残る。表示量は `CONAHCNUJ_OPENCODE_LOG_LEVEL`（既定 `WARN`。`--print-logs` の既定 INFO はモデルごとに 30 行近い起動ログを出す）と `CONAHCNUJ_RENDER_MAX_LINES` / `CONAHCNUJ_RENDER_MAX_COLS`（既定 200 行 / 400 桁。省略分は必ず明示される）で調整する。`gh-api.sh` は `GH_API_TEST_MODE=1` で stdin からモック応答を 1 コール 1 行読み、ネットワーク I/O をしない |
@@ -36,7 +37,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置。加えて `conahcnuj` バイナリ（既定 `~/.local/bin`）と bin 側 `gh-app/`・`lib/` を配置 | gh-app は**2 箇所**へ配備（opencode 設定用とドライバ用）。実 `app.env` があればそれを、無ければ example から作成。`opencode/AGENTS.md` のコミット規則は既存の `<Destination>/AGENTS.md` へ管理ブロックとしてマージする（冪等・非破壊） |
 | `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
 | `docker-run.sh` | 上記イメージでドライバを実行するラッパー（対象リポジトリを `/work` へマウント、コンテナ用 `app.env` を生成し秘密鍵を読み取り専用マウント） | テストではなく**実走行**用（実キー・ネットワーク・opencode 設定が必要） |
-| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
+| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-unit` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
 | `.github/actions/install-opencode/action.yml` | opencode を最新リリースで導入する composite action（authenticated リリース検索＋PATH 設定） | `ci.yml` と `issue-driver.yml` の両方が `uses: ./.github/actions/install-opencode` で共有。未認証の `api.github.com` は共有ランナーでレート制限に当たりやすいためトークン付きで解決する |
 | `.github/workflows/issue-driver.yml` | issue が open / reopen されたらドライバで自動対応を試みる（issue→PR まで。失敗時はバグ報告 issue） | タイムアウトは Actions 側で制御（`timeout-minutes: 60`）。`CONAHCNUJ_MAX_SECONDS=3540` でドライバが先に自己終了しバグ報告を残す。repo secrets `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY`（PEM）が必要。bot 名義の issue（`<slug>[bot]` 含む）は再帰防止のため `user.type` でスキップ（job レベルの `if` は `secrets` を参照できないため）。`GITHUB_TOKEN` は `contents: read` のみ（書き込みは全て App トークン） |
 | `.github/workflows/auto-merge.yml` | owner の PR 承認時に auto-merge を有効化 | 承認した head SHA と一致する場合だけ merge commit を要求。green 済みなら即時マージ。書き込みには `GITHUB_TOKEN` を使用 |
@@ -51,6 +52,10 @@ shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
 
 # プラグイン型チェック（@types/node は plugins/package.json＋lock から取得）
 (cd plugins && npm ci --no-audit --no-fund && ./node_modules/.bin/tsc -p ../plugins --noEmit)
+
+# プラグインのテスト（node/npm のみ。smoke は pwsh も使う）
+bash test/unit.sh   # 内部ロジックのユニットテスト
+bash test/smoke.sh  # install.ps1 → 読込 → フック契約の runtime テスト
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/tests/run.sh

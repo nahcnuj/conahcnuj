@@ -3,6 +3,7 @@ gh-app/bot-id.cache
 gh-app/app.env
 node_modules/
 .smoke/
+.unit/
 *.tmp
 *.log
 var/
