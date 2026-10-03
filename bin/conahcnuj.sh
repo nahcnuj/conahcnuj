@@ -704,17 +704,34 @@ ${body}"
 }
 
 # Wait until every non-reviewer constraint (checks + mergeability) passes.
-# Returns 0 when passable now, 1 when the PR needs new work.
+# Returns 0 when passable now, 1 when the PR needs new work. Exits when the PR
+# left the open state while we were waiting: there is nothing left to drive then,
+# and polling on would only end in a spurious bug report.
 poll_conditions() {
   local owner="${1}" repo="${2}" pr="${3}"
   while true; do
     check_timeout
-    local cond state mergeable mss
+    local cond state mergeable mss pr_state
     cond="$(gh_api_fetch_pr_conditions "${owner}" "${repo}" "${pr}")"
     state="$(printf '%s' "${cond}" | cut -d'|' -f1)"
     mergeable="$(printf '%s' "${cond}" | cut -d'|' -f2)"
     mss="$(printf '%s' "${cond}" | cut -d'|' -f3)"
+    pr_state="$(printf '%s' "${cond}" | cut -d'|' -f4)"
     echo "PR #${pr} constraints: checks=${state} mergeable=${mergeable} mergeState=${mss}" >&2
+    # The auto-merge workflow merges the PR once CI is green and no longer
+    # waits for this run's own check, so the PR can be merged out from under
+    # the poll. Report that as the end of the road instead of looping on a PR
+    # that can never become MERGEABLE again.
+    case "${pr_state}" in
+      MERGED)
+        echo "PR #${pr} is merged while waiting; nothing left to do." >&2
+        exit 0
+        ;;
+      CLOSED)
+        echo "PR #${pr} is closed without merge while waiting; nothing left to do." >&2
+        exit 1
+        ;;
+    esac
     if [[ "${state}" == "SUCCESS" && "${mergeable}" == "MERGEABLE" ]]; then
       echo "All non-reviewer constraints pass." >&2
       return 0

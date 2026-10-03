@@ -8,11 +8,20 @@
 # forever and never reached the review phase - the requested changes were
 # never addressed.
 #
+# The same deadlock has a second leg: the "Owner-approved auto-merge" job
+# merges only after every other check on the approved head is green, this
+# driver's run included, so its check stays pending for as long as the
+# driver waits - and once the job gives up it fails, which the driver then
+# tried to fix with yet another implementation round. Neither check belongs
+# to a workflow this driver can unblock by changing code, so neither is a
+# constraint (see CONAHCNUJ_OWN_WORKFLOWS in lib/gh-api.sh).
+#
 # Drives bin/conahcnuj.sh <PR> against a mocked GitHub API tape whose
 # statusCheckRollup enumerates the check contexts:
 #
 #   PR #15 state read -> head branch checked out -> constraints pass
-#   (own run IN_PROGRESS is excluded) -> review requested ->
+#   (own run IN_PROGRESS and the pending auto-merge check are both
+#   excluded) -> review requested ->
 #   CHANGES_REQUESTED detected -> addressed and committed -> constraints
 #   re-verified (own run CANCELLED is excluded too) -> replied -> polled
 #   again (real CI still running keeps the driver waiting) -> APPROVED +
@@ -44,9 +53,10 @@ git -C "${WORK}" commit -qm init
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue
 #   (stub body -> real issue body), update_pr (body sync), continuation
 #   comment, conditions (own run IN_PROGRESS), request_review,
-#   fetch_reviews (CHANGES_REQUESTED), conditions (own run CANCELLED),
-#   request_review, post_comment, fetch_reviews (fingerprint refresh after
-#   the reply), conditions (real CI running), conditions (CI green),
+#   fetch_reviews (CHANGES_REQUESTED), conditions (own run CANCELLED +
+#   auto-merge FAILED), request_review, post_comment, fetch_reviews
+#   (fingerprint refresh after the reply), conditions (real CI running),
+#   conditions (CI green),
 #   fetch_reviews (APPROVED), conditions.
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit
 # path runs `git add -A`).
@@ -57,10 +67,10 @@ cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
 {}
 {"id":889}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
+{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
 {}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"CANCELLED","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
+{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"CANCELLED","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"COMPLETED","conclusion":"FAILURE","checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
 {}
 {"id":888}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Addressed the review feedback:\n\nreviewDecision: CHANGES_REQUESTED","author":{"login":"conahcnuj[bot]"}}]},"reviewThreads":{"nodes":[]}}}}}
@@ -93,8 +103,9 @@ grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: the requested changes were not acted on"; exit 1; }
 grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
 
-# The driver's own run (pending, then cancelled) never became a
-# constraint: the poll reported SUCCESS instead of waiting for itself.
+# The driver's own run (pending, then cancelled) and the auto-merge job's
+# check (pending, then failed) never became a constraint: the poll reported
+# SUCCESS instead of waiting for the runs only this driver can finish.
 grep -q "PR #15 constraints: checks=SUCCESS" "${LOG}" || { echo "FAIL: own run was not excluded from the constraints"; exit 1; }
 # Real CI that is still running is still waited for.
 grep -q "PR #15 constraints: checks=PENDING" "${LOG}" || { echo "FAIL: a pending real CI check was not waited for"; exit 1; }

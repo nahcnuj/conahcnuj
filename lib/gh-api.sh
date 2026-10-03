@@ -280,16 +280,24 @@ gh_api_fetch_pr_state() {
     "${is_draft}" "${mergeable}" "${mss}" "${decision}" "${head}" "${base}" "${head_oid}" "${linked}"
 }
 
-# Workflows whose checks the driver must not treat as a constraint. The driver's
-# own workflow attaches a check run to the PR head commit while it is still
-# running, so counting it makes the driver wait for its own run to finish before
-# it can do anything - and a run a maintainer cancelled (or that timed out)
-# stays on the head commit as a failure no code change can ever fix. Both leave
-# the driver looping (issue #115: a requested-changes review was never
-# addressed). Comma separated; empty disables the filter.
+# Workflows whose checks the driver must not treat as a constraint. Both of
+# them attach a check run to the PR head commit while they are still running,
+# and neither can finish while this driver run is alive:
+#   - "Issue auto-drive" is the driver's own run: counting it makes the driver
+#     wait for itself before it can do anything.
+#   - "Owner-approved auto-merge" merges the PR only once every other check on
+#     the approved head commit is green - this driver's run included - so
+#     counting it here deadlocks the two against each other. Neither check can
+#     ever pass, the driver burns its whole time budget in poll_conditions and
+#     the merge job fails on its own check timeout (issue #115). Each side
+#     waits for CI only: the merge job skips the driver by workflow name the
+#     same way the driver skips the merge job here.
+# A run a maintainer cancelled (or that timed out) also stays on the head commit
+# as a failure no code change can ever fix, so both are left out of the
+# aggregate entirely. Comma separated; empty disables the filter.
 # `-` (not `:-`) so an explicitly empty value really disables the filter: the
 # caller has to be able to turn it off from the environment alone.
-CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive}"
+CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approved auto-merge}"
 
 # Aggregate a statusCheckRollup payload (stdin) into SUCCESS / PENDING /
 # FAILURE, leaving out the checks that belong to the workflows named in $1.
@@ -366,27 +374,34 @@ gh_api_rollup_state() {
   fi
 }
 
-# Non-reviewer merge constraints. Output: checks_state|mergeable|mergeStateStatus
+# Non-reviewer merge constraints. Output: checks_state|mergeable|mergeStateStatus|state
 # checks_state is SUCCESS when there is no status check on the head commit, and
-# the driver's own workflow run (CONAHCNUJ_OWN_WORKFLOWS) never counts against
-# the run that is doing the polling.
+# the checks of the workflows in CONAHCNUJ_OWN_WORKFLOWS (the driver's own run
+# and the merge job that waits for it) never count against the run that is
+# polling. state is the PR state, so the caller can tell "still open" from
+# "merged/closed while we waited"; it is empty when the payload does not carry
+# it, which the caller reads as unknown (keep polling).
 gh_api_fetch_pr_conditions() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state, contexts(first: 100) { nodes { __typename, ... on CheckRun { name, status, conclusion, checkSuite { workflowRun { workflow { name } } } }, ... on StatusContext { context, state } }, pageInfo { hasNextPage } } } } } } } } }"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, state, commits(last: 1) { nodes { commit { statusCheckRollup { state, contexts(first: 100) { nodes { __typename, ... on CheckRun { name, status, conclusion, checkSuite { workflowRun { workflow { name } } } }, ... on StatusContext { context, state } }, pageInfo { hasNextPage } } } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
     json="$(gh_api_graphql "${query}")"
   fi
 
-  local state mergeable mss
+  local state mergeable mss pr_state
   state="$(printf '%s' "${json}" | gh_api_rollup_state "${CONAHCNUJ_OWN_WORKFLOWS}")"
   if [[ -z "${state}" ]]; then
     state="SUCCESS"
   fi
   mergeable="$(gh_api_json_str "${json}" "mergeable")"
   mss="$(gh_api_json_str "${json}" "mergeStateStatus")"
-  printf '%s|%s|%s\n' "${state}" "${mergeable}" "${mss}"
+  # The PR's own state, anchored to the field right after mergeStateStatus:
+  # statusCheckRollup has a "state" of its own and a bare key match would pick
+  # up that aggregate instead (fields come back in query order).
+  pr_state="$(printf '%s' "${json}" | sed -n 's/.*"mergeStateStatus"[[:space:]]*:[[:space:]]*"[^"]*",[[:space:]]*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  printf '%s|%s|%s|%s\n' "${state}" "${mergeable}" "${mss}" "${pr_state}"
 }
 
 # Review status + raw payload.
