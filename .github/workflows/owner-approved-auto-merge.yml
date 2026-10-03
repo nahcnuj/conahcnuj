@@ -45,7 +45,8 @@ jobs:
       github.event.review.state == 'approved' &&
       github.event.review.author_association == 'OWNER'
     runs-on: ubuntu-latest
-    # CI の完了待ちは gh pr checks --watch で行うため、checks の所要時間ぶん確保する
+    # CI の完了待ちはこのジョブのポーリング（CHECK_TIMEOUT 秒）で行うため、
+    # タイムアウトは checks の待ち時間 + マージの余裕ぶん確保する
     timeout-minutes: 30
     steps:
       - name: Merge and dispatch
@@ -80,22 +81,70 @@ jobs:
           # （"Resource not accessible by integration"）ため、checks を待って自前で
           # マージする。GITHUB_TOKEN のマージは push イベントを発生させない
           # ので、呼び出し側が post-merge-dispatch でデプロイを起動する。
-          if ! checks_output="$(gh pr checks "$PR_NUMBER" --repo "$REPOSITORY" --watch --interval 30 2>&1)"; then
-            if printf '%s' "$checks_output" | grep -q 'no checks reported'; then
-              echo 'no checks reported on the PR; merging'
-            else
-              printf '%s\n' "$checks_output"
-              echo "checks did not pass for $REPOSITORY#$PR_NUMBER" >&2
+          #
+          # gh pr checks --watch で待つと、このジョブ自身の check run（承認された
+          # head SHA に紐付いたまま pending）が永久に終わらないため自己デッドロック
+          # する。check runs を API で直接読み、この run のものだけ除外して待つ。
+          CHECK_INTERVAL=30
+          CHECK_TIMEOUT=1500
+          SELF_RUN="/actions/runs/${GITHUB_RUN_ID}/"
+
+          outstanding_checks() {
+            {
+              gh api "repos/$REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" \
+                | jq -r --arg self "$SELF_RUN" '
+                    [(.check_runs // [])[]
+                     | select(((((.details_url // "") + (.html_url // "")) | contains($self)) | not))
+                     | (if .status != "completed" then "pending"
+                        elif ((.conclusion // "") | IN("success", "neutral", "skipped")) then ""
+                        else "failed" end) as $state
+                     | select($state != "")
+                     | "\($state)\tcheck\t\(.name)\t\(.conclusion // .status)"]
+                    | .[]'
+              gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" \
+                | jq -r '
+                    [(.statuses // [])[]
+                     | (if .state == "pending" then "pending"
+                        elif .state == "success" then ""
+                        else "failed" end) as $state
+                     | select($state != "")
+                     | "\($state)\tstatus\t\(.context)\t\(.state)"]
+                    | .[]'
+            }
+          }
+
+          deadline=$(( $(date +%s) + CHECK_TIMEOUT ))
+          while true; do
+            outstanding="$(outstanding_checks)"
+            if [ -z "$outstanding" ]; then
+              echo "all checks passed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA"
+              break
+            fi
+            if printf '%s\n' "$outstanding" | grep -q '^failed'; then
+              printf '%s\n' "$outstanding" >&2
+              echo "checks did not pass for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
               exit 1
             fi
-          else
-            printf '%s\n' "$checks_output"
-          fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              printf '%s\n' "$outstanding" >&2
+              echo "timed out after ${CHECK_TIMEOUT}s waiting for checks at $HEAD_SHA" >&2
+              exit 1
+            fi
+            echo "waiting for $(printf '%s\n' "$outstanding" | grep -c .) check(s) at $HEAD_SHA"
+            printf '%s\n' "$outstanding"
+            sleep "$CHECK_INTERVAL"
+          done
 
-          gh pr merge "$PR_NUMBER" \
+          if ! merge_output="$(gh pr merge "$PR_NUMBER" \
             --repo "$REPOSITORY" \
             "$MERGE_FLAG" \
-            --match-head-commit "$HEAD_SHA"
+            --match-head-commit "$HEAD_SHA" 2>&1)"; then
+            printf '%s\n' "$merge_output" >&2
+            echo "merge failed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
+            echo "if 'enable / enable' is a required status check, remove it from the branch protection rules" >&2
+            exit 1
+          fi
+          printf '%s\n' "$merge_output"
 
           if [ -n "$POST_MERGE_DISPATCH" ]; then
             echo "dispatching $POST_MERGE_DISPATCH on $REPOSITORY"
