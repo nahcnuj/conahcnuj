@@ -1,5 +1,7 @@
 .git
+node_modules
 plugins/node_modules
+.cache
 gh-app/app.env
 gh-app/token.cache
 gh-app/bot-id.cache
