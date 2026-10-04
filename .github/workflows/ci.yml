@@ -30,7 +30,15 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y shellcheck
           elif command -v choco >/dev/null 2>&1; then
-            choco install shellcheck --yes --no-progress
+            # choco hits transient 5xx from the community feed; retry.
+            for attempt in 1 2 3; do
+              choco install shellcheck --yes --no-progress && break
+              if [ "${attempt}" -eq 3 ]; then
+                echo "choco install shellcheck failed after 3 attempts" >&2
+                exit 1
+              fi
+              sleep 10
+            done
           else
             echo "no package manager available to install shellcheck" >&2
             exit 1
