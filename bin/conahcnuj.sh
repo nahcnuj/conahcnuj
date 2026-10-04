@@ -1060,6 +1060,7 @@ resume_pr() {
     iss="$(gh_api_fetch_issue "${owner}" "${repo}" "${closes}")"
     iss_body="$(gh_api_unescape "$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)")"
     if [[ -n "${iss_body}" ]]; then
+      iss_body="$(strip_closing_references "${iss_body}")"
       echo "PR body is just the closing stub; reusing issue #${closes} as the PR body." >&2
       body="${iss_body}"
     fi
