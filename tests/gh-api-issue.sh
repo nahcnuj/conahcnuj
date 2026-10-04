@@ -319,6 +319,19 @@ test_request_review() {
   local out
   out="$(printf '%s\n' '{}' | gh_api_request_review "nahcnuj" "conahcnuj" 15)"
   [[ "${out}" == '{}' ]]
+  # With a reviewer login the request names it; without one it stays a plain
+  # ask-for-review. The stubbed gh_api_call reports the request body.
+  local body
+  body="$(
+    gh_api_call() { printf '%s' "${3}"; }
+    gh_api_request_review "nahcnuj" "conahcnuj" 15 "nahcnuj"
+  )"
+  [[ "${body}" == '{"reviewers":["nahcnuj"]}' ]]
+  body="$(
+    gh_api_call() { printf '%s' "${3}"; }
+    gh_api_request_review "nahcnuj" "conahcnuj" 15
+  )"
+  [[ "${body}" == '{"reviewers":[]}' ]]
   echo "gh_api_request_review passed"
 }
 

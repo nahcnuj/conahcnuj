@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # gh_api_review_fingerprint tests: a raw reviews payload with no reviewer
-# feedback must fingerprint as EMPTY (so the driver polls instead of firing a
-# spurious implementation round), while real feedback or an actionable
-# decision (CHANGES_REQUESTED / COMMENTED with no body) must fingerprint as
-# non-empty and change when the feedback changes.
+# feedback must fingerprint as EMPTY (so the driver only re-requests review
+# instead of firing a spurious implementation round), while real feedback or an
+# actionable decision (CHANGES_REQUESTED / COMMENTED with no body) must
+# fingerprint as non-empty and change when the feedback changes.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
