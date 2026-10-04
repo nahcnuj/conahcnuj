@@ -12,8 +12,8 @@
 #
 #   issue #10 read -> existing feature branch (already has a commit) and an
 #   untracked scratch file + no .commit-msg -> implement skipped -> PR #124
-#   created -> constraints pass -> review requested -> APPROVED ->
-#   "ready to merge" -> exit 0, scratch file still present and uncommitted.
+#   created -> constraints pass -> APPROVED -> "ready to merge" -> exit 0,
+#   scratch file still present and uncommitted.
 #
 # No secrets, no network.
 set -euo pipefail
@@ -52,8 +52,7 @@ printf '{"reply": 1}\n' > "${WORK}/reply.json"
 
 # Mocked response tape, in call order:
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
-#   repo id, create_pr (124), conditions (SUCCESS), request_review,
-#   fetch_reviews (APPROVED), conditions.
+#   repo id, create_pr (124), conditions (SUCCESS), fetch_reviews (APPROVED).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "issue駆動自律開発", "body": "# 背景\n動作確認用のダミー issue です。", "labels": [{"name": "enhancement"}], "state": "open"}
@@ -64,9 +63,7 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"createPullRequest":{"pullRequest":{"number":124}}}}
 {"id":776}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1

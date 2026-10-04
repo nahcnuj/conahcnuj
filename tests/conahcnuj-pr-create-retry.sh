@@ -8,8 +8,8 @@
 # the PR is eventually created.
 #
 #   issue read -> branch -> implement -> create_pr (UNPROCESSABLE) ->
-#   re-implement -> create_pr (#125) -> constraints pass -> review requested
-#   -> APPROVED -> "ready to merge" -> exit 0
+#   re-implement -> create_pr (#125) -> constraints pass -> APPROVED ->
+#   "ready to merge" -> exit 0
 #
 # No secrets, no network.
 set -euo pipefail
@@ -39,7 +39,7 @@ OID="$(git -C "${WORK}" rev-parse HEAD)"
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
 #   repo id, create_pr (UNPROCESSABLE) -> then, after the recovery round:
 #   find_pr_by_head (empty), repo id, create_pr (125), conditions (SUCCESS),
-#   request_review, fetch_reviews (APPROVED), conditions.
+#   fetch_reviews (APPROVED).
 TAPE="${ROOT}/tape.txt"
 sed "s/OID_PLACEHOLDER/${OID}/" > "${TAPE}" <<'EOF'
 {"number": 18, "title": "fix racing driver", "body": "PR creation must be retried, not fatal", "labels": [], "state": "open"}
@@ -53,9 +53,7 @@ sed "s/OID_PLACEHOLDER/${OID}/" > "${TAPE}" <<'EOF'
 {"data":{"createPullRequest":{"pullRequest":{"number":125}}}}
 {"id":776}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
