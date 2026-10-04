@@ -101,6 +101,15 @@ X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/r
 offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `bin/conahcnuj.sh` のヘッダーコメントを参照。
 
+コーディングエージェントは**ブランチ保護を緩和する提案をしない**。branch
+protection / ruleset / required checks・reviews はリポジトリ owner の設定で、
+この App のトークンからは変更できないため、全モデルのプロンプト
+（`lib/opencode.sh` の `OPENCODE_SCOPE_RULES`）に「作業ツリーの範囲で直せるものだけ
+を直し、直せない制約は素直に報告する」ことを明記し、緩和を試みる `gh` コマンドは
+プラグイン（`tool.execute.before`）がブロックする。マージが通らない理由はログに
+出るが、それを緩和させる指示はどのログにも書かない
+（`tests/merge-policy-scope.sh` が検査）。
+
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
 すべて省略可能です。
 

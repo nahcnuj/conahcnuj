@@ -25,6 +25,17 @@ opencode_get_models() {
   opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 }
 
+# Operating rules handed to every model run, fresh or handoff. The coding agent
+# may only change the repository's working tree. Repository-level merge policy
+# (branch protection, rulesets, required checks / reviews) belongs to the owner,
+# so the agent must neither change it nor suggest changing it: a run that says
+# "cannot merge because of branch protection" and proposes relaxing it is useless
+# work, since the proposal can never be applied from inside the driver.
+# Single-quoted so no expansion and no command substitution happen here.
+OPENCODE_SCOPE_RULES='Work only within the scope you are allowed to work in: edit files in this repository'"'"'s working tree.
+Never relax, bypass, or disable branch protection, repository rulesets, required status checks, required reviews, or any other repository-level merge policy. Do not propose, request, or write such a change down either: not in a file, not in a commit message, and not as a suggestion that someone else should make it. Never merge with admin or bypass privileges (for example "gh pr merge --admin"), and never weaken a check, a test, or a verification step to make a merge go through.
+If something blocks the work from the working tree alone (a failing required check, a pull request that will not merge, a review that is still pending), say so plainly and stop. The repository owner owns that policy; you do not.'
+
 # Build the implementation prompt for a single model run.
 # Args: issue_title issue_body [extra_context]
 # A fresh implementation round (no extra_context) also lets the agent choose
@@ -46,6 +57,8 @@ ${extra_context}"
 
 Implement the changes needed to resolve this issue. Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
 
+${OPENCODE_SCOPE_RULES}
+
 When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. This message should summarize the changes you made."
   if [[ -z "${extra_context}" ]]; then
     prompt="${prompt}
@@ -57,7 +70,7 @@ If you want to choose the feature branch name, write your preferred branch name 
 
 opencode_build_handoff_prompt() {
   local previous_model="${1}"
-  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}"
+  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n\n%s\n' "${previous_model}" "${OPENCODE_SCOPE_RULES}"
 }
 
 # Run opencode with a specific model and publish its session ID in

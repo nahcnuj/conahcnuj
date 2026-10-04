@@ -201,7 +201,12 @@ jobs:
             --match-head-commit "$HEAD_SHA" 2>&1)"; then
             printf '%s\n' "$merge_output" >&2
             echo "merge failed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
-            echo "if 'enable / enable' is a required status check, remove it from the branch protection rules" >&2
+            # gh prints the reason above. Repository merge policy (branch
+            # protection, required checks / reviews) is the owner's setting
+            # and is never changed from here, so the log points at the failure
+            # only: a suggestion to relax it would reach the coding agent
+            # through the driver's bug-report log and be impossible to apply.
+            echo "check the reported reason and the branch's protection rules; this workflow does not change them" >&2
             exit 1
           fi
           printf '%s\n' "$merge_output"

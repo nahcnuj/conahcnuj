@@ -53,6 +53,35 @@ test_opencode_build_handoff_prompt() {
   echo "opencode_build_handoff_prompt passed"
 }
 
+# Repository merge policy (branch protection / rulesets / required checks) is
+# the owner's, and the agent can never change it from inside the driver. Every
+# model run therefore carries the same scope rules: work in the working tree,
+# and never propose relaxing the policy to get a merge through. The handoff
+# prompt gets them too - a model taking over mid-task reads no other prompt.
+test_opencode_prompt_scope_rules() {
+  local prompt variant
+  for variant in build handoff; do
+    if [[ "${variant}" == "build" ]]; then
+      prompt="$(opencode_build_prompt "Issue title" "Issue body")"
+    else
+      prompt="$(opencode_build_handoff_prompt "opencode/dead-model")"
+    fi
+    for needle in \
+      "branch protection" \
+      "ruleset" \
+      "required status checks" \
+      "Do not propose, request, or write such a change down" \
+      "Work only within the scope you are allowed to work in"; do
+      [[ "${prompt}" == *"${needle}"* ]] || {
+        echo "FAIL: the ${variant} prompt does not carry the scope rule '${needle}':" >&2
+        printf '%s\n' "${prompt}" >&2
+        exit 1
+      }
+    done
+  done
+  echo "opencode prompt scope rules passed"
+}
+
 test_opencode_run() {
   export OPENCODE_TEST_MODE=1
   local tmp
@@ -203,6 +232,7 @@ test_opencode_get_models
 test_opencode_build_prompt
 test_opencode_build_prompt_fresh
 test_opencode_build_handoff_prompt
+test_opencode_prompt_scope_rules
 test_opencode_run
 test_opencode_run_noop_models
 test_opencode_run_session_handoff

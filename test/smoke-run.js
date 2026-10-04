@@ -56,6 +56,40 @@ async function main() {
     threw = /git vc/.test(String((err && err.message) || err))
   }
   assert(threw, "git commit was not redirected to git vc")
+
+  // Branch protection / rulesets belong to the repository owner: every write
+  // path is refused, an admin merge included, and so is a GraphQL mutation
+  // against the same policy.
+  const protectionWrites = [
+    "gh ruleset create --repo o/r --branch main",
+    "gh api -X PUT repos/o/r/branches/main/protection",
+    "gh api --method DELETE repos/o/r/branches/main/protection/required_status_checks",
+    "gh api repos/o/r/branches/main/protection -f required_status_checks='{}'",
+    "gh api -X POST repos/o/r/rulesets",
+    "gh api graphql -f query='mutation { updateBranchProtectionRule }'",
+    "gh pr merge 1 --repo o/r --admin",
+  ]
+  for (const command of protectionWrites) {
+    let blocked = false
+    try {
+      await before({ tool: "bash" }, { args: { command }, env: {} })
+    } catch (err) {
+      blocked = /branch protection/i.test(String((err && err.message) || err))
+    }
+    assert(blocked, `merge-policy weakening was not blocked: ${command}`)
+  }
+  // Reading the current rules stays allowed: a blocked merge must still be
+  // explainable, only changing the rules is out of scope.
+  await before(
+    { tool: "bash" },
+    { args: { command: "gh api repos/o/r/branches/main/protection" }, env: {} }
+  )
+  await before(
+    { tool: "bash" },
+    { args: { command: "gh api -X GET repos/o/r/rulesets" }, env: {} }
+  )
+  await before({ tool: "bash" }, { args: { command: "gh pr checks 1" }, env: {} })
+
   // Must not interfere with anything else.
   await before({ tool: "bash" }, { args: { command: "git status" }, env: {} })
   await before({ tool: "read" }, { args: { filePath: "x" }, env: {} })

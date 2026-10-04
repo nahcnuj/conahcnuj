@@ -300,6 +300,46 @@ function isGitCommitCommand(cmd: string): boolean {
   return /(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)
 }
 
+// A `gh` call of the form `gh ... api ...` / `gh ... pr ...`.
+const GH_API_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+[^\n;&|]*\bapi\b/
+const GH_RULESET_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+ruleset\b/
+const GH_PR_MERGE_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+[^\n;&|]*\bpr\s+merge\b/
+// Repository merge policy lives under /protection and /rulesets.
+const PROTECTION_API_PATH =
+  /\/branches\/[^\s/"']+\/protection\b|\/rulesets?(?:[\s/"']|$)/
+
+/**
+ * True when a `gh api` call sends a request body / non-GET method. `gh api`
+ * defaults to GET, but any -X/--method wins, and supplying a field turns the
+ * call into a POST on its own - both are writes on a protection endpoint.
+ */
+function ghApiIsWrite(cmd: string): boolean {
+  const method = /(^|\s)(?:-X|--method)[=\s]+([A-Za-z]+)/.exec(cmd)
+  if (method) {
+    return method[2].toUpperCase() !== "GET"
+  }
+  return /(^|\s)(?:-f|--field|-F|--raw-field|--input)(\s|=|$)/.test(cmd)
+}
+
+/**
+ * True when a command line tries to weaken repository-level merge policy:
+ * `gh ruleset ...`, a write to a branch protection / ruleset endpoint, a
+ * branch protection GraphQL mutation, or an admin merge. Relaxing branch
+ * protection is never an option from inside this App, so such a call is
+ * refused rather than retried; reading the current rules (`-X GET`, a plain
+ * `gh api .../protection`) stays allowed so a blocked merge can still be
+ * explained. Same shape as the `git commit` guard.
+ */
+function isProtectionWeakeningCommand(cmd: string): boolean {
+  if (GH_RULESET_CALL.test(cmd)) return true
+  if (GH_API_CALL.test(cmd) && PROTECTION_API_PATH.test(cmd)) {
+    return ghApiIsWrite(cmd)
+  }
+  if (/\bmutation\b/.test(cmd) && /BranchProtectionRule/.test(cmd)) return true
+  if (GH_PR_MERGE_CALL.test(cmd) && /(^|\s)--admin(\s|$)/.test(cmd)) return true
+  return false
+}
+
 interface ShellIdentity {
   botName: string
   botEmail: string
@@ -463,6 +503,31 @@ function blockUnsignedCommit(
   }
 }
 
+/**
+ * `tool.execute.before` hook body: repository-level merge policy (branch
+ * protection, rulesets, required checks / reviews) belongs to the owner and
+ * can never be relaxed from here, so a call that weakens it is refused
+ * instead of being proposed or retried. The agent is expected to keep working
+ * inside the repository's working tree and report what it cannot change.
+ * Throws to block, returns silently to allow.
+ */
+function blockProtectionWeakening(tool: string, args: unknown): void {
+  if (tool !== "bash") {
+    return
+  }
+  const cmd = parseBashCommand(args)
+  if (cmd !== null && isProtectionWeakeningCommand(cmd)) {
+    throw new Error(
+      "Do not weaken repository merge policy: branch protection, rulesets, " +
+        "required status checks / reviews, and admin merges are the " +
+        "repository owner's decision and cannot be changed from here. " +
+        "Fix the work in the working tree instead; if a required check or a " +
+        "merge is blocked for a reason the code cannot fix, report that " +
+        "plainly instead of relaxing the policy."
+    )
+  }
+}
+
 export const GhAppTokenPlugin: Plugin = async () => {
   const botUserId = await resolveBotUserId(config.APP_SLUG)
   const botName = `${config.APP_SLUG}[bot]`
@@ -511,6 +576,7 @@ export const GhAppTokenPlugin: Plugin = async () => {
     },
     "tool.execute.before": async (input, output) => {
       blockUnsignedCommit(input.tool, output.args, botName, vcUsage)
+      blockProtectionWeakening(input.tool, output.args)
     },
   }
 }
