@@ -49,7 +49,11 @@ check_file() {
 while IFS= read -r file; do
   check_file "${file}"
 done < <(
+  # node_modules is pruned: plugins/ is scanned for the plugin sources, and a
+  # vendored dependency is not a line the agent is ever shown. Without the
+  # prune the scan set depends on whether npm ci has run locally.
   find "${REPO}/bin" "${REPO}/lib" "${REPO}/gh-app" "${REPO}/plugins" "${REPO}/.github/workflows" \
+    -name node_modules -prune -o \
     -type f \( -name '*.sh' -o -name '*.yml' -o -name '*.yaml' -o -name '*.ts' \) -print
   printf '%s\n' "${REPO}/README.md" "${REPO}/AGENTS.md"
 )

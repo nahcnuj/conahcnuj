@@ -199,15 +199,29 @@ jobs:
             --repo "$REPOSITORY" \
             "$MERGE_FLAG" \
             --match-head-commit "$HEAD_SHA" 2>&1)"; then
+            # An immediate merge is refused while the head branch is behind the
+            # base (another PR merged first). That is not this run failing, so
+            # queue the merge instead: GitHub lands it as soon as the branch is
+            # up to date again, without anyone re-approving the same head.
             printf '%s\n' "$merge_output" >&2
-            echo "merge failed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
-            # gh prints the reason above. Repository merge policy (branch
-            # protection, required checks / reviews) is the owner's setting
-            # and is never changed from here, so the log points at the failure
-            # only: a suggestion to relax it would reach the coding agent
-            # through the driver's bug-report log and be impossible to apply.
-            echo "check the reported reason and the branch's protection rules; this workflow does not change them" >&2
-            exit 1
+            if auto_output="$(gh pr merge "$PR_NUMBER" \
+              --repo "$REPOSITORY" \
+              "$MERGE_FLAG" \
+              --auto \
+              --match-head-commit "$HEAD_SHA" 2>&1)"; then
+              echo "immediate merge was refused; auto-merge is queued for $REPOSITORY#$PR_NUMBER" >&2
+              merge_output="${auto_output}"
+            else
+              printf '%s\n' "$auto_output" >&2
+              echo "merge failed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
+              # Repository merge policy is the owner's setting and is never
+              # changed from here. The log must not suggest relaxing it either:
+              # the driver copies this log into its bug report, so the next
+              # coding agent would read a relaxation it can never carry out.
+              echo "check the reason gh printed above; this workflow does not change repository merge policy" >&2
+              echo "if auto-merge could not be queued either, the repository needs Settings -> General -> Pull Requests -> Allow auto-merge" >&2
+              exit 1
+            fi
           fi
           printf '%s\n' "$merge_output"
 

@@ -302,8 +302,12 @@ function isGitCommitCommand(cmd: string): boolean {
 
 // A `gh` call of the form `gh ... api ...` / `gh ... pr ...`.
 const GH_API_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+[^\n;&|]*\bapi\b/
-const GH_RULESET_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+ruleset\b/
+const GH_RULESET_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+ruleset(?:\.exe)?(?:\s+([A-Za-z][\w-]*))?/
 const GH_PR_MERGE_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+[^\n;&|]*\bpr\s+merge\b/
+// `gh ruleset` subcommands that only report the current rules. Explaining why a
+// merge is blocked is inside the agent's scope; changing a ruleset is not, so
+// every other subcommand is refused.
+const GH_RULESET_READS = new Set(["list", "view", "check"])
 // Repository merge policy lives under /protection and /rulesets.
 const PROTECTION_API_PATH =
   /\/branches\/[^\s/"']+\/protection\b|\/rulesets?(?:[\s/"']|$)/
@@ -323,15 +327,22 @@ function ghApiIsWrite(cmd: string): boolean {
 
 /**
  * True when a command line tries to weaken repository-level merge policy:
- * `gh ruleset ...`, a write to a branch protection / ruleset endpoint, a
- * branch protection GraphQL mutation, or an admin merge. Relaxing branch
- * protection is never an option from inside this App, so such a call is
- * refused rather than retried; reading the current rules (`-X GET`, a plain
- * `gh api .../protection`) stays allowed so a blocked merge can still be
- * explained. Same shape as the `git commit` guard.
+ * a `gh ruleset` subcommand that changes a ruleset, a write to a branch
+ * protection / ruleset endpoint, a branch protection GraphQL mutation, or an
+ * admin merge. Relaxing branch protection is never an option from inside this
+ * App, so such a call is refused rather than retried; reading the current rules
+ * (`gh ruleset list|view|check`, `-X GET`, a plain `gh api .../protection`)
+ * stays allowed so a blocked merge can still be explained. Same shape as the
+ * `git commit` guard.
  */
 function isProtectionWeakeningCommand(cmd: string): boolean {
-  if (GH_RULESET_CALL.test(cmd)) return true
+  const ruleset = GH_RULESET_CALL.exec(cmd)
+  if (ruleset) {
+    // Groups: 1 = command boundary, 2 = `exe`, 3 = subcommand. A bare
+    // `gh ruleset` (group 3 undefined) just prints help.
+    const sub = (ruleset[3] || "").toLowerCase()
+    return sub !== "" && !GH_RULESET_READS.has(sub)
+  }
   if (GH_API_CALL.test(cmd) && PROTECTION_API_PATH.test(cmd)) {
     return ghApiIsWrite(cmd)
   }

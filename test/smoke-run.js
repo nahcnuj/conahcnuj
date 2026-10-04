@@ -62,6 +62,8 @@ async function main() {
   // against the same policy.
   const protectionWrites = [
     "gh ruleset create --repo o/r --branch main",
+    "gh ruleset edit 1234 --repo o/r --bypass-pull-requests-as-admin",
+    "gh ruleset delete 1234 --repo o/r",
     "gh api -X PUT repos/o/r/branches/main/protection",
     "gh api --method DELETE repos/o/r/branches/main/protection/required_status_checks",
     "gh api repos/o/r/branches/main/protection -f required_status_checks='{}'",
@@ -87,6 +89,11 @@ async function main() {
   await before(
     { tool: "bash" },
     { args: { command: "gh api -X GET repos/o/r/rulesets" }, env: {} }
+  )
+  await before({ tool: "bash" }, { args: { command: "gh ruleset list --repo o/r" }, env: {} })
+  await before(
+    { tool: "bash" },
+    { args: { command: "gh ruleset check main --repo o/r" }, env: {} }
   )
   await before({ tool: "bash" }, { args: { command: "gh pr checks 1" }, env: {} })
 
