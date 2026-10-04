@@ -6,6 +6,10 @@ set -euo pipefail
 STAGE="${1:?staged gh-app dir required}"
 APICOMMIT="${STAGE}/api-commit.sh"
 
+# A wrapping agent session (the conahcnuj opencode plugin) exports
+# CONAHCNUJ_COMMIT_MODEL; the label-unset cases below must not see it.
+unset CONAHCNUJ_COMMIT_MODEL
+
 FIX="$(mktemp -d)"
 trap 'rm -rf "${FIX}"' EXIT
 git -C "${FIX}" init -q
