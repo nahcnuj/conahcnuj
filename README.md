@@ -82,22 +82,27 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    `sessionID` と現在の作業ツリーを次のモデルへ引き継ぎ、完了まで継続する。
    セッションIDを取得できなかった場合だけ新しいセッションで作業ツリーから再開する。
 1. PR を作成し、レビュアー以外の制約（status checks・mergeable）が通るまで
-   待ってからレビューを依頼する。PR の本文はクローズ対象 issue の内容を基に
+   待ってから、**リポジトリ owner を reviewer にアサイン**してレビューを依頼する。
+   人がレビューを引き受ける引き渡し点（hand-off）がここなので、依頼付けられた
+   時点でドライバは正常終了する（既に Approved なら「ready to merge」で終了する）。
+   PR の本文はクローズ対象 issue の内容を基に
    `Closes #<番号>` と合わせて自動生成され、既存 PR を再利用した場合も同期される。
-2. レビューステータスをポーリングし、Comment / Request changes / 未解決の
-   レビュースレッド（セキュリティレビューの指摘を含む）を検出したらモデルを
-   使って対応し、api-commit.sh で Verified コミットを push して制約を再確認し、
-   PR へ返信する。
-3. PR が「Approved かつ全制約通過（ready to merge）」になるまで終了しない。
-4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開など
-   で PR を解決できずに終了コード非 0 で終わる場合）は、ドライバが対象
+2. 再開実行時に新しいレビュー意見（Comment / Request changes / 未解決の
+   レビュースレッド。セキュリティレビューの指摘を含む）がある場合は、
+   モデルを使って対応し、api-commit.sh で Verified コミットを push して制約を
+   再確認し、PR へ返信して owner へレビューを再依頼してから終了する。
+3. owner の Approve と merge は `auto-merge.yml` /
+   `owner-approved-auto-merge.yml` の担当で、ドライバ自身は自動マージしない。
+4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開・
+   レビュー依頼の失敗で PR を引き渡せなかった場合など、終了コード非 0 で
+   終わる場合）は、ドライバが対象
    リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
    `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
    実行ログ末尾を含む）。
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
-ドライバ自身は自動マージを行わない。環境変数の上書き（時間予算・ポーリング幅）や
+環境変数の上書き（時間予算・ポーリング幅）や
 offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 `bin/conahcnuj.sh` のヘッダーコメントを参照。
 

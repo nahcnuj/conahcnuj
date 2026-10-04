@@ -6,9 +6,12 @@
 # throwaway git repository. Exercises the happy path end to end:
 #
 #   issue #10 read -> feature branch -> implement -> PR #123 created ->
-#   non-reviewer constraints pass -> review requested -> CHANGES_REQUESTED
-#   feedback detected -> addressed + committed -> re-verified -> replied ->
-#   polled again -> APPROVED + constraints -> "ready to merge" -> exit 0
+#   non-reviewer constraints pass -> no review feedback yet -> owner assigned
+#   as reviewer -> "review requested" -> exit 0
+#
+# The driver stops at the review request: approval (and the merge
+# owner-approved-auto-merge chains off it) belongs to the human reviewer. The
+# feedback round of a resumed run is covered by conahcnuj-resume.sh.
 #
 # No secrets, no network.
 set -euo pipefail
@@ -34,10 +37,8 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape. One JSON document per GitHub API call, in call order:
 #   fetch_issue, get_repo, find_pr_by_head (empty), repo id lookup, create_pr
-#   (123), continuation comment, conditions (SUCCESS|MERGEABLE), request_review,
-#   fetch_reviews (CHANGES_REQUESTED), conditions, request_review, post_comment,
-#   fetch_reviews (fingerprint refresh after the reply), update_pr (body sync on
-#   the reuse path), conditions, fetch_reviews (APPROVED), conditions.
+#   (123), continuation comment, conditions (SUCCESS|MERGEABLE), fetch_reviews
+#   (REVIEW_REQUIRED, nothing to act on), request_review.
 # Keep the tape and the run log OUTSIDE the repo: the driver's test-mode
 # commit path does `git add -A`, and a file living in the worktree would be
 # re-staged as it grows.
@@ -51,16 +52,8 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"createPullRequest":{"pullRequest":{"number":123}}}}
 {"id":776}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {}
-{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Nice work so far!","author":{"login":"reviewer"}}]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Inline note on line 10"}]}}]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{}
-{"id":777}
-{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Nice work so far!","author":{"login":"reviewer"}},{"body":"Addressed the review feedback:\n\nreviewDecision: CHANGES_REQUESTED\nREVIEWS:","author":{"login":"conahcnuj[bot]"}}]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Inline note on line 10"}]}}]}}}}}
-{}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -89,10 +82,11 @@ echo "-----------------------------"
 
 [[ ${RC} -eq 0 ]] || { echo "FAIL: driver exited ${RC} (expected 0)"; exit 1; }
 
-grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
+grep -q "Review requested on PR #123 (reviewer: nahcnuj): https://github.com/nahcnuj/conahcnuj/pull/123" "${LOG}" || { echo "FAIL: the driver did not hand the PR to the owner as reviewer"; exit 1; }
+grep -q "Assigned nahcnuj as reviewer on PR #123" "${LOG}" || { echo "FAIL: the owner was not assigned as reviewer"; exit 1; }
+grep -q "Ready to merge" "${LOG}" && { echo "FAIL: the driver waited for an approval that never came"; exit 1; }
 grep -q "Created PR #123" "${LOG}" || { echo "FAIL: PR #123 was not created"; exit 1; }
-grep -q "Replied on PR #123 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
-grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
+grep -q "New review feedback detected" "${LOG}" && { echo "FAIL: a fresh PR must not fire an implementation round"; exit 1; }
 grep -q "Model opencode/first failed before completing the work; handing off to the next model" "${LOG}" || { echo "FAIL: failed model did not hand off"; exit 1; }
 grep -q "Handing off session ses_mock from opencode/first to opencode/second" "${LOG}" || { echo "FAIL: session was not handed to the second model"; exit 1; }
 grep -q -- "--session ses_mock" "${LOG}" || { echo "FAIL: continuation command omitted --session"; exit 1; }
@@ -109,7 +103,7 @@ grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the handoff model's .commit-msg was not used"; exit 1; }
 FULL_LOG="$(git -C "${WORK}" log --format=%B)"
 grep -q "Model: opencode/second" <<<"${FULL_LOG}" || { echo "FAIL: handoff model trailer missing"; exit 1; }
-# init + implement + review-feedback fix = 3 commits from the branch tip.
-[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement + review commits"; exit 1; }
+# init + implement = 2 commits from the branch tip (no feedback round here).
+[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "2" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
 
 echo "conahcnuj flow passed"
