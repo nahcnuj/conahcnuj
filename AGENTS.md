@@ -13,6 +13,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 - 変数展開はシェルスクリプト内で常にブレース付き `${var}` を使う。`$var` は使わない。
 - Windows で `bash` の素コマンドは WSL（`C:\Windows\System32\bash.exe`）に解決されることがある。スクリプト・プラグインで bash を起動するときは必ず `BASH_EXE`（`C:/Program Files/Git/bin/bash.exe`）を使う。
 - 作業後に opencode を再起動しないとプラグイン変更は反映されない（プラグインは起動時ロード）。
+- ドライバの整形ログ（`lib/opencode-render.sh`）は truncate しない。行数・桁数で省略せず、モデルが書いた行もコマンドが出力した行も全文が出る（`CONAHCNUJ_RENDER_MAX_LINES` / `CONAHCNUJ_RENDER_MAX_COLS` に相当する省略は行わない。両変数は廃止済み）。このログは run の唯一の記録で、異常終了時はその一部がバグ報告に載るため、省略は「モデルがそう言わなかったこと」と区別できない穴になる。
 
 ## ファイルガイド
 

@@ -26,14 +26,15 @@
 # events are dropped, and lines that are not JSON pass through verbatim. Its
 # exit status is ignored by the caller for the same reason.
 #
-# Overridable: CONAHCNUJ_RENDER_MAX_LINES (per-block line cap, default 200),
-# CONAHCNUJ_RENDER_MAX_COLS (per-line column cap, default 400). Truncation is
-# always announced in place so nothing disappears silently.
+# Nothing is ever clipped: there is no line cap, no column cap and no "...[+N
+# cols]" marker, neither for the agent's own text and reasoning nor for what a
+# command printed. This log is the run's only record of what happened -- an
+# abnormal exit files its tail as a bug report -- so a shortened block would be
+# a hole in the evidence that nobody could tell apart from something the model
+# never said.
 
 set -uo pipefail
 
-MAX_LINES="${CONAHCNUJ_RENDER_MAX_LINES:-200}"
-MAX_COLS="${CONAHCNUJ_RENDER_MAX_COLS:-400}"
 INDENT="  "
 SEP=$'\x1f'
 
@@ -316,31 +317,20 @@ render_header() {
 
 # --- block bodies -----------------------------------------------------------
 
-# Print text indented under its block, capped so one runaway payload cannot
-# bury the log. Both caps announce what was dropped.
+# Print text indented under its block, line by line, exactly as it was
+# produced: every line the model wrote or the command printed comes out whole,
+# and a blank line stays a blank line.
 render_indent() {
-  local -a lines=()
-  local line total limit i
-  [[ -n "${1:-}" ]] || return 0
-  mapfile -t lines <<< "${1}"
-  total="${#lines[@]}"
-  limit="${MAX_LINES}"
-  [[ "${limit}" -le "${total}" ]] || limit="${total}"
-  for ((i = 0; i < limit; i++)); do
-    line="${lines[i]}"
-    if [[ "${#line}" -gt "${MAX_COLS}" ]]; then
-      printf '%s%s ...[+%s cols]\n' "${INDENT}" "${line:0:MAX_COLS}" "$(( ${#line} - MAX_COLS ))"
-    else
-      printf '%s%s\n' "${INDENT}" "${line}"
-    fi
-  done
-  if [[ "${total}" -gt "${limit}" ]]; then
-    printf '%s... (%s more lines truncated)\n' "${INDENT}" "$(( total - limit ))"
-  fi
+  local value="${1:-}"
+  local line
+  [[ -n "${value}" ]] || return 0
+  while IFS= read -r line; do
+    printf '%s%s\n' "${INDENT}" "${line}"
+  done <<< "${value}"
 }
 
 # Assistant text and reasoning read the same way: the header says which step
-# this is, the body is just the model's words.
+# this is, the body is just the model's words, printed in full.
 render_block_text() {
   [[ -n "${F[text]}" ]] || return 0
   render_header
