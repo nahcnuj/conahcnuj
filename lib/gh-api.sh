@@ -77,10 +77,25 @@ gh_api_get_token() {
   bash "${GH_APP_DIR}/get-token.sh"
 }
 
+# The HTTP status of a response curl recorded with -D. curl writes one header
+# block per response, so the answer is the LAST status line in the dump: reading
+# only the first line mistakes a proxy's "HTTP/1.1 200 Connection established"
+# (or any informational 1xx block) for the response itself and silently turns a
+# real API answer into the wrong verdict. Prints nothing when there is none.
+gh_api_http_status() {
+  tr -d '\r' < "${1}" 2>/dev/null |
+    sed -n 's#^HTTP/[0-9.]* \([0-9][0-9][0-9]\).*$#\1#p' |
+    tail -n 1
+}
+
 # HTTP layer. Args: method url [request-body]
 # Real mode: performs the call; on 403/429 waits for the rate limit using
 # Retry-After / X-RateLimit-Reset headers and retries (max 5 tries).
 # Test mode: echoes the single stdin "response" line unchanged.
+# A call that ends up without a 2xx says so on stderr: callers routinely throw
+# this function's stdout away and the response body is the only place GitHub
+# states why, so a failure that reached nothing but the exit status would leave
+# a bug report with no clue at all (issue #134).
 gh_api_call() {
   local method="${1:-GET}"
   local url="${2}"
@@ -91,7 +106,7 @@ gh_api_call() {
     return 0
   fi
 
-  local token headers body code attempt
+  local token headers body code attempt curl_status detail
   token="$(gh_api_get_token)"
   headers="$(mktemp)"
   body="$(mktemp)"
@@ -108,6 +123,7 @@ gh_api_call() {
   attempt=0
   while [[ ${attempt} -lt 5 ]]; do
     attempt=$((attempt + 1))
+    curl_status=0
     local -a args=(
       -sS -D "${headers}" -o "${body}" -X "${method}"
       -H "Authorization: Bearer ${token}"
@@ -116,8 +132,8 @@ gh_api_call() {
     if [[ -n "${data}" ]]; then
       args+=(-H "Content-Type: application/json" --data-binary "@${datafile}")
     fi
-    curl "${args[@]}" "${url}" || true
-    code="$(tr -d '\r' < "${headers}" | sed -n '1s/.* \([0-9][0-9][0-9]\)$/\1/p')"
+    curl "${args[@]}" "${url}" || curl_status=$?
+    code="$(gh_api_http_status "${headers}")"
     if [[ "${code}" == "403" || "${code}" == "429" ]]; then
       rate_limit_wait "$(tr -d '\r' < "${headers}")"
       continue
@@ -126,6 +142,13 @@ gh_api_call() {
   done
   GH_API_LAST_HTTP_CODE="${code}"
   rm -f "${headers}" "${datafile}"
+  if [[ "${code}" != "200" && "${code}" != "201" ]]; then
+    detail="${code:-no response}"
+    if [[ "${curl_status}" -ne 0 ]]; then
+      detail="${detail}, curl exit ${curl_status}"
+    fi
+    echo "ERROR: ${method} ${url} -> ${detail}: $(head -c 300 "${body}" | tr -d '\r\n')" >&2
+  fi
   cat "${body}"
   rm -f "${body}"
   case "${code}" in
@@ -586,6 +609,30 @@ gh_api_request_review() {
     body='{"reviewers":[]}'
   fi
   gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/requested_reviewers" "${body}"
+}
+
+# The reviewers GitHub currently has requested on a PR, one login per line
+# (nothing when nobody is asked). The request endpoint answers with a status
+# alone, and a status is not proof: a transport error or a 5xx that arrives
+# after GitHub has already recorded the request reads exactly like a refusal
+# (issue #134, where the driver died with "could not request review" on a PR
+# that did carry a review_requested event). Reading the PR back tells the two
+# apart, so a hand-off GitHub accepted is never retried into a duplicate or
+# reported as lost.
+gh_api_requested_reviewers() {
+  local owner="${1}" repo="${2}" number="${3}" json logins
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_call GET "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/requested_reviewers")" || return 1
+  fi
+  # The payload is {"users":[…],"teams":[…]}: only the user objects carry a
+  # "login" (a team carries a "slug"), so every login in it is a reviewer.
+  logins="$(printf '%s' "${json}" |
+    grep -oE '"login":"[^"]*"' |
+    sed 's/^"login":"//; s/"$//' || true)"
+  [[ -n "${logins}" ]] || return 0
+  printf '%s\n' "${logins}"
 }
 
 # Post a PR/issue comment. Args: owner repo pr body  (output: comment id)

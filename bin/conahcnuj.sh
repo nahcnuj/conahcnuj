@@ -753,17 +753,29 @@ poll_conditions() {
 # Hand the PR over to a human: the repository owner is assigned as reviewer,
 # which is the last deliverable of a run. A reviewer who cannot be assigned
 # (GitHub refuses e.g. the author of the PR) or a request that is already
-# pending must not fail the run, so fall back to the unnamed ask-for-review;
-# only when that fails too is the hand-off reported as an error.
-# Args: owner repo pr
+# pending must not fail the run, so fall back to the unnamed ask-for-review.
+# Both attempts reporting a failure is not proof that nobody was asked either:
+# the request endpoint answers with a status, and a transport error or a 5xx
+# that arrives after GitHub recorded the request is indistinguishable from a
+# refusal. The PR is therefore read back before the hand-off is called lost —
+# issue #134 died with "could not request review" on a PR GitHub had just
+# recorded a review_requested event for, and filed a bug report for a run whose
+# work was in fact complete. Args: owner repo pr
 request_review_from_owner() {
-  local owner="${1}" repo="${2}" pr="${3}"
-  if gh_api_request_review "${owner}" "${repo}" "${pr}" "${owner}" >/dev/null 2>&1; then
+  local owner="${1}" repo="${2}" pr="${3}" requested
+  # stderr is kept so gh_api_call's "-> <status>: <body>" reaches the run log:
+  # without it a failed hand-off explains nothing in the bug report.
+  if gh_api_request_review "${owner}" "${repo}" "${pr}" "${owner}" >/dev/null; then
     echo "Assigned ${owner} as reviewer on PR #${pr}." >&2
     return 0
   fi
-  if gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null 2>&1; then
+  if gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null; then
     echo "Review requested on PR #${pr} (${owner} is not assignable; asked for review instead)." >&2
+    return 0
+  fi
+  requested="$(gh_api_requested_reviewers "${owner}" "${repo}" "${pr}" 2>/dev/null || true)"
+  if [[ -n "${requested}" ]]; then
+    echo "Review already requested on PR #${pr} (${requested//$'\n'/, }); the request call reported a failure but GitHub has it, so the hand-off is done." >&2
     return 0
   fi
   echo "ERROR: could not request review on PR #${pr}." >&2

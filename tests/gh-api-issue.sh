@@ -335,6 +335,48 @@ test_request_review() {
   echo "gh_api_request_review passed"
 }
 
+test_http_status() {
+  local dump
+  dump="$(mktemp)"
+  # A plain single-block response.
+  printf 'HTTP/2 201\r\ncontent-type: application/json\r\n\r\n' > "${dump}"
+  [[ "$(gh_api_http_status "${dump}")" == "201" ]]
+  # A reason phrase after the code, and a status from an HTTP/1.1 response.
+  printf 'HTTP/1.1 422 Unprocessable Entity\r\nx: y\r\n\r\n' > "${dump}"
+  [[ "$(gh_api_http_status "${dump}")" == "422" ]]
+  # curl records one block per response, so the answer is the LAST status line:
+  # a proxy CONNECT reply or an informational 1xx in front of it must not be
+  # mistaken for the response (issue #134).
+  printf 'HTTP/1.1 200 Connection established\r\n\r\nHTTP/2 201\r\nx: y\r\n\r\n' > "${dump}"
+  [[ "$(gh_api_http_status "${dump}")" == "201" ]]
+  printf 'HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 403 rate limit exceeded\r\n\r\n' > "${dump}"
+  [[ "$(gh_api_http_status "${dump}")" == "403" ]]
+  # A header that merely mentions HTTP is not a status line, and no response at
+  # all yields nothing rather than a bogus code.
+  printf 'via: HTTP/1.1 200 proxy\r\nx-ratelimit-remaining: 4999\r\n\r\n' > "${dump}"
+  [[ -z "$(gh_api_http_status "${dump}")" ]]
+  : > "${dump}"
+  [[ -z "$(gh_api_http_status "${dump}")" ]]
+  rm -f "${dump}"
+  echo "gh_api_http_status passed"
+}
+
+test_requested_reviewers() {
+  local out
+  # What the read-back reports for a PR somebody was asked to look at.
+  out="$(printf '%s\n' '{"users":[{"login":"nahcnuj","id":1}],"teams":[]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
+  [[ "${out}" == "nahcnuj" ]]
+  # Nobody asked: the answer is empty, not an error (the caller reads it as
+  # "the hand-off really is lost" only when it is non-empty).
+  out="$(printf '%s\n' '{"users":[],"teams":[]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
+  [[ -z "${out}" ]]
+  # A team request carries a slug, never a login, so it is not mistaken for a
+  # reviewer; a user asked next to a team still is.
+  out="$(printf '%s\n' '{"users":[{"login":"conahcnuj[bot]","id":2}],"teams":[{"slug":"reviewers","id":3}]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
+  [[ "${out}" == "conahcnuj[bot]" ]]
+  echo "gh_api_requested_reviewers passed"
+}
+
 test_post_comment() {
   local out
   out="$(printf '%s\n' "${MOCK_COMMENT}" | gh_api_post_comment "nahcnuj" "conahcnuj" 15 "Addressed feedback")"
@@ -365,6 +407,8 @@ test_find_pr_by_head
 test_create_pr
 test_update_pr
 test_request_review
+test_http_status
+test_requested_reviewers
 test_post_comment
 test_create_issue
 test_merge_pr

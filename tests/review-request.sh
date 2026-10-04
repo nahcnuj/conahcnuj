@@ -5,7 +5,9 @@
 # once the repository owner is assigned as the PR's reviewer. A reviewer GitHub
 # refuses to assign (e.g. the PR author, or a request that is already pending)
 # must not fail the run: the unnamed ask-for-review is the fallback, and only
-# when that fails too is the hand-off reported as an error.
+# when that fails too is the hand-off reported as an error — and even then the PR
+# is read back first, because the request endpoint answers with a status and a
+# status does not prove nobody was asked (issue #134).
 #
 # Sources bin/conahcnuj.sh via CONAHCNUJ_IMPORT=1 (main() must not run) and
 # stubs gh_api_request_review so the calls are observable without any network
@@ -24,6 +26,8 @@ trap 'rm -f "${CALLS}"' EXIT
 
 FAIL_NAMED="false"
 FAIL_UNNAMED="false"
+# What the PR really holds, as gh_api_requested_reviewers would report it.
+REQUESTED=""
 
 # Stub of gh_api_request_review that records the requested reviewer ("named" for
 # the 4-arg form) and fails on demand. Records to a file so the order survives
@@ -38,6 +42,11 @@ gh_api_request_review() {
     return 1
   fi
   return 0
+}
+
+gh_api_requested_reviewers() {
+  [[ -n "${REQUESTED}" ]] || return 0
+  printf '%s\n' "${REQUESTED}"
 }
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -65,5 +74,16 @@ FAIL_UNNAMED="true"
 out="$(request_review_from_owner "nahcnuj" "conahcnuj" 15 2>&1)" && fail "a failed hand-off must report an error"
 [[ "${out}" == *"ERROR: could not request review on PR #15."* ]] || fail "the failed hand-off was not reported: ${out}"
 echo "request_review_from_owner reports a failed hand-off: passed"
+
+# ...unless the PR already carries the request. GitHub recorded it and the call
+# still reported a failure (a transport error or a 5xx after the fact), which is
+# what killed the run behind issue #134: every constraint had passed, the review
+# was asked for, and the driver exited 1 and filed a bug report.
+REQUESTED="nahcnuj"
+: > "${CALLS}"
+out="$(request_review_from_owner "nahcnuj" "conahcnuj" 15 2>&1)" || fail "a review request the PR already holds must count as done"
+[[ "${out}" == *"Review already requested on PR #15 (nahcnuj)"* ]] || fail "the confirmed hand-off was not reported: ${out}"
+grep -q "ERROR: could not request review" <<<"${out}" && fail "a confirmed hand-off must not be reported as an error: ${out}"
+echo "request_review_from_owner confirms a hand-off GitHub already recorded: passed"
 
 echo "All review-request tests passed"
