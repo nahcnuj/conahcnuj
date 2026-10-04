@@ -77,10 +77,25 @@ gh_api_get_token() {
   bash "${GH_APP_DIR}/get-token.sh"
 }
 
+# The HTTP status of a response curl recorded with -D. curl writes one header
+# block per response, so the answer is the LAST status line in the dump: reading
+# only the first line mistakes a proxy's "HTTP/1.1 200 Connection established"
+# (or any informational 1xx block) for the response itself and silently turns a
+# real API answer into the wrong verdict. Prints nothing when there is none.
+gh_api_http_status() {
+  tr -d '\r' < "${1}" 2>/dev/null |
+    sed -n 's#^HTTP/[0-9.]* \([0-9][0-9][0-9]\).*$#\1#p' |
+    tail -n 1
+}
+
 # HTTP layer. Args: method url [request-body]
 # Real mode: performs the call; on 403/429 waits for the rate limit using
 # Retry-After / X-RateLimit-Reset headers and retries (max 5 tries).
 # Test mode: echoes the single stdin "response" line unchanged.
+# A call that ends up without a 2xx says so on stderr: callers routinely throw
+# this function's stdout away and the response body is the only place GitHub
+# states why, so a failure that reached nothing but the exit status would leave
+# a bug report with no clue at all (issue #134).
 gh_api_call() {
   local method="${1:-GET}"
   local url="${2}"
@@ -91,7 +106,7 @@ gh_api_call() {
     return 0
   fi
 
-  local token headers body code attempt
+  local token headers body code attempt curl_status detail
   token="$(gh_api_get_token)"
   headers="$(mktemp)"
   body="$(mktemp)"
@@ -108,6 +123,7 @@ gh_api_call() {
   attempt=0
   while [[ ${attempt} -lt 5 ]]; do
     attempt=$((attempt + 1))
+    curl_status=0
     local -a args=(
       -sS -D "${headers}" -o "${body}" -X "${method}"
       -H "Authorization: Bearer ${token}"
@@ -116,8 +132,8 @@ gh_api_call() {
     if [[ -n "${data}" ]]; then
       args+=(-H "Content-Type: application/json" --data-binary "@${datafile}")
     fi
-    curl "${args[@]}" "${url}" || true
-    code="$(tr -d '\r' < "${headers}" | sed -n '1s/.* \([0-9][0-9][0-9]\)$/\1/p')"
+    curl "${args[@]}" "${url}" || curl_status=$?
+    code="$(gh_api_http_status "${headers}")"
     if [[ "${code}" == "403" || "${code}" == "429" ]]; then
       rate_limit_wait "$(tr -d '\r' < "${headers}")"
       continue
@@ -126,6 +142,13 @@ gh_api_call() {
   done
   GH_API_LAST_HTTP_CODE="${code}"
   rm -f "${headers}" "${datafile}"
+  if [[ "${code}" != "200" && "${code}" != "201" ]]; then
+    detail="${code:-no response}"
+    if [[ "${curl_status}" -ne 0 ]]; then
+      detail="${detail}, curl exit ${curl_status}"
+    fi
+    echo "ERROR: ${method} ${url} -> ${detail}: $(head -c 300 "${body}" | tr -d '\r\n')" >&2
+  fi
   cat "${body}"
   rm -f "${body}"
   case "${code}" in
@@ -280,25 +303,128 @@ gh_api_fetch_pr_state() {
     "${is_draft}" "${mergeable}" "${mss}" "${decision}" "${head}" "${base}" "${head_oid}" "${linked}"
 }
 
-# Non-reviewer merge constraints. Output: checks_state|mergeable|mergeStateStatus
-# checks_state is SUCCESS when there is no status check on the head commit.
+# Workflows whose checks the driver must not treat as a constraint. Both of
+# them attach a check run to the PR head commit while they are still running,
+# and neither can finish while this driver run is alive:
+#   - "Issue auto-drive" is the driver's own run: counting it makes the driver
+#     wait for itself before it can do anything.
+#   - "Owner-approved auto-merge" merges the PR only once every other check on
+#     the approved head commit is green - this driver's run included - so
+#     counting it here deadlocks the two against each other. Neither check can
+#     ever pass, the driver burns its whole time budget in poll_conditions and
+#     the merge job fails on its own check timeout (issue #115). Each side
+#     waits for CI only: the merge job skips the driver by workflow name the
+#     same way the driver skips the merge job here.
+# A run a maintainer cancelled (or that timed out) also stays on the head commit
+# as a failure no code change can ever fix, so both are left out of the
+# aggregate entirely. Comma separated; empty disables the filter.
+# `-` (not `:-`) so an explicitly empty value really disables the filter: the
+# caller has to be able to turn it off from the environment alone.
+CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approved auto-merge}"
+
+# Aggregate a statusCheckRollup payload (stdin) into SUCCESS / PENDING /
+# FAILURE, leaving out the checks that belong to the workflows named in $1.
+# Precedence follows GitHub's own rollup: a failing check beats a pending one,
+# and NEUTRAL / SKIPPED count as success.
+# A payload that carries no context list (an older response, or one that could
+# not be enumerated) cannot be filtered, so its own aggregate "state" is trusted
+# as-is; an empty result means "no checks at all", which the caller reads as
+# SUCCESS.
+gh_api_rollup_state() {
+  local skip="${1:-}" json contexts node type state status conclusion workflow result="" pending="false"
+
+  json="$(gh_api_read_line)"
+  if [[ "${json}" != *'"contexts"'* ]]; then
+    gh_api_json_str "${json}" "state"
+    return 0
+  fi
+  # More contexts than one page holds: the aggregate would be computed from an
+  # incomplete list, so trust the rollup's own state instead of guessing.
+  if printf '%s' "${json}" | grep -q '"contexts":{"nodes":\[.*\],"pageInfo":{"hasNextPage":true}'; then
+    gh_api_json_str "${json}" "state"
+    return 0
+  fi
+  # Every context is a flat object, so the only "},{" inside the array separates
+  # two of them: splitting there yields one context per line.
+  contexts="$(printf '%s' "${json}" | sed -n 's/.*"contexts":{"nodes":[[:space:]]*\(\[[^]]*\]\).*/\1/p')"
+  while IFS= read -r node; do
+    [[ -n "${node}" ]] || continue
+    type="$(gh_api_json_str "${node}" "__typename")"
+    case "${type}" in
+      StatusContext)
+        state="$(gh_api_json_str "${node}" "state")"
+        case "${state}" in
+          SUCCESS) ;;
+          PENDING|EXPECTED) pending="true" ;;
+          "") pending="true" ;;
+          *) result="FAILURE" ;;
+        esac
+        ;;
+      CheckRun)
+        # A check run that belongs to one of the skipped workflows is left out of
+        # the aggregate entirely: neither its pending nor its failed state may
+        # gate the run that is doing the polling.
+        workflow="$(printf '%s' "${node}" | sed -n 's/.*"workflow":{"name":"\([^"]*\)".*/\1/p')"
+        if [[ -n "${workflow}" && ",${skip}," == *",${workflow},"* ]]; then
+          continue
+        fi
+        status="$(gh_api_json_str "${node}" "status")"
+        if [[ "${status}" != "COMPLETED" ]]; then
+          pending="true"
+          continue
+        fi
+        conclusion="$(gh_api_json_str "${node}" "conclusion")"
+        case "${conclusion}" in
+          SUCCESS|NEUTRAL|SKIPPED) ;;
+          "") pending="true" ;;
+          null) pending="true" ;;
+          *) result="FAILURE" ;;
+        esac
+        ;;
+      *)
+        # Not a member we know how to read: wait rather than call it green.
+        pending="true"
+        ;;
+    esac
+  done < <(printf '%s\n' "${contexts}" | sed 's/},{/}\n{/g')
+
+  if [[ "${result}" == "FAILURE" ]]; then
+    printf '%s\n' "FAILURE"
+  elif [[ "${pending}" == "true" ]]; then
+    printf '%s\n' "PENDING"
+  else
+    printf '%s\n' "SUCCESS"
+  fi
+}
+
+# Non-reviewer merge constraints. Output: checks_state|mergeable|mergeStateStatus|state
+# checks_state is SUCCESS when there is no status check on the head commit, and
+# the checks of the workflows in CONAHCNUJ_OWN_WORKFLOWS (the driver's own run
+# and the merge job that waits for it) never count against the run that is
+# polling. state is the PR state, so the caller can tell "still open" from
+# "merged/closed while we waited"; it is empty when the payload does not carry
+# it, which the caller reads as unknown (keep polling).
 gh_api_fetch_pr_conditions() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, state, commits(last: 1) { nodes { commit { statusCheckRollup { state, contexts(first: 100) { nodes { __typename, ... on CheckRun { name, status, conclusion, checkSuite { workflowRun { workflow { name } } } }, ... on StatusContext { context, state } }, pageInfo { hasNextPage } } } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
     json="$(gh_api_graphql "${query}")"
   fi
 
-  local state mergeable mss
-  state="$(gh_api_json_str "${json}" "state")"
+  local state mergeable mss pr_state
+  state="$(printf '%s' "${json}" | gh_api_rollup_state "${CONAHCNUJ_OWN_WORKFLOWS}")"
   if [[ -z "${state}" ]]; then
     state="SUCCESS"
   fi
   mergeable="$(gh_api_json_str "${json}" "mergeable")"
   mss="$(gh_api_json_str "${json}" "mergeStateStatus")"
-  printf '%s|%s|%s\n' "${state}" "${mergeable}" "${mss}"
+  # The PR's own state, anchored to the field right after mergeStateStatus:
+  # statusCheckRollup has a "state" of its own and a bare key match would pick
+  # up that aggregate instead (fields come back in query order).
+  pr_state="$(printf '%s' "${json}" | sed -n 's/.*"mergeStateStatus"[[:space:]]*:[[:space:]]*"[^"]*",[[:space:]]*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  printf '%s|%s|%s|%s\n' "${state}" "${mergeable}" "${mss}" "${pr_state}"
 }
 
 # Review status + raw payload.
@@ -471,11 +597,57 @@ gh_api_update_pr() {
   gh_api_call PATCH "https://api.github.com/repos/${owner}/${repo}/pulls/${number}" "${payload}" >/dev/null
 }
 
-# Request reviewers on a PR (empty list = ask for review). Args: owner repo pr
+# Request review on a PR. Args: owner repo pr [reviewer]
+# A named reviewer assigns the request to that account; omitting it asks for
+# review without naming anyone.
 gh_api_request_review() {
-  local owner="${1}" repo="${2}" number="${3}"
-  local body='{"reviewers":[]}'
+  local owner="${1}" repo="${2}" number="${3}" reviewer="${4:-}"
+  local body
+  if [[ -n "${reviewer}" ]]; then
+    body="{\"reviewers\":[\"$(gh_api_escape "${reviewer}")\"]}"
+  else
+    body='{"reviewers":[]}'
+  fi
   gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/requested_reviewers" "${body}"
+}
+
+# The reviewers GitHub currently has requested on a PR, one per line (nothing
+# when nobody is asked; a team slug is written "team:<slug>"). Non-zero exit when
+# the PR could not be read at all, so the caller can tell "GitHub says nobody is
+# asked" from "I could not look" — only the first is proof that a hand-off was
+# lost. The request endpoint answers with a status alone, and a status is not
+# proof: a transport error or a 5xx that arrives after GitHub has already
+# recorded the request reads exactly like a refusal (issue #134, where the driver
+# died with "could not request review" on a PR that did carry a
+# review_requested event). Reading the PR back tells the two apart, so a
+# hand-off GitHub accepted is never retried into a duplicate or reported as lost.
+gh_api_requested_reviewers() {
+  local owner="${1}" repo="${2}" number="${3}" json logins teams
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_call GET "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/requested_reviewers")" || return 1
+  fi
+  # The payload is {"users":[…],"teams":[…]}: a user object carries a "login" and
+  # a team object a "slug". Both are a hand-off to a human, so both are reported;
+  # a team-only request read as "nobody was asked" would fail a run on a PR
+  # GitHub had already asked. This is the one REST payload in this file, so the
+  # separator has to be read the way REST actually answers: pretty-printed, with
+  # a space after the colon ("login": "x"), unlike the compact GraphQL payloads
+  # and the one-line mock tape. A compact-only pattern finds nothing in a real
+  # response, so the read-back reported "nobody was asked" on a PR GitHub had
+  # already recorded a request on and the driver kept dying on the hand-off
+  # (issue #136: PR #687 carried reviewRequests=[nahcnuj] and the run still
+  # exited 1 with "could not request review").
+  logins="$(printf '%s' "${json}" |
+    grep -oE '"login"[[:space:]]*:[[:space:]]*"[^"]*"' |
+    sed 's/^"login"[[:space:]]*:[[:space:]]*"//; s/"$//' || true)"
+  teams="$(printf '%s' "${json}" |
+    grep -oE '"slug"[[:space:]]*:[[:space:]]*"[^"]*"' |
+    sed 's/^"slug"[[:space:]]*:[[:space:]]*"//; s/"$//; s/^/team:/' || true)"
+  [[ -n "${logins}" ]] && printf '%s\n' "${logins}"
+  [[ -n "${teams}" ]] && printf '%s\n' "${teams}"
+  return 0
 }
 
 # Post a PR/issue comment. Args: owner repo pr body  (output: comment id)
