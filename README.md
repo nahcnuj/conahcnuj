@@ -131,6 +131,11 @@ approve すると auto-merge を有効化します。必要な status checks が
 GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
 auto-merge が有効になっている必要があります。
 
+承認からマージまでのあいだに別の PR が base ブランチへ入ると、head が base に
+遅れて GitHub が即時マージを拒否します。この Workflow はその場合に `--auto` で
+マージをキューイングするので（head が最新に戻れば自動的にマージされる）、
+ジョブが失敗にはなりません。キューイングもできない場合はエラーとして報告します。
+
 ### 他のリポジトリで使う（Reusable Workflow）
 
 `.github/workflows/owner-approved-auto-merge.yml` は、`workflow_call` で

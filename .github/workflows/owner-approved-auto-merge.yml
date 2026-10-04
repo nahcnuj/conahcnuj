@@ -199,10 +199,25 @@ jobs:
             --repo "$REPOSITORY" \
             "$MERGE_FLAG" \
             --match-head-commit "$HEAD_SHA" 2>&1)"; then
+            # An immediate merge is refused while the head branch is behind the
+            # base (another PR merged first). That is not this run failing, so
+            # queue the merge instead: GitHub lands it as soon as the branch is
+            # up to date again, without anyone re-approving the same head.
             printf '%s\n' "$merge_output" >&2
-            echo "merge failed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
-            echo "if 'enable / enable' is a required status check, remove it from the branch protection rules" >&2
-            exit 1
+            if auto_output="$(gh pr merge "$PR_NUMBER" \
+              --repo "$REPOSITORY" \
+              "$MERGE_FLAG" \
+              --auto \
+              --match-head-commit "$HEAD_SHA" 2>&1)"; then
+              echo "immediate merge was refused; auto-merge is queued for $REPOSITORY#$PR_NUMBER" >&2
+              merge_output="${auto_output}"
+            else
+              printf '%s\n' "$auto_output" >&2
+              echo "merge failed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
+              echo "if 'enable / enable' is a required status check, remove it from the branch protection rules" >&2
+              echo "if auto-merge could not be queued either, the repository needs Settings -> General -> Pull Requests -> Allow auto-merge" >&2
+              exit 1
+            fi
           fi
           printf '%s\n' "$merge_output"
 
