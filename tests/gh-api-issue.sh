@@ -377,10 +377,14 @@ test_requested_reviewers() {
   # "the hand-off really is lost" only when it is non-empty).
   out="$(printf '%s\n' '{"users":[],"teams":[]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
   [[ -z "${out}" ]]
-  # A team request carries a slug, never a login, so it is not mistaken for a
-  # reviewer; a user asked next to a team still is.
+  # A team is a reviewer too: it carries a slug instead of a login, and a
+  # team-only request read as "nobody was asked" would fail a run on a PR
+  # GitHub had already asked. Both are reported, the team prefixed.
   out="$(printf '%s\n' '{"users":[{"login":"conahcnuj[bot]","id":2}],"teams":[{"slug":"reviewers","id":3}]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
-  [[ "${out}" == "conahcnuj[bot]" ]]
+  [[ "${out}" == "conahcnuj[bot]
+team:reviewers" ]]
+  out="$(printf '%s\n' '{"users":[],"teams":[{"slug":"reviewers","id":3}]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
+  [[ "${out}" == "team:reviewers" ]]
   echo "gh_api_requested_reviewers passed"
 }
 
@@ -388,12 +392,18 @@ test_requested_reviewers() {
 # the REST API sends and what the one-line mock tape cannot express. gh_api_call
 # is the only seam that can hand back a multi-line body, so it is stubbed here;
 # without the whitespace tolerance of the parser the run's hand-off would be
-# reported as lost on a real response (issue #136).
+# reported as lost on a real response (issue #136). The second read uses a
+# gh_api_call that fails: a read that failed is reported as a failure, never as
+# an empty answer, because only an answer that lists nobody proves a hand-off
+# was lost (issue #139).
 test_requested_reviewers_pretty() {
   local out
   out="$(
     export GH_API_TEST_MODE=0
     gh_api_call() {
+      if [[ "${READ_FAILS:-false}" == "true" ]]; then
+        return 1
+      fi
       printf '%s' '{
   "users": [
     {
@@ -406,8 +416,11 @@ test_requested_reviewers_pretty() {
 }'
     }
     gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15
+    READ_FAILS=true
+    gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15 || printf 'unreadable\n'
   )"
-  [[ "${out}" == "nahcnuj" ]]
+  [[ "${out}" == "nahcnuj
+unreadable" ]]
   echo "gh_api_requested_reviewers (pretty-printed payload) passed"
 }
 

@@ -611,36 +611,43 @@ gh_api_request_review() {
   gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/requested_reviewers" "${body}"
 }
 
-# The reviewers GitHub currently has requested on a PR, one login per line
-# (nothing when nobody is asked). The request endpoint answers with a status
-# alone, and a status is not proof: a transport error or a 5xx that arrives
-# after GitHub has already recorded the request reads exactly like a refusal
-# (issue #134, where the driver died with "could not request review" on a PR
-# that did carry a review_requested event). Reading the PR back tells the two
-# apart, so a hand-off GitHub accepted is never retried into a duplicate or
-# reported as lost.
+# The reviewers GitHub currently has requested on a PR, one per line (nothing
+# when nobody is asked; a team slug is written "team:<slug>"). Non-zero exit when
+# the PR could not be read at all, so the caller can tell "GitHub says nobody is
+# asked" from "I could not look" — only the first is proof that a hand-off was
+# lost. The request endpoint answers with a status alone, and a status is not
+# proof: a transport error or a 5xx that arrives after GitHub has already
+# recorded the request reads exactly like a refusal (issue #134, where the driver
+# died with "could not request review" on a PR that did carry a
+# review_requested event). Reading the PR back tells the two apart, so a
+# hand-off GitHub accepted is never retried into a duplicate or reported as lost.
 gh_api_requested_reviewers() {
-  local owner="${1}" repo="${2}" number="${3}" json logins
+  local owner="${1}" repo="${2}" number="${3}" json logins teams
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
     json="$(gh_api_call GET "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/requested_reviewers")" || return 1
   fi
-  # The payload is {"users":[…],"teams":[…]}: only the user objects carry a
-  # "login" (a team carries a "slug"), so every login in it is a reviewer.
-  # This is the one REST payload in this file, so the separator has to be read
-  # the way REST actually answers: pretty-printed, with a space after the colon
-  # ("login": "x"), unlike the compact GraphQL payloads and the one-line mock
-  # tape. A compact-only pattern finds nothing in a real response, so the
-  # read-back reported "nobody was asked" on a PR GitHub had already recorded a
-  # request on and the driver kept dying on the hand-off (issue #136: PR #687
-  # carried reviewRequests=[nahcnuj] and the run still exited 1 with "could not
-  # request review").
+  # The payload is {"users":[…],"teams":[…]}: a user object carries a "login" and
+  # a team object a "slug". Both are a hand-off to a human, so both are reported;
+  # a team-only request read as "nobody was asked" would fail a run on a PR
+  # GitHub had already asked. This is the one REST payload in this file, so the
+  # separator has to be read the way REST actually answers: pretty-printed, with
+  # a space after the colon ("login": "x"), unlike the compact GraphQL payloads
+  # and the one-line mock tape. A compact-only pattern finds nothing in a real
+  # response, so the read-back reported "nobody was asked" on a PR GitHub had
+  # already recorded a request on and the driver kept dying on the hand-off
+  # (issue #136: PR #687 carried reviewRequests=[nahcnuj] and the run still
+  # exited 1 with "could not request review").
   logins="$(printf '%s' "${json}" |
     grep -oE '"login"[[:space:]]*:[[:space:]]*"[^"]*"' |
     sed 's/^"login"[[:space:]]*:[[:space:]]*"//; s/"$//' || true)"
-  [[ -n "${logins}" ]] || return 0
-  printf '%s\n' "${logins}"
+  teams="$(printf '%s' "${json}" |
+    grep -oE '"slug"[[:space:]]*:[[:space:]]*"[^"]*"' |
+    sed 's/^"slug"[[:space:]]*:[[:space:]]*"//; s/"$//; s/^/team:/' || true)"
+  [[ -n "${logins}" ]] && printf '%s\n' "${logins}"
+  [[ -n "${teams}" ]] && printf '%s\n' "${teams}"
+  return 0
 }
 
 # Post a PR/issue comment. Args: owner repo pr body  (output: comment id)
