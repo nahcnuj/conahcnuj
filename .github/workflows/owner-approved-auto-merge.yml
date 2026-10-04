@@ -84,33 +84,93 @@ jobs:
           #
           # gh pr checks --watch で待つと、このジョブ自身の check run（承認された
           # head SHA に紐付いたまま pending）が永久に終わらないため自己デッドロック
-          # する。check runs を API で直接読み、この run のものだけ除外して待つ。
+          # する。checks を API で直接読み、この run のものだけを除いて待つ。
+          #
+          # このリポジトリのドライバ（Issue auto-drive）も、動いている間だけ head
+          # commit に check run を残す。だから ここでその check を待つと両者が
+          # 互いを受け待ちになる（issue #115: ドライバはこのジョブの check を制約
+          # として待ち、このジョブはドライバの check を待たれて CHECK_TIMEOUT で
+          # 失敗する）。ドライバ側も CONAHCNUJ_OWN_WORKFLOWS で同じ workflow 名を
+          # 除外しているので（lib/gh-api.sh）、ここでも workflow 名で除外して
+          # CI だけを待つ。
           CHECK_INTERVAL=30
           CHECK_TIMEOUT=1500
-          SELF_RUN="/actions/runs/${GITHUB_RUN_ID}/"
+          SELF_RUN_ID="$GITHUB_RUN_ID"
+          IGNORED_WORKFLOWS="${IGNORED_WORKFLOWS:-Issue auto-drive}"
+          OWNER="${REPOSITORY%%/*}"
+          REPO_NAME="${REPOSITORY#*/}"
 
+          # 残っている check / commit status を 1 行ずつ "pending|failed<TAB>check|
+          # status<TAB>名前<TAB>状態" で出す。出力が空なら待てるものは全部 green。
+          # workflow 名は REST の check-runs には付かないので GraphQL の
+          # statusCheckRollup から取る（commit status も同じ扱いで混ざる）。context を
+          # 列挙できないページ / checks の無いコミットは「保留」として待つ（勝手に
+          # 「全部 green」と合計すると、そのまま merge してしまう）。
           outstanding_checks() {
-            {
-              gh api "repos/$REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" \
-                | jq -r --arg self "$SELF_RUN" '
-                    [(.check_runs // [])[]
-                     | select(((((.details_url // "") + (.html_url // "")) | contains($self)) | not))
-                     | (if .status != "completed" then "pending"
-                        elif ((.conclusion // "") | IN("success", "neutral", "skipped")) then ""
-                        else "failed" end) as $state
-                     | select($state != "")
-                     | "\($state)\tcheck\t\(.name)\t\(.conclusion // .status)"]
-                    | .[]'
-              gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" \
-                | jq -r '
-                    [(.statuses // [])[]
-                     | (if .state == "pending" then "pending"
-                        elif .state == "success" then ""
-                        else "failed" end) as $state
-                     | select($state != "")
-                     | "\($state)\tstatus\t\(.context)\t\(.state)"]
-                    | .[]'
-            }
+            gh api graphql \
+              -F owner="$OWNER" \
+              -F name="$REPO_NAME" \
+              -F sha="$HEAD_SHA" \
+              -f query='
+                query($owner: String!, $name: String!, $sha: GitObjectID!) {
+                  repository(owner: $owner, name: $name) {
+                    object(oid: $sha) {
+                      ... on Commit {
+                        statusCheckRollup {
+                          contexts(first: 100) {
+                            pageInfo { hasNextPage }
+                            nodes {
+                              __typename
+                              ... on CheckRun {
+                                name status conclusion
+                                checkSuite {
+                                  workflowRun { databaseId workflow { name } }
+                                }
+                              }
+                              ... on StatusContext { context state }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }' \
+              | jq -r \
+                  --arg owner "$OWNER" \
+                  --arg name "$REPO_NAME" \
+                  --arg sha "$HEAD_SHA" \
+                  --arg self_run "$SELF_RUN_ID" \
+                  --arg ignore "$IGNORED_WORKFLOWS" '
+                    .data.repository.object as $object
+                    | if $object == null then
+                        error("no commit " + $sha + " in " + ($owner + "/" + $name)
+                              + "; refusing to merge blind")
+                      else $object end
+                    | (.statusCheckRollup // null) as $rollup
+                    | (
+                        if ($rollup == null or ($rollup.contexts.pageInfo.hasNextPage // false))
+                        then "pending\tcheck\t(no enumerable check list)\tpending"
+                        else empty end,
+                        (($rollup.contexts.nodes // [])[]
+                          # この run 自身の check は、承認 head に紐付いたまま pending。
+                          | select(((.checkSuite.workflowRun.databaseId | tostring) != $self_run))
+                          # 除外 workflow の check（このリポジトリのドライバ）も待たない。
+                          | select((.checkSuite.workflowRun.workflow.name // "") as $wf
+                                   | (($ignore | split(",") | index($wf)) == null))
+                          | (if .__typename == "CheckRun"
+                             then (if .status != "COMPLETED" then "pending"
+                                   elif ((.conclusion // "") | IN("SUCCESS", "NEUTRAL", "SKIPPED")) then ""
+                                   else "failed" end)
+                             elif .__typename == "StatusContext"
+                             then (if .state == "SUCCESS" then ""
+                                   elif ((.state // "") | IN("PENDING", "EXPECTED", "")) then "pending"
+                                   else "failed" end)
+                             # 読み方を知らない context は「保留」扱い（勝手に合計しない）。
+                             else "pending" end) as $state
+                          | select($state != "")
+                          | "\($state)\t\(if .__typename == "CheckRun" then "check" else "status" end)\t\(.name // .context // "unknown context")\t\(.conclusion // .status // .state // "unknown")"
+                        )
+                      )'
           }
 
           deadline=$(( $(date +%s) + CHECK_TIMEOUT ))
