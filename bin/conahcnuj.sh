@@ -19,13 +19,9 @@
 #      Verified commit, re-verifies the non-reviewer constraints, replies on
 #      the PR and re-requests review before exiting
 #   4. on an abnormal exit (timeout, no model completed the work, unexpected
-#      errors, a closed PR, a failed review hand-off) automatically files a bug
-#      report in the repository's "Bug report" discussion category so a run the
-#      driver could not resolve is never silently lost. The report carries the
-#      tail of the run's console output as a detailed error log. A discussion,
-#      not an issue: an issue would re-trigger this driver's workflow. Failures
-#      of the same kind (same thread title) are appended to the existing thread
-#      instead of opening a new one
+#      errors) automatically files a bug report issue in the repository so a
+#      run the driver could not resolve is never silently lost. The report
+#      carries the tail of the run's console output as a detailed error log
 #
 # Usage: conahcnuj <issue-or-pr-number>
 #

@@ -95,16 +95,10 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    `owner-approved-auto-merge.yml` の担当で、ドライバ自身は自動マージしない。
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開・
    レビュー依頼の失敗で PR を引き渡せなかった場合など、終了コード非 0 で
-   終わる場合）は、ドライバが対象リポジトリの Bug report ディスカッション
-   カテゴリへバグ報告を自動投稿する（`lib/gh-api.sh` の discussion ヘルパー。
-   終了コード・対象 #番号・ブランチ・HEAD・実行ログ末尾を含む）。
-   issue ではなく discussion へ書く: issue は issue-driver ワークフローを
-   再発火させ、ドライバ自身の報告を「解決すべき作業」として追いかけてしまう
-   ため（報告チェーン issues #33/#34 の反省）。同じタイトル（＝同種の失敗）の
-   報告は既存スレッドへ返信として追記され、新規スレッドは作られない。
-   カテゴリは `CONAHCNUJ_BUG_REPORT_CATEGORY` で変更できる（既定
-   `Bug report`）。報告の投稿には App の **Discussions 権限（読み書き）**
-   が必要。
+   終わる場合）は、ドライバが対象
+   リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
+   `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
+   実行ログ末尾を含む）。
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
