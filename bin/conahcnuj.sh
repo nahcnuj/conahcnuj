@@ -13,7 +13,10 @@
 #      mergeability) passes, then assigns the repository owner as reviewer.
 #      That hand-off to a human is the last thing a run owes the PR, so the
 #      driver exits there; an already APPROVED PR exits earlier as "ready to
-#      merge". Never auto-merges.
+#      merge". Never auto-merges. The request is retried once, and the PR is
+#      read back before a hand-off is called lost; only a PR that GitHub says
+#      has nobody asked fails the run, while a hand-off that cannot be verified
+#      at all ends the run with a warning (issues #134 / #139).
 #   3. when the run was resumed with fresh review feedback (comments /
 #      requested changes / security-review threads), addresses it, pushes a
 #      Verified commit, re-verifies the non-reviewer constraints, replies on
@@ -28,6 +31,8 @@
 # Environment overrides (all optional):
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
+#   CONAHCNUJ_HANDOFF_RETRY_SECONDS  pause before the single review-request
+#                            retry (default: 15 s; 0 disables the pause)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
 #   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
@@ -79,6 +84,11 @@ fi
 # up by `git add -A`.
 PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
 PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
+
+# Whether the last request_review_from_owner call could confirm the reviewer
+# assignment. log_review_handoff words its final line after it, so the run log
+# never claims a review request the run could not verify.
+REVIEW_HANDOFF_CONFIRMED="true"
 
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
@@ -754,38 +764,88 @@ poll_conditions() {
 # which is the last deliverable of a run. A reviewer who cannot be assigned
 # (GitHub refuses e.g. the author of the PR) or a request that is already
 # pending must not fail the run, so fall back to the unnamed ask-for-review.
-# Both attempts reporting a failure is not proof that nobody was asked either:
-# the request endpoint answers with a status, and a transport error or a 5xx
-# that arrives after GitHub recorded the request is indistinguishable from a
-# refusal. The PR is therefore read back before the hand-off is called lost —
-# issue #134 died with "could not request review" on a PR GitHub had just
-# recorded a review_requested event for, and filed a bug report for a run whose
-# work was in fact complete. Args: owner repo pr
+# Each attempt is retried once: the endpoint is idempotent (asking for the same
+# reviewer twice records no second request), and a single failure is not proof
+# of anything — a transport error or a 5xx that arrives after GitHub recorded
+# the request is indistinguishable from a refusal. Both POSTs reporting a
+# failure is not proof that nobody was asked either, so the PR is read back
+# before the hand-off is called lost: issue #134 died with "could not request
+# review" on a PR GitHub had just recorded a review_requested event for, and
+# issue #139 died the same way two minutes after GitHub had recorded the owner
+# as the reviewer of PR #138 — a run whose work was complete, reported as a
+# driver failure. Args: owner repo pr
 request_review_from_owner() {
-  local owner="${1}" repo="${2}" pr="${3}" requested
-  # stderr is kept so gh_api_call's "-> <status>: <body>" reaches the run log:
-  # without it a failed hand-off explains nothing in the bug report.
-  if gh_api_request_review "${owner}" "${repo}" "${pr}" "${owner}" >/dev/null; then
+  local owner="${1}" repo="${2}" pr="${3}" requested="" read_state="answered"
+  REVIEW_HANDOFF_CONFIRMED="true"
+  if request_review_with_retry "${owner}" "${repo}" "${pr}" "${owner}"; then
     echo "Assigned ${owner} as reviewer on PR #${pr}." >&2
     return 0
   fi
-  if gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null; then
+  if request_review_with_retry "${owner}" "${repo}" "${pr}"; then
     echo "Review requested on PR #${pr} (${owner} is not assignable; asked for review instead)." >&2
     return 0
   fi
-  requested="$(gh_api_requested_reviewers "${owner}" "${repo}" "${pr}" 2>/dev/null || true)"
+  # Reading the PR back is the only remaining evidence. Its answer has to be
+  # read for what it is: a reviewer listed means the hand-off happened, an empty
+  # answer means GitHub really has nobody asked, and an unreadable PR means the
+  # driver cannot tell the two apart. Only the empty answer is proof of a lost
+  # hand-off, so only that fails the run.
+  if ! requested="$(gh_api_requested_reviewers "${owner}" "${repo}" "${pr}" 2>/dev/null)"; then
+    read_state="unreadable"
+  fi
   if [[ -n "${requested}" ]]; then
     echo "Review already requested on PR #${pr} (${requested//$'\n'/, }); the request call reported a failure but GitHub has it, so the hand-off is done." >&2
+    return 0
+  fi
+  if [[ "${read_state}" == "unreadable" ]]; then
+    REVIEW_HANDOFF_CONFIRMED="false"
+    echo "WARNING: no review request on PR #${pr} was accepted and the PR could not be read back either, so nobody can be confirmed as asked. The PR is complete and waits for a human, so the run ends here instead of filing a bug report for an unverifiable hand-off." >&2
     return 0
   fi
   echo "ERROR: could not request review on PR #${pr}." >&2
   return 1
 }
 
-# Final line of a run whose PR now waits on a human reviewer.
+# One review-request call, retried once after a short pause. stderr is kept so
+# gh_api_call's "-> <status>: <body>" reaches the run log: without it a failed
+# hand-off explains nothing in the bug report. Args: owner repo pr [reviewer]
+request_review_with_retry() {
+  local owner="${1}" repo="${2}" pr="${3}" reviewer="${4:-}" attempt
+  for attempt in 1 2; do
+    if gh_api_request_review "${owner}" "${repo}" "${pr}" "${reviewer}" >/dev/null; then
+      return 0
+    fi
+    if [[ "${attempt}" -eq 1 ]]; then
+      echo "Review request on PR #${pr} reported a failure; retrying once." >&2
+      hand_off_retry_pause
+    fi
+  done
+  return 1
+}
+
+# Pause before the review-request retry. Offline runs never sleep, and 0 (or any
+# value that is not a number) disables the pause.
+hand_off_retry_pause() {
+  local seconds="${CONAHCNUJ_HANDOFF_RETRY_SECONDS:-15}"
+  if [[ "${TEST_MODE}" == "1" ]]; then
+    return 0
+  fi
+  if [[ "${seconds}" =~ ^[0-9]+$ ]] && (( seconds > 0 )); then
+    sleep "${seconds}"
+  fi
+  return 0
+}
+
+# Final line of a run whose PR now waits on a human reviewer. The wording
+# depends on whether the reviewer assignment was actually confirmed, so the log
+# never claims a request that the run could not verify.
 log_review_handoff() {
   local owner="${1}" repo="${2}" pr="${3}" reviewer="${4}"
-  echo "Review requested on PR #${pr} (reviewer: ${reviewer}): https://github.com/${owner}/${repo}/pull/${pr}" >&2
+  if [[ "${REVIEW_HANDOFF_CONFIRMED}" == "true" ]]; then
+    echo "Review requested on PR #${pr} (reviewer: ${reviewer}): https://github.com/${owner}/${repo}/pull/${pr}" >&2
+  else
+    echo "PR #${pr} is ready for a human reviewer: https://github.com/${owner}/${repo}/pull/${pr}" >&2
+  fi
 }
 
 # --- review fingerprint -----------------------------------------------------
