@@ -32,10 +32,6 @@
 #                            the OpenCode display name (plugin) or the model id
 #   CONAHCNUJ_OPENCODE_LOG_LEVEL  opencode --log-level for the run
 #                            (default: WARN; DEBUG to debug a failing model)
-#   CONAHCNUJ_RENDER_MAX_LINES/COLS  per-block caps for tool output in the
-#                            rendered log (defaults: 200 lines / 400 cols).
-#                            The agent's own text and reasoning are never
-#                            clipped; only command output is capped.
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
@@ -43,7 +39,9 @@
 
 # opencode's JSON events are formatted as they arrive (lib/opencode-render.sh,
 # one context header per block) onto stderr, so the console output stays
-# readable and the bug report above carries that text.
+# readable and the bug report above carries that text. The formatter clips
+# nothing: every line the model wrote and every line a command printed reaches
+# the log.
 
 set -euo pipefail
 

@@ -26,17 +26,15 @@
 # events are dropped, and lines that are not JSON pass through verbatim. Its
 # exit status is ignored by the caller for the same reason.
 #
-# Overridable: CONAHCNUJ_RENDER_MAX_LINES (per-block line cap, default 200),
-# CONAHCNUJ_RENDER_MAX_COLS (per-line column cap, default 400). Both cap tool
-# output only: what a command printed is machine data and a runaway build log
-# must not bury the rest of the run, while the agent's own text and reasoning
-# are always printed in full. Nothing the model wrote is ever dropped from the
-# log, and every truncation is announced in place.
+# Nothing is ever clipped: there is no line cap, no column cap and no "...[+N
+# cols]" marker, neither for the agent's own text and reasoning nor for what a
+# command printed. This log is the run's only record of what happened -- an
+# abnormal exit files its tail as a bug report -- so a shortened block would be
+# a hole in the evidence that nobody could tell apart from something the model
+# never said.
 
 set -uo pipefail
 
-MAX_LINES="${CONAHCNUJ_RENDER_MAX_LINES:-200}"
-MAX_COLS="${CONAHCNUJ_RENDER_MAX_COLS:-400}"
 INDENT="  "
 SEP=$'\x1f'
 
@@ -319,38 +317,16 @@ render_header() {
 
 # --- block bodies -----------------------------------------------------------
 
-# Print text indented under its block.
-#
-# The second argument picks the cap policy. "capped" applies both caps and
-# announces whatever was dropped; "full" prints every line exactly as the
-# model wrote it. Tool output is "capped" because it is machine data (a failed
-# build can print a megabyte); the model's own text and reasoning are "full"
-# because they are the point of the log -- a model wraps its prose at a few
-# hundred columns, so the column cap would only ever cut a sentence in half.
+# Print text indented under its block, line by line, exactly as it was
+# produced: every line the model wrote or the command printed comes out whole,
+# and a blank line stays a blank line.
 render_indent() {
-  local value="${1:-}" policy="${2:-capped}"
-  local -a lines=()
-  local line total limit i
+  local value="${1:-}"
+  local line
   [[ -n "${value}" ]] || return 0
-  mapfile -t lines <<< "${value}"
-  total="${#lines[@]}"
-  if [[ "${policy}" == "capped" ]]; then
-    limit="${MAX_LINES}"
-    [[ "${limit}" -le "${total}" ]] || limit="${total}"
-  else
-    limit="${total}"
-  fi
-  for ((i = 0; i < limit; i++)); do
-    line="${lines[i]}"
-    if [[ "${policy}" == "capped" && "${#line}" -gt "${MAX_COLS}" ]]; then
-      printf '%s%s ...[+%s cols]\n' "${INDENT}" "${line:0:MAX_COLS}" "$(( ${#line} - MAX_COLS ))"
-    else
-      printf '%s%s\n' "${INDENT}" "${line}"
-    fi
-  done
-  if [[ "${total}" -gt "${limit}" ]]; then
-    printf '%s... (%s more lines truncated)\n' "${INDENT}" "$(( total - limit ))"
-  fi
+  while IFS= read -r line; do
+    printf '%s%s\n' "${INDENT}" "${line}"
+  done <<< "${value}"
 }
 
 # Assistant text and reasoning read the same way: the header says which step
@@ -358,7 +334,7 @@ render_indent() {
 render_block_text() {
   [[ -n "${F[text]}" ]] || return 0
   render_header
-  render_indent "${F[text]}" full
+  render_indent "${F[text]}"
 }
 
 # A tool call: the command line, whatever it printed, and whether it worked.
