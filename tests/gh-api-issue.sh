@@ -366,6 +366,13 @@ test_requested_reviewers() {
   # What the read-back reports for a PR somebody was asked to look at.
   out="$(printf '%s\n' '{"users":[{"login":"nahcnuj","id":1}],"teams":[]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
   [[ "${out}" == "nahcnuj" ]]
+  # The shape GitHub really sends: the REST API answers pretty-printed, so the
+  # login is written "login": "x", with a space after the colon. Matching the
+  # compact spelling only made the read-back report nobody as asked on a PR
+  # GitHub had already recorded a request on, which killed the run's hand-off
+  # with "could not request review" (issue #136).
+  out="$(printf '%s\n' '{"users": [{"login": "nahcnuj", "id": 1}], "teams": []}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
+  [[ "${out}" == "nahcnuj" ]]
   # Nobody asked: the answer is empty, not an error (the caller reads it as
   # "the hand-off really is lost" only when it is non-empty).
   out="$(printf '%s\n' '{"users":[],"teams":[]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
@@ -375,6 +382,33 @@ test_requested_reviewers() {
   out="$(printf '%s\n' '{"users":[{"login":"conahcnuj[bot]","id":2}],"teams":[{"slug":"reviewers","id":3}]}' | gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15)"
   [[ "${out}" == "conahcnuj[bot]" ]]
   echo "gh_api_requested_reviewers passed"
+}
+
+# The same read-back against a response spread over several lines, which is what
+# the REST API sends and what the one-line mock tape cannot express. gh_api_call
+# is the only seam that can hand back a multi-line body, so it is stubbed here;
+# without the whitespace tolerance of the parser the run's hand-off would be
+# reported as lost on a real response (issue #136).
+test_requested_reviewers_pretty() {
+  local out
+  out="$(
+    export GH_API_TEST_MODE=0
+    gh_api_call() {
+      printf '%s' '{
+  "users": [
+    {
+      "login": "nahcnuj",
+      "id": 2093896,
+      "type": "User"
+    }
+  ],
+  "teams": []
+}'
+    }
+    gh_api_requested_reviewers "nahcnuj" "conahcnuj" 15
+  )"
+  [[ "${out}" == "nahcnuj" ]]
+  echo "gh_api_requested_reviewers (pretty-printed payload) passed"
 }
 
 test_post_comment() {
@@ -409,6 +443,7 @@ test_update_pr
 test_request_review
 test_http_status
 test_requested_reviewers
+test_requested_reviewers_pretty
 test_post_comment
 test_create_issue
 test_merge_pr

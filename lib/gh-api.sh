@@ -628,9 +628,17 @@ gh_api_requested_reviewers() {
   fi
   # The payload is {"users":[…],"teams":[…]}: only the user objects carry a
   # "login" (a team carries a "slug"), so every login in it is a reviewer.
+  # This is the one REST payload in this file, so the separator has to be read
+  # the way REST actually answers: pretty-printed, with a space after the colon
+  # ("login": "x"), unlike the compact GraphQL payloads and the one-line mock
+  # tape. A compact-only pattern finds nothing in a real response, so the
+  # read-back reported "nobody was asked" on a PR GitHub had already recorded a
+  # request on and the driver kept dying on the hand-off (issue #136: PR #687
+  # carried reviewRequests=[nahcnuj] and the run still exited 1 with "could not
+  # request review").
   logins="$(printf '%s' "${json}" |
-    grep -oE '"login":"[^"]*"' |
-    sed 's/^"login":"//; s/"$//' || true)"
+    grep -oE '"login"[[:space:]]*:[[:space:]]*"[^"]*"' |
+    sed 's/^"login"[[:space:]]*:[[:space:]]*"//; s/"$//' || true)"
   [[ -n "${logins}" ]] || return 0
   printf '%s\n' "${logins}"
 }
