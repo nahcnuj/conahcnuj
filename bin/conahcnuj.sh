@@ -663,6 +663,14 @@ PR #${pr} の処理を継続するには、Issue auto-drive を手動実行し�
   return 1
 }
 
+# Remove standalone closing-reference lines ("Closes #<n>", "Fixes #<n>",
+# "Resolves #<n>", also comma-separated lists) from a body and collapse the
+# blank lines the removal leaves behind, so the driver's own single
+# "Closes #<n>" prefix is the only closing reference in the PR body (#143).
+strip_closing_references() {
+  printf '%s\n' "${1}" | sed -E '/^[[:space:]]*([Cc]lose[sd]?|[Ff]ix(e[sd])?|[Rr]esolve[sd]?)[[:space:]]+#[0-9]+([[:space:]]*,[[:space:]]*#[0-9]+)*[[:space:]]*$/d' | awk '/^$/{blank++; if(blank>1) next; print; next} {blank=0; print}'
+}
+
 # Reuse the open PR for this head branch, else create one. Both reuse paths keep
 # the PR body derived from the linked issue ("Closes #<n>\n\n<issue body>"), so a
 # PR that was created without a written body (or with a stale one) gets it set.
@@ -676,6 +684,9 @@ ensure_pr() {
   if [[ -n "${closes}" ]]; then
     # Trim trailing whitespace from issue body to avoid extra blank lines
     body="$(printf '%s' "${body}" | sed 's/[[:space:]]*$//')"
+    # Drop closing-reference lines the issue body may already carry so the PR
+    # body has exactly one "Closes #<n>" (#143).
+    body="$(strip_closing_references "${body}")"
     pr_body="Closes #${closes}
 
 ${body}"

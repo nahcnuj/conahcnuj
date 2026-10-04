@@ -55,6 +55,32 @@ out="$(ensure_pr "nahcnuj" "conahcnuj" "" "conahcnuj/10-x" "main" "Fix something
 grep -q "^UPDATE|42|Closes #10" "${REPORT}" || { echo "FAIL: reuse path did not derive the Closes #n body"; exit 1; }
 echo "ensure_pr reuses existing PR and syncs body: passed"
 
+# Regression test for #143: closing-reference lines already present in the issue
+# body are dropped so the PR body has exactly one "Closes #<n>".
+reset_body_marker
+out="$(ensure_pr "nahcnuj" "conahcnuj" "15" "feature/fix-10" "main" "Fix something" "real issue body
+
+Closes #10
+
+Closes #11, #12
+
+Fixes #9
+
+Resolves #8
+
+trailing text" "10")"
+[[ "${out}" == "15" ]] || { echo "FAIL: ensure_pr output was '${out}' (expected 15)"; exit 1; }
+[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "1" ]] || { echo "FAIL: dedup body sync must issue exactly one PATCH"; exit 1; }
+# The body spans multiple lines, so take everything from the UPDATE line on.
+updated="$(awk '/^UPDATE\|/{flag=1} flag{print}' "${REPORT}")"
+[[ "${updated}" == "UPDATE|15|Closes #10
+
+real issue body
+
+trailing text" ]] || { echo "FAIL: closing references were not deduplicated, got: '${updated}'"; exit 1; }
+[[ "$(printf '%s' "${updated}" | grep -c 'Closes #')" == "1" ]] || { echo "FAIL: PR body must contain exactly one 'Closes #' line"; exit 1; }
+echo "ensure_pr keeps exactly one Closes #n even when the issue body has more: passed"
+
 # No linked issue: body must stay verbatim and NO PATCH may be issued.
 reset_body_marker
 # shellcheck disable=SC2329
