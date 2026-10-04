@@ -9,6 +9,7 @@
 # Usage:
 #   cd <target-repo>
 #   bash <path-to>/docker-run.sh <issue-or-pr-number>
+#   bash <path-to>/docker-run.sh --discussion <discussion-number>   # triage
 #
 # By default the container runs in the foreground and stops as soon as the
 # driver exits. Set CONAHCNUJ_DAEMON=1 (with an optional CONAHCNUJ_NAME) to
@@ -24,7 +25,8 @@
 #   CONAHCNUJ_NAME         container name to use in daemon mode (default: conahcnuj-<epoch>)
 #   OPENCODE_CONFIG_DIR    host opencode config dir (default: ~/.config/opencode)
 #   OPENCODE_DATA_DIR      host opencode data/auth dir (default: ~/.local/share/opencode)
-#   CONAHCNUJ_REPO, CONAHCNUJ_MAX_SECONDS, CONAHCNUJ_POLL_* are passed through.
+#   CONAHCNUJ_REPO, CONAHCNUJ_MAX_SECONDS, CONAHCNUJ_POLL_*,
+#   CONAHCNUJ_BUG_REPORT_CATEGORY are passed through.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,7 +97,8 @@ trap 'rm -rf "${RUN_DIR}"' EXIT
 # Forward driver overrides that are actually set.
 env_args=()
 for name in CONAHCNUJ_REPO CONAHCNUJ_MAX_SECONDS \
-            CONAHCNUJ_POLL_CONDITIONS_MIN CONAHCNUJ_POLL_CONDITIONS_MAX; do
+            CONAHCNUJ_POLL_CONDITIONS_MIN CONAHCNUJ_POLL_CONDITIONS_MAX \
+            CONAHCNUJ_BUG_REPORT_CATEGORY; do
   if [[ -n "${!name:-}" ]]; then
     env_args+=(-e "${name}=${!name}")
   fi

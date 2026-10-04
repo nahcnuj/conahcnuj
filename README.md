@@ -95,10 +95,14 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    `owner-approved-auto-merge.yml` の担当で、ドライバ自身は自動マージしない。
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開・
    レビュー依頼の失敗で PR を引き渡せなかった場合など、終了コード非 0 で
-   終わる場合）は、ドライバが対象
-   リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
-   `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
-   実行ログ末尾を含む）。
+   終わる場合）は、ドライバが対象リポジトリの **Bug report カテゴリへ
+   バグ報告 discussion を自動投稿**する（終了コード・対象 #番号・ブランチ・
+   HEAD・実行ログ末尾を含む）。同種の失敗は同じスレッドにまとめ、
+   再発時は返信として追記する。
+
+```
+conahcnuj --discussion <discussion番号>   # バグ報告 discussion を調査する
+```
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
@@ -108,6 +112,47 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 
 `CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
 すべて省略可能です。
+
+### バグ報告の triage（discussion → 調査 → issue）
+
+バグ報告は issue ではなく discussion で受けます。issue は「これから作るもの」の
+置き場であり、ドライバの異常終了（予定にもない失敗）を issue で受け取ると、
+ドライバ自身がそれを実装対象として再実行してしまいます。報告は discussion、
+そこから得られる計画だけが issue になります。
+
+```
+バグ報告 discussion ──▶ triage 実行（調査）──▶ issue ──▶ 通常の issue 駆動フロー
+        │                        │
+        │                        └── verdict だけなら issue を作らずスレッドへ返信
+        └── 同種の失敗は同じスレッドへ追記
+```
+
+`conahcnuj --discussion <番号>` は次を行います。
+
+1. discussion を読む。Bug report カテゴリ以外の discussion、およびすでに
+   triage マーカー（`<!-- conahcnuj:triage issue=... -->`）があるスレッドは
+   ここで終了する（同じ報告から issue が 2 本できあがらない）。
+2. コーディングエージェントに調査させる。判定は `.triage-issue`
+   （実在する未修正の不具合 → 1 行目が issue タイトル、残りが本文）か
+   `.triage-verdict`（バグではない・すでに追跡中・再現不能・情報不足 →
+   1 行目が verdict、残りが根拠）のどちらかを書かせ、ドライバがそれを読む。
+   実装は行わない（調査のみで、コミットも作らない）。
+3. `.triage-issue` があれば `conahcnuj-triage: ` 接頭辞付きで issue を作り、
+   元の discussion へ issue へのリンクを返信する。`.triage-verdict` があれば
+   issue を作らず、根拠をスレッドへ返信する。
+
+triage 実行は issue を作るだけで終わり、実装は別の実行に任せます（調査の時間予算
+と実装の時間予算を分けるため）。`conahcnuj-triage: ` 接頭辞は
+`issue-driver.yml` の bot 除外ガードの唯一の例外で、これによって調査済みの
+issue が通常どおり実装対象になります（他の bot が作った issue は引き続き除外）。
+
+triage 実行が自滅した場合は、ドライバのバグ報告がスレッドに投稿されます。その
+タイトルは discussion 番号を含まない `conahcnuj: failed to triage a bug report
+discussion` なので、2 回目以降は同じスレッドへの返信になります。返信は
+`discussion` イベントを発火しないため、「報告 → triage → 報告」の連鎖は
+1 段で止まります。カテゴリ名を変える場合はリポジトリ変数
+`CONAHCNUJ_BUG_REPORT_CATEGORY` を使ってください（workflow のフィルタと
+ドライバの判定が同じ値を参照します）。
 
 ### 旧バグ報告 issue の移行
 
@@ -130,9 +175,13 @@ open 中の draft でない同一リポジトリの PR に `approved` 以外の 
 submit・編集・dismiss された場合も、PR 番号でドライバを再開します。
 同じ PR で実行中の場合は、concurrency により新しい実行を待機させます。
 失敗時はドライバが Bug report カテゴリへバグ報告 discussion を自動投稿します
-（discussion は `issues` イベントを発火しないため、再帰実行の心配はありません。
-bot が開いた issue を除外する条件は、他の自動化が作った issue への
-念のためのガードとして残しています）。
+（discussion は `issues` イベントを発火しないため、報告だけが再帰実行を
+起こすことはありません。bot が開いた issue の除外条件は他の自動化が作った
+issue へのガードとして残していますが、triage が作る `conahcnuj-triage: `
+接頭辞の issue だけは例外で実装対象にします）。
+`.github/workflows/discussion-driver.yml` は Bug report カテゴリに
+discussion が投稿されると上記 `--discussion` を実行します（同じ discussion
+番号の実行は concurrency で直列化）。
 
 - **タイムアウトは Actions 側で制御**します（ジョブの `timeout-minutes: 60`）。
   `CONAHCNUJ_MAX_SECONDS=3540` をその直下に設定し、ジョブが強制終了される前に

@@ -16,7 +16,8 @@ name: Issue auto-drive
 # discussions) goes through the GitHub App installation token from
 # gh-app/get-token.sh, exactly like a local run. A discussion never fires the
 # `issues` trigger above, so the driver's own bug reports cannot recurse into
-# another driver run.
+# another driver run; the issues that do come out of the triage workflow are
+# driven here on purpose (see the `if` below).
 
 on:
   issues:
@@ -44,18 +45,24 @@ jobs:
     timeout-minutes: 60
     environment: conahcnuj
     # Do not chase bot-authored issues: other automations file issues too, and
-    # running the driver on them would loop forever. (The driver's own bug
-    # reports are discussions now and never fire the `issues` trigger; this
-    # guard stays as defense in depth.) A job-level `if` cannot read the
-    # `secrets` context (and APP_SLUG is not needed here), so any bot-authored
-    # issue is skipped by type. Missing secrets are not pre-checked either:
-    # the run fails loudly and the driver files its own bug report (no silent
-    # skip).
+    # running the driver on them would loop forever. The one exception is an
+    # issue the triage run filed from a bug-report discussion: it carries the
+    # "conahcnuj-triage: " prefix and is exactly the planned work this workflow
+    # exists for, so it is driven like any issue a human wrote. (The driver's
+    # own bug reports are discussions now and never fire the `issues` trigger;
+    # the guard on everything else stays as defense in depth.) A job-level `if`
+    # cannot read the `secrets` context (and APP_SLUG is not needed here), so any
+    # other bot-authored issue is skipped by type. Missing secrets are not
+    # pre-checked either: the run fails loudly and the driver files its own bug
+    # report (no silent skip).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
         github.event_name == 'issues' &&
-        github.event.issue.user.type != 'Bot'
+        (
+          github.event.issue.user.type != 'Bot' ||
+          startsWith(github.event.issue.title, 'conahcnuj-triage: ')
+        )
       ) ||
       (
         github.event_name == 'pull_request_review' &&

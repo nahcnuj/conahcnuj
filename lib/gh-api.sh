@@ -210,6 +210,89 @@ gh_api_json_num() {
   printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" | head -1
 }
 
+# Raw (still backslash-escaped) value of a JSON string field, honouring escapes
+# so a value may itself contain quotes. Args: json key
+# gh_api_json_str stops at the first quote, which truncates a field whose content
+# has escaped quotes (a bug report carrying the driver's log tail is full of
+# them). This scans past `\"` pairs instead and reports the LAST occurrence of
+# the key, matching gh_api_json_str's greediness, so put the multi-line field
+# last in the query. Decoded with gh_api_unescape. Prints nothing when the key is
+# absent or its value is not a string.
+gh_api_json_str_escaped() {
+  printf '%s' "${1}" | awk -v key="${2}" '
+    # 1-based offset, in s, of the character right after the last occurrence of
+    # needle (0 when there is none). o tracks where the current tail of s starts
+    # in the original string.
+    function last_match(s, needle,   p, o, q) {
+      o = 1
+      p = 0
+      while ((q = index(s, needle)) > 0) {
+        p = o + q + length(needle) - 1
+        o = p
+        s = substr(s, q + length(needle))
+      }
+      return p
+    }
+    {
+      after = last_match($0, "\"" key "\"")
+      if (after == 0) exit
+      rest = substr($0, after + 1)
+      sub(/^[[:space:]]*:[[:space:]]*/, "", rest)
+      if (substr(rest, 1, 1) != "\"") exit
+      rest = substr(rest, 2)
+      value = ""
+      n = length(rest)
+      i = 1
+      while (i <= n) {
+        c = substr(rest, i, 1)
+        # A backslash escapes whatever follows it, so the pair is consumed whole
+        # and an escaped quote never ends the value.
+        if (c == "\\") {
+          value = value substr(rest, i, 2)
+          i += 2
+          continue
+        }
+        if (c == "\"") break
+        value = value c
+        i++
+      }
+      printf "%s", value
+      exit
+    }
+  '
+}
+
+# Fetch one discussion thread. Args: owner repo number
+# Output: title_b64|body_b64|url|category|id|triaged_issue
+# `triaged_issue` is the issue number a previous triage run already filed for
+# this thread (0 when the thread was never triaged), read from the marker the
+# triage reply carries. That makes triage idempotent: re-running it (dispatch,
+# or a re-fired trigger) must not open a second issue for one report.
+# The query asks for `body` last so the multi-line field is the document's last
+# `"body":` occurrence, which gh_api_json_str_escaped resolves correctly.
+gh_api_fetch_discussion() {
+  local owner="${1}" repo="${2}" number="${3}"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { discussion(number: ${number}) { number id title url category { name } comments(first: 100) { nodes { body } } body } } }"
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+
+  # The marker lives in a comment body, so it is plain text in the response and
+  # needs no JSON parsing.
+  local triaged
+  triaged="$(printf '%s' "${json}" | grep -oE '<!-- conahcnuj:triage issue=[0-9]+' | sed -n 's/.*issue=//p' | head -1)"
+  printf '%s|%s|%s|%s|%s|%s\n' \
+    "$(gh_api_b64 "$(gh_api_json_str_escaped "${json}" "title")")" \
+    "$(gh_api_b64 "$(gh_api_unescape "$(gh_api_json_str_escaped "${json}" "body")")")" \
+    "$(gh_api_json_str "${json}" "url")" \
+    "$(gh_api_json_str "${json}" "name")" \
+    "$(gh_api_json_str "${json}" "id")" \
+    "${triaged:-0}"
+}
+
 # --- Issues / PRs -----------------------------------------------------------
 
 # Fetch an issue (PRs are issues too). Output: title_b64|body_b64|labels_b64|is_pr
@@ -616,6 +699,21 @@ gh_api_post_comment() {
   gh_api_json_num "${json}" "id"
 }
 
+# Create an issue. Args: owner repo title body
+# Output: issue number (empty when the API call failed)
+# Used by the discussion triage run, which turns an investigated bug-report
+# discussion into planned work (bin/conahcnuj.sh).
+gh_api_create_issue() {
+  local owner="${1}" repo="${2}" title="${3}" body="${4}"
+  local escaped_title escaped_body payload
+  escaped_title="$(gh_api_escape "${title}")"
+  escaped_body="$(gh_api_escape "${body}")"
+  payload="{\"title\":\"${escaped_title}\",\"body\":\"${escaped_body}\"}"
+  local json
+  json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")" || return 1
+  gh_api_json_num "${json}" "number"
+}
+
 # Close an issue (pull requests are issues too). Args: owner repo number
 # state_reason "not_planned" marks it as moved/duplicate instead of done.
 gh_api_close_issue() {
@@ -632,6 +730,9 @@ gh_api_close_issue() {
 # re-trigger issue-driver.yml (the driver's own report is then resolved as if it
 # were planned work), and a discussion is the right home for an unplanned
 # failure report. Discussions are GraphQL-only.
+# The two directions are kept apart on purpose: reporting files a discussion
+# (gh_api_create_discussion / gh_api_reply_discussion), triage reads one back and
+# turns an investigated report into an issue (gh_api_fetch_discussion below).
 
 # Resolve the repository node id and one discussion category id.
 # Args: owner repo category (category name or slug, matched case-insensitively)
