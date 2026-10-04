@@ -59,17 +59,24 @@ async function main() {
 
   // Branch protection / rulesets belong to the repository owner: every write
   // path is refused, an admin merge included, and so is a GraphQL mutation
-  // against the same policy.
+  // against the same policy. `gh` is not the only way in, so a direct HTTP
+  // client and `gh` with global flags in front of the subcommand count too.
   const protectionWrites = [
     "gh ruleset create --repo o/r --branch main",
     "gh ruleset edit 1234 --repo o/r --bypass-pull-requests-as-admin",
     "gh ruleset delete 1234 --repo o/r",
+    "gh --repo o/r ruleset edit 1234 --bypass-pull-requests-as-admin",
     "gh api -X PUT repos/o/r/branches/main/protection",
     "gh api --method DELETE repos/o/r/branches/main/protection/required_status_checks",
     "gh api repos/o/r/branches/main/protection -f required_status_checks='{}'",
     "gh api -X POST repos/o/r/rulesets",
     "gh api graphql -f query='mutation { updateBranchProtectionRule }'",
     "gh pr merge 1 --repo o/r --admin",
+    "curl -fsSL -X PATCH https://api.github.com/repos/o/r/branches/main/protection -d @body.json",
+    "curl https://api.github.com/repos/o/r/rulesets -X POST --data '{}'",
+    "wget --method=PUT --body-data=@b.json https://api.github.com/repos/o/r/rulesets",
+    "http DELETE https://api.github.com/repos/o/r/branches/main/protection",
+    "echo checking && curl -X DELETE https://api.github.com/repos/o/r/rulesets/12",
   ]
   for (const command of protectionWrites) {
     let blocked = false
@@ -89,6 +96,14 @@ async function main() {
   await before(
     { tool: "bash" },
     { args: { command: "gh api -X GET repos/o/r/rulesets" }, env: {} }
+  )
+  await before(
+    { tool: "bash" },
+    { args: { command: "curl -fsSL https://api.github.com/repos/o/r/branches/main/protection" }, env: {} }
+  )
+  await before(
+    { tool: "bash" },
+    { args: { command: "curl https://api.github.com/repos/o/r/rulesets?per_page=100" }, env: {} }
   )
   await before({ tool: "bash" }, { args: { command: "gh ruleset list --repo o/r" }, env: {} })
   await before(

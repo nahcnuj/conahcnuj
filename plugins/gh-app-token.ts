@@ -302,15 +302,43 @@ function isGitCommitCommand(cmd: string): boolean {
 
 // A `gh` call of the form `gh ... api ...` / `gh ... pr ...`.
 const GH_API_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+[^\n;&|]*\bapi\b/
-const GH_RULESET_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+ruleset(?:\.exe)?(?:\s+([A-Za-z][\w-]*))?/
+// `gh [global flags] ruleset [subcommand]`. Global flags are matched explicitly
+// so `gh --repo o/r ruleset edit` is caught like `gh ruleset edit`, and the
+// lookahead keeps `gh api repos/o/r/rulesets` from reading `rulesets` as the
+// subcommand of a `gh ruleset` call.
+const GH_RULESET_CALL =
+  /(^|[;&|\n])\s*gh(\.exe)?\s+(?:-{1,2}[\w-]+(?:[=\s][^\s;&|]+)?\s+)*ruleset(?![^\s;&|])(?:\s+([A-Za-z][\w-]*))?/
 const GH_PR_MERGE_CALL = /(^|[;&|\n])\s*gh(\.exe)?\s+[^\n;&|]*\bpr\s+merge\b/
+// A direct HTTP client. The `gh` guards above are one `curl` away from being
+// bypassed, and the repository merge policy is protected by the endpoint, not
+// by the client, so the same paths are recognised here. Group 2 is the first
+// argument when it is a bare word: httpie takes the method there
+// (`http PATCH <url>`).
+const HTTP_CLIENT_CALL =
+  /(^|[;&|\n])\s*(?:curl|curl\.exe|wget|wget\.exe|http|httpie)(?:\s+([A-Za-z]+))?(?=\s|$)/
+// HTTP methods, so a verb in place of a flag counts as the request method.
+const HTTP_VERBS = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+])
 // `gh ruleset` subcommands that only report the current rules. Explaining why a
 // merge is blocked is inside the agent's scope; changing a ruleset is not, so
 // every other subcommand is refused.
 const GH_RULESET_READS = new Set(["list", "view", "check"])
 // Repository merge policy lives under /protection and /rulesets.
 const PROTECTION_API_PATH =
-  /\/branches\/[^\s/"']+\/protection\b|\/rulesets?(?:[\s/"']|$)/
+  /\/branches\/[^\s/"']+\/protection\b|\/rulesets?(?:[\s/"'?]|$)/
+// `-X GET` / `--method=PUT` / `--request POST`: an explicit method.
+const HTTP_METHOD_FLAG =
+  /(?:^|\s)(?:-X|--request|--method)(?:[=\s]+)([A-Za-z]+)/
+// A request body (curl -d/--data-*, httpie --json, wget --post-data, ...).
+// Any of these turns a plain read into a write.
+const HTTP_BODY_FLAG =
+  /(?:^|\s)(?:-d|-F|-T|--data|--data-[\w-]+|--json|--form|--form-string|--upload-file|--post-data|--post-file|--body-data|--body-file)(?:[=\s]|$)/
 
 /**
  * True when a `gh api` call sends a request body / non-GET method. `gh api`
@@ -318,22 +346,40 @@ const PROTECTION_API_PATH =
  * call into a POST on its own - both are writes on a protection endpoint.
  */
 function ghApiIsWrite(cmd: string): boolean {
-  const method = /(^|\s)(?:-X|--method)[=\s]+([A-Za-z]+)/.exec(cmd)
+  const method = HTTP_METHOD_FLAG.exec(cmd)
   if (method) {
-    return method[2].toUpperCase() !== "GET"
+    return method[1].toUpperCase() !== "GET"
   }
   return /(^|\s)(?:-f|--field|-F|--raw-field|--input)(\s|=|$)/.test(cmd)
 }
 
 /**
+ * True when an HTTP client call is a write rather than a read. Same shape as
+ * ghApiIsWrite: an explicit method other than GET/HEAD (as a flag or, for
+ * httpie, as the first argument), or any body flag.
+ */
+function httpClientIsWrite(cmd: string, firstArg: string): boolean {
+  if (HTTP_VERBS.has(firstArg.toUpperCase())) {
+    const verb = firstArg.toUpperCase()
+    return verb !== "GET" && verb !== "HEAD"
+  }
+  const method = HTTP_METHOD_FLAG.exec(cmd)
+  if (method) {
+    const verb = method[1].toUpperCase()
+    return verb !== "GET" && verb !== "HEAD"
+  }
+  return HTTP_BODY_FLAG.test(cmd)
+}
+
+/**
  * True when a command line tries to weaken repository-level merge policy:
  * a `gh ruleset` subcommand that changes a ruleset, a write to a branch
- * protection / ruleset endpoint, a branch protection GraphQL mutation, or an
- * admin merge. Relaxing branch protection is never an option from inside this
- * App, so such a call is refused rather than retried; reading the current rules
- * (`gh ruleset list|view|check`, `-X GET`, a plain `gh api .../protection`)
- * stays allowed so a blocked merge can still be explained. Same shape as the
- * `git commit` guard.
+ * protection / ruleset endpoint (through `gh api` or a direct HTTP client), a
+ * branch protection GraphQL mutation, or an admin merge. Relaxing branch
+ * protection is never an option from inside this App, so such a call is refused
+ * rather than retried; reading the current rules (`gh ruleset list|view|check`,
+ * `-X GET`, a plain `gh api .../protection`) stays allowed so a blocked merge
+ * can still be explained. Same shape as the `git commit` guard.
  */
 function isProtectionWeakeningCommand(cmd: string): boolean {
   const ruleset = GH_RULESET_CALL.exec(cmd)
@@ -345,6 +391,10 @@ function isProtectionWeakeningCommand(cmd: string): boolean {
   }
   if (GH_API_CALL.test(cmd) && PROTECTION_API_PATH.test(cmd)) {
     return ghApiIsWrite(cmd)
+  }
+  const http = HTTP_CLIENT_CALL.exec(cmd)
+  if (http && PROTECTION_API_PATH.test(cmd)) {
+    return httpClientIsWrite(cmd, http[2] || "")
   }
   if (/\bmutation\b/.test(cmd) && /BranchProtectionRule/.test(cmd)) return true
   if (GH_PR_MERGE_CALL.test(cmd) && /(^|\s)--admin(\s|$)/.test(cmd)) return true

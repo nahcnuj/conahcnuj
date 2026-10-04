@@ -80,6 +80,12 @@ fi
 PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
 PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
 
+# The constraint state poll_conditions last read, e.g.
+# "checks=SUCCESS mergeable=CONFLICTING mergeStateStatus=DIRTY". Empty until the
+# first poll. Read by constraint_fix_context so the coding agent is told what is
+# actually blocking instead of a bare "constraints failing".
+LAST_CONSTRAINTS=""
+
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
   [[ "$(cat "${PR_BODY_SYNCED_FILE}" 2>/dev/null || true)" == "1" ]]
@@ -717,6 +723,10 @@ poll_conditions() {
     mergeable="$(printf '%s' "${cond}" | cut -d'|' -f2)"
     mss="$(printf '%s' "${cond}" | cut -d'|' -f3)"
     pr_state="$(printf '%s' "${cond}" | cut -d'|' -f4)"
+    # Kept for the implementation round below: the agent needs to know which
+    # constraint is failing, and a stale base (CONFLICTING) is fixed in a
+    # completely different way from a red check.
+    LAST_CONSTRAINTS="checks=${state} mergeable=${mergeable:-unknown} mergeStateStatus=${mss:-unknown}"
     echo "PR #${pr} constraints: checks=${state} mergeable=${mergeable} mergeState=${mss}" >&2
     # The auto-merge workflow merges the PR once CI is green and no longer
     # waits for this run's own check, so the PR can be merged out from under
@@ -748,6 +758,36 @@ poll_conditions() {
     fi
     rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
   done
+}
+
+# Instructions for an implementation round that has to clear a failing
+# constraint (the "Additional context" block of the prompt).
+#
+# The agent's only lever is the working tree. A CONFLICTING branch in particular
+# cannot be cleared any other way from here: api-commit.sh appends one commit to
+# the branch head and never rewrites history, so the base branch has to be
+# merged into the tree by the agent. Without the base branch and its history a
+# runner clone cannot do that at all (actions/checkout leaves a depth-1 clone of
+# the default branch only), which is why the fetch is spelled out.
+#
+# Repository merge policy (branch protection, rulesets, required checks and
+# reviews) is the owner's and is never changed to get past a constraint; the
+# scope rules handed to every model say so, and this block must not talk anyone
+# into proposing it.
+# Args: pr base detail
+constraint_fix_context() {
+  local pr="${1}" base="${2}" detail="${3:-}"
+  printf 'The pull request'"'"'s CI / merge constraints are currently failing. Fix whatever breaks them.\n\n'
+  printf 'Observed on PR #%s: %s.\n' "${pr}" "${detail:-unknown}"
+  case "${detail}" in
+    *mergeable=CONFLICTING* | *mergeStateStatus=DIRTY*)
+      printf 'The head branch conflicts with %s, so GitHub refuses to merge it and no check even runs. Bring the current %s into the working tree and resolve the conflict there: fetch the base branch (git fetch origin %s) first, deepen the clone (git fetch --unshallow origin) when git refuses to merge because the clone is shallow. Merge it by hand, keep the behaviour of both sides, and do not reformat unrelated files.\n' \
+        "${base}" "${base}" "${base}"
+      ;;
+    *)
+      printf 'Read the failing checks on the pull request and fix them in the working tree.\n'
+      ;;
+  esac
 }
 
 # Hand the PR over to a human: the repository owner is assigned as reviewer,
@@ -837,7 +877,7 @@ drive() {
       # (poll_conditions returns immediately on FAILURE).
       echo "PR #${pr}: constraints failing; fixing with a new implementation round." >&2
       local produced_change="false"
-      if implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
+      if implement "${title}" "${body}" "$(constraint_fix_context "${pr}" "${base}" "${LAST_CONSTRAINTS}")"; then
         produced_change="true"
       fi
       if workdir_changed "$(pwd)"; then
