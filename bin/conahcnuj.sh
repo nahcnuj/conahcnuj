@@ -10,18 +10,12 @@
 #      opencode (handing the same session and working tree to another model
 #      when one fails), committing only with the agent's .commit-msg
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
-#      mergeability) passes, then assigns the repository owner as reviewer.
-#      That hand-off to a human is the last thing a run owes the PR, so the
-#      driver exits there; an already APPROVED PR exits earlier as "ready to
-#      merge". Never auto-merges. The request is retried once, and the PR is
-#      read back before a hand-off is called lost; only a PR that GitHub says
-#      has nobody asked fails the run, while a hand-off that cannot be verified
-#      at all ends the run with a warning (issues #134 / #139).
-#   3. when the run was resumed with fresh review feedback (comments /
-#      requested changes / security-review threads), addresses it, pushes a
-#      Verified commit, re-verifies the non-reviewer constraints, replies on
-#      the PR and re-requests review before exiting
-#   4. on an abnormal exit (timeout, no model completed the work, unexpected
+#      mergeability) passes, then requests review
+#   3. polls the review status; addresses comments / requested changes /
+#      security-review threads, pushes and re-verifies non-reviewer
+#      constraints, then replies on the PR
+#   4. exits only when the PR is ready to merge
+#   5. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the repository so a
 #      run the driver could not resolve is never silently lost. The report
 #      carries the tail of the run's console output as a detailed error log
@@ -31,9 +25,8 @@
 # Environment overrides (all optional):
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
-#   CONAHCNUJ_HANDOFF_RETRY_SECONDS  pause before the single review-request
-#                            retry (default: 15 s; 0 disables the pause)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
+#   CONAHCNUJ_POLL_REVIEWS_MIN/MAX     review poll window (default 30/3600 s)
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
 #   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
 #                            the OpenCode display name (plugin) or the model id
@@ -58,6 +51,8 @@ TEST_MODE="${CONAHCNUJ_TEST_MODE:-0}"
 MAX_DURATION="${CONAHCNUJ_MAX_SECONDS:-259200}"
 POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
 POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
+POLL_REVIEWS_MIN="${CONAHCNUJ_POLL_REVIEWS_MIN:-30}"
+POLL_REVIEWS_MAX="${CONAHCNUJ_POLL_REVIEWS_MAX:-3600}"
 START_TIME="$(date +%s)"
 # Snapshot a caller-supplied trailer label. apply_driver_commit_model exports
 # CONAHCNUJ_COMMIT_MODEL for api-commit.sh, so a later commit must not treat
@@ -84,11 +79,6 @@ fi
 # up by `git add -A`.
 PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
 PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
-
-# Whether the last request_review_from_owner call could confirm the reviewer
-# assignment. log_review_handoff words its final line after it, so the run log
-# never claims a review request the run could not verify.
-REVIEW_HANDOFF_CONFIRMED="true"
 
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
@@ -496,25 +486,6 @@ next_free_branch() {
   printf '%s\n' "${branch}"
 }
 
-# Fetch <branch> from origin and check out its head. A failed fetch stops the
-# run instead of falling back to whatever origin/<branch> happens to hold: such
-# a checkout "succeeds" at a stale commit, the driver then reads the branch as
-# "not implemented yet" and hands a fresh implementation round to a model, which
-# re-implements what is already committed and commits that second copy on top of
-# the real branch head. A lost branch head is far more expensive than a stopped
-# run (the stopped run files a bug report, issue #115).
-checkout_branch_head() {
-  local branch="${1}"
-  # git's own output goes to stderr: callers capture this script's stdout, and
-  # `git checkout -B <b> origin/<b>` prints "branch '<b>' set up to track ..."
-  # to stdout, which would be captured as part of a branch name.
-  if ! git fetch origin "${branch}" 1>&2; then
-    echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
-    return 1
-  fi
-  git checkout -B "${branch}" "origin/${branch}" 1>&2
-}
-
 # Create (or reuse) the feature branch off the default branch and check it out.
 ensure_issue_branch() {
   local owner="${1}" repo="${2}" num="${3}" title="${4}" default_branch="${5}" default_oid="${6}" branch_override="${7:-}"
@@ -533,17 +504,18 @@ ensure_issue_branch() {
   fi
 
   # This function's stdout is captured by the caller to obtain the branch
-  # name, so every git command must keep its own output off stdout (checkout_branch_head
-  # sends git's output to stderr).
+  # name, so every git command must keep its own output off stdout (send it to
+  # stderr): `git checkout -B <branch> <remote>/<branch>` prints
+  # "branch '<b>' set up to track ..." to stdout, which would otherwise be
+  # captured as part of the branch name and break PR creation.
+  git fetch origin "${branch}" >/dev/null 2>&1 || true
   if git rev-parse --verify -q "origin/${branch}" >/dev/null 2>&1; then
-    # `|| return 1` rather than relying on errexit: this function runs inside a
-    # command substitution, where bash does not honour it, and every command
-    # after the checkout would otherwise run on the stale head.
-    checkout_branch_head "${branch}" || return 1
+    git checkout -B "${branch}" "origin/${branch}" 1>&2
     echo "Using existing feature branch ${branch} (resume)." >&2
   else
     gh_api_create_branch "${owner}" "${repo}" "${branch}" "${default_oid}" >/dev/null 2>&1 || echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
-    checkout_branch_head "${branch}" || return 1
+    git fetch origin "${branch}" 1>&2
+    git checkout -B "${branch}" "origin/${branch}" 1>&2
     echo "Created feature branch ${branch}." >&2
   fi
   printf '%s\n' "${branch}"
@@ -557,7 +529,9 @@ ensure_pr_branch_head() {
     git checkout -B "${head}" >/dev/null 2>&1 || git checkout -b "${head}"
     return 0
   fi
-  checkout_branch_head "${head}"
+  # Keep git's own output off stdout; callers capture this function's stdout.
+  git fetch origin "${head}" 1>&2
+  git checkout -B "${head}" "origin/${head}" 1>&2
 }
 
 # Let the coding agent choose the feature branch. If the implementation round
@@ -663,14 +637,6 @@ PR #${pr} の処理を継続するには、Issue auto-drive を手動実行し�
   return 1
 }
 
-# Remove standalone closing-reference lines ("Closes #<n>", "Fixes #<n>",
-# "Resolves #<n>", also comma-separated lists) from a body and collapse the
-# blank lines the removal leaves behind, so the driver's own single
-# "Closes #<n>" prefix is the only closing reference in the PR body (#143).
-strip_closing_references() {
-  printf '%s\n' "${1}" | sed -E '/^[[:space:]]*([Cc]lose[sd]?|[Ff]ix(e[sd])?|[Rr]esolve[sd]?)[[:space:]]+#[0-9]+([[:space:]]*,[[:space:]]*#[0-9]+)*[[:space:]]*$/d' | awk '/^$/{blank++; if(blank>1) next; print; next} {blank=0; print}'
-}
-
 # Reuse the open PR for this head branch, else create one. Both reuse paths keep
 # the PR body derived from the linked issue ("Closes #<n>\n\n<issue body>"), so a
 # PR that was created without a written body (or with a stale one) gets it set.
@@ -684,9 +650,6 @@ ensure_pr() {
   if [[ -n "${closes}" ]]; then
     # Trim trailing whitespace from issue body to avoid extra blank lines
     body="$(printf '%s' "${body}" | sed 's/[[:space:]]*$//')"
-    # Drop closing-reference lines the issue body may already carry so the PR
-    # body has exactly one "Closes #<n>" (#143).
-    body="$(strip_closing_references "${body}")"
     pr_body="Closes #${closes}
 
 ${body}"
@@ -725,34 +688,17 @@ ${body}"
 }
 
 # Wait until every non-reviewer constraint (checks + mergeability) passes.
-# Returns 0 when passable now, 1 when the PR needs new work. Exits when the PR
-# left the open state while we were waiting: there is nothing left to drive then,
-# and polling on would only end in a spurious bug report.
+# Returns 0 when passable now, 1 when the PR needs new work.
 poll_conditions() {
   local owner="${1}" repo="${2}" pr="${3}"
   while true; do
     check_timeout
-    local cond state mergeable mss pr_state
+    local cond state mergeable mss
     cond="$(gh_api_fetch_pr_conditions "${owner}" "${repo}" "${pr}")"
     state="$(printf '%s' "${cond}" | cut -d'|' -f1)"
     mergeable="$(printf '%s' "${cond}" | cut -d'|' -f2)"
     mss="$(printf '%s' "${cond}" | cut -d'|' -f3)"
-    pr_state="$(printf '%s' "${cond}" | cut -d'|' -f4)"
     echo "PR #${pr} constraints: checks=${state} mergeable=${mergeable} mergeState=${mss}" >&2
-    # The auto-merge workflow merges the PR once CI is green and no longer
-    # waits for this run's own check, so the PR can be merged out from under
-    # the poll. Report that as the end of the road instead of looping on a PR
-    # that can never become MERGEABLE again.
-    case "${pr_state}" in
-      MERGED)
-        echo "PR #${pr} is merged while waiting; nothing left to do." >&2
-        exit 0
-        ;;
-      CLOSED)
-        echo "PR #${pr} is closed without merge while waiting; nothing left to do." >&2
-        exit 1
-        ;;
-    esac
     if [[ "${state}" == "SUCCESS" && "${mergeable}" == "MERGEABLE" ]]; then
       echo "All non-reviewer constraints pass." >&2
       return 0
@@ -771,102 +717,14 @@ poll_conditions() {
   done
 }
 
-# Hand the PR over to a human: the repository owner is assigned as reviewer,
-# which is the last deliverable of a run. A reviewer who cannot be assigned
-# (GitHub refuses e.g. the author of the PR) or a request that is already
-# pending must not fail the run, so fall back to the unnamed ask-for-review.
-# Each attempt is retried once: the endpoint is idempotent (asking for the same
-# reviewer twice records no second request), and a single failure is not proof
-# of anything — a transport error or a 5xx that arrives after GitHub recorded
-# the request is indistinguishable from a refusal. Both POSTs reporting a
-# failure is not proof that nobody was asked either, so the PR is read back
-# before the hand-off is called lost: issue #134 died with "could not request
-# review" on a PR GitHub had just recorded a review_requested event for, and
-# issue #139 died the same way two minutes after GitHub had recorded the owner
-# as the reviewer of PR #138 — a run whose work was complete, reported as a
-# driver failure. Args: owner repo pr
-request_review_from_owner() {
-  local owner="${1}" repo="${2}" pr="${3}" requested="" read_state="answered"
-  REVIEW_HANDOFF_CONFIRMED="true"
-  if request_review_with_retry "${owner}" "${repo}" "${pr}" "${owner}"; then
-    echo "Assigned ${owner} as reviewer on PR #${pr}." >&2
-    return 0
-  fi
-  if request_review_with_retry "${owner}" "${repo}" "${pr}"; then
-    echo "Review requested on PR #${pr} (${owner} is not assignable; asked for review instead)." >&2
-    return 0
-  fi
-  # Reading the PR back is the only remaining evidence. Its answer has to be
-  # read for what it is: a reviewer listed means the hand-off happened, an empty
-  # answer means GitHub really has nobody asked, and an unreadable PR means the
-  # driver cannot tell the two apart. Only the empty answer is proof of a lost
-  # hand-off, so only that fails the run.
-  if ! requested="$(gh_api_requested_reviewers "${owner}" "${repo}" "${pr}" 2>/dev/null)"; then
-    read_state="unreadable"
-  fi
-  if [[ -n "${requested}" ]]; then
-    echo "Review already requested on PR #${pr} (${requested//$'\n'/, }); the request call reported a failure but GitHub has it, so the hand-off is done." >&2
-    return 0
-  fi
-  if [[ "${read_state}" == "unreadable" ]]; then
-    REVIEW_HANDOFF_CONFIRMED="false"
-    echo "WARNING: no review request on PR #${pr} was accepted and the PR could not be read back either, so nobody can be confirmed as asked. The PR is complete and waits for a human, so the run ends here instead of filing a bug report for an unverifiable hand-off." >&2
-    return 0
-  fi
-  echo "ERROR: could not request review on PR #${pr}." >&2
-  return 1
-}
-
-# One review-request call, retried once after a short pause. stderr is kept so
-# gh_api_call's "-> <status>: <body>" reaches the run log: without it a failed
-# hand-off explains nothing in the bug report. Args: owner repo pr [reviewer]
-request_review_with_retry() {
-  local owner="${1}" repo="${2}" pr="${3}" reviewer="${4:-}" attempt
-  for attempt in 1 2; do
-    if gh_api_request_review "${owner}" "${repo}" "${pr}" "${reviewer}" >/dev/null; then
-      return 0
-    fi
-    if [[ "${attempt}" -eq 1 ]]; then
-      echo "Review request on PR #${pr} reported a failure; retrying once." >&2
-      hand_off_retry_pause
-    fi
-  done
-  return 1
-}
-
-# Pause before the review-request retry. Offline runs never sleep, and 0 (or any
-# value that is not a number) disables the pause.
-hand_off_retry_pause() {
-  local seconds="${CONAHCNUJ_HANDOFF_RETRY_SECONDS:-15}"
-  if [[ "${TEST_MODE}" == "1" ]]; then
-    return 0
-  fi
-  if [[ "${seconds}" =~ ^[0-9]+$ ]] && (( seconds > 0 )); then
-    sleep "${seconds}"
-  fi
-  return 0
-}
-
-# Final line of a run whose PR now waits on a human reviewer. The wording
-# depends on whether the reviewer assignment was actually confirmed, so the log
-# never claims a request that the run could not verify.
-log_review_handoff() {
-  local owner="${1}" repo="${2}" pr="${3}" reviewer="${4}"
-  if [[ "${REVIEW_HANDOFF_CONFIRMED}" == "true" ]]; then
-    echo "Review requested on PR #${pr} (reviewer: ${reviewer}): https://github.com/${owner}/${repo}/pull/${pr}" >&2
-  else
-    echo "PR #${pr} is ready for a human reviewer: https://github.com/${owner}/${repo}/pull/${pr}" >&2
-  fi
-}
-
 # --- review fingerprint -----------------------------------------------------
 
-# Main state machine. Handles both the fresh-issue path and the resume path.
-# Never auto-merges, and never waits for an approval: it exits once the review
-# request is on the PR ("ready to merge" when the PR is already APPROVED).
+# Main state machine. Handles both the fresh-issue path and the resume path;
+# never exits until the PR is approved and every non-reviewer constraint
+# passes ("ready to merge"). Never auto-merges.
 drive() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
-  local last_sig=""
+  local last_sig="" review_requested="false"
 
   while true; do
     check_timeout
@@ -935,12 +793,12 @@ drive() {
     fi
 
     echo "PR #${pr}: non-reviewer constraints satisfied." >&2
+    if [[ "${review_requested}" != "true" ]]; then
+      gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null 2>&1 || echo "WARNING: could not request review on PR #${pr} (may already be requested)." >&2
+      review_requested="true"
+    fi
 
     # --- review phase ---
-    # Asking for review is what a run hands over to a human, so the review
-    # request (not an approval) is the last thing the driver produces. The
-    # approval, and the merge owner-approved-auto-merge chains off it, are the
-    # reviewer's part to give: the driver reports and exits instead of polling.
     local rv decision payload raw summary sig actionable
     rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
     decision="$(printf '%s' "${rv}" | cut -d'|' -f1)"
@@ -951,8 +809,13 @@ drive() {
     echo "reviewDecision: ${decision:-NONE}" >&2
 
     if [[ "${decision}" == "APPROVED" ]]; then
-      echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
-      exit 0
+      if poll_conditions "${owner}" "${repo}" "${pr}"; then
+        echo "PR #${pr} is APPROVED and every non-reviewer constraint passes." >&2
+        echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
+        exit 0
+      fi
+      echo "PR approved but constraints regressed; re-checking." >&2
+      continue
     fi
 
     actionable="false"
@@ -963,35 +826,38 @@ drive() {
     if [[ "${actionable}" == "true" && -n "${sig}" && "${sig}" != "${last_sig}" ]]; then
       last_sig="${sig}"
       echo "New review feedback detected; addressing it." >&2
-      local addressed="false"
-      if implement "${title}" "${body}" "Address the pull request review feedback:
+      if ! implement "${title}" "${body}" "Address the pull request review feedback:
 
 ${summary}"; then
-        addressed="true"
-      fi
-      if workdir_changed "$(pwd)"; then
-        commit_changes
-        addressed="true"
-      fi
-      if [[ "${addressed}" == "true" ]]; then
-        if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
-          echo "Constraints failing after addressing feedback; fixing next cycle." >&2
+        if ! workdir_changed "$(pwd)"; then
+          echo "No changes could be produced for this feedback; continuing to poll." >&2
           continue
         fi
-        request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
-        gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
+      fi
+      commit_changes
+      if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
+        echo "Constraints failing after addressing feedback; fixing next cycle." >&2
+        continue
+      fi
+      gh_api_request_review "${owner}" "${repo}" "${pr}" >/dev/null 2>&1 || echo "WARNING: could not request review on PR #${pr} (may already be requested)." >&2
+      review_requested="true"
+      gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
 
 ${summary}" >/dev/null || echo "WARNING: could not post the review-feedback reply on PR #${pr}." >&2
-        echo "Replied on PR #${pr} after addressing review feedback." >&2
-        log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
-        exit 0
-      fi
-      echo "No changes could be produced for this feedback; leaving the review request as it is." >&2
+      echo "Replied on PR #${pr} after addressing review feedback." >&2
+      # The reply is itself a new comment and would change the review payload,
+      # so re-fingerprint the payload as it appears AFTER the reply. Otherwise
+      # the next poll would treat our own comment as fresh reviewer feedback
+      # and loop forever addressing the same thread.
+      rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
+      payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
+      sig="$(gh_api_review_fingerprint "$(gh_api_unb64 "${payload}")")"
+      last_sig="${sig}"
+      continue
     fi
 
-    request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
-    log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
-    exit 0
+    echo "No new review feedback; waiting for reviewers..." >&2
+    rate_limit_poll_sleep "${POLL_REVIEWS_MIN}" "${POLL_REVIEWS_MAX}"
   done
 }
 
@@ -1060,7 +926,6 @@ resume_pr() {
     iss="$(gh_api_fetch_issue "${owner}" "${repo}" "${closes}")"
     iss_body="$(gh_api_unescape "$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)")"
     if [[ -n "${iss_body}" ]]; then
-      iss_body="$(strip_closing_references "${iss_body}")"
       echo "PR body is just the closing stub; reusing issue #${closes} as the PR body." >&2
       body="${iss_body}"
     fi

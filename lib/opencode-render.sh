@@ -330,7 +330,7 @@ render_indent() {
 }
 
 # Assistant text and reasoning read the same way: the header says which step
-# this is, the body is just the model's words, printed in full.
+# this is, the body is just the model's words.
 render_block_text() {
   [[ -n "${F[text]}" ]] || return 0
   render_header

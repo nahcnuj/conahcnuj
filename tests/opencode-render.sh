@@ -7,10 +7,6 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RENDER="${HERE}/../lib/opencode-render.sh"
 
-# A wrapping agent session (the conahcnuj opencode plugin) exports these for
-# the real runs; the fixture expectations below must not see them.
-unset CONAHCNUJ_MODEL_LABEL_FILE CONAHCNUJ_RENDER_MAX_LINES CONAHCNUJ_RENDER_MAX_COLS
-
 # A work tree with one commit, one modified file and one new (untracked) file,
 # so the header has a real SHA / branch / diff to report.
 fixture_repo() {
