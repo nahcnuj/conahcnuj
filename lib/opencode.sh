@@ -25,6 +25,18 @@ opencode_get_models() {
   opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 }
 
+# What every round shares, whatever the model or the stage: the point of the run
+# and who does what. This is deliberately one short paragraph. A model once read
+# a long list of instructions (banned commands, warnings that a message is not a
+# deliverable) as the task itself and answered with a commit message and a pull
+# request title instead of writing code, so the paragraph states the division of
+# labour and stops there: telling the coding agent how to work gets in its way.
+opencode_agent_contract() {
+  cat <<'EOF'
+This run takes the issue (or the pull request being resumed) to the owner's approval. Your part is the change in the working tree: implement it and run the repository's own validation. The driver names the branch and creates the commit, the push, the pull request and the review request once you are done.
+EOF
+}
+
 # Build the implementation prompt for a single model run.
 # Args: issue_title issue_body [extra_context]
 # A fresh implementation round (no extra_context) also lets the agent choose
@@ -44,9 +56,11 @@ ${extra_context}"
   fi
   prompt="${prompt}
 
-Implement the changes needed to resolve this issue. Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
+$(opencode_agent_contract)
 
-When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. This message should summarize the changes you made."
+Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
+
+When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. The driver uses that line as the commit message it makes for you."
   if [[ -z "${extra_context}" ]]; then
     prompt="${prompt}
 
@@ -57,7 +71,7 @@ If you want to choose the feature branch name, write your preferred branch name 
 
 opencode_build_handoff_prompt() {
   local previous_model="${1}"
-  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits. When the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}"
+  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits.\n\n%s\n\nWhen the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}" "$(opencode_agent_contract)"
 }
 
 # Run opencode with a specific model and publish its session ID in
@@ -71,7 +85,7 @@ opencode_run() {
   else
     prompt="$(opencode_build_prompt "${issue_title}" "${issue_body}" "${extra_context}")"
     if [[ -n "${previous_model}" ]]; then
-      prompt="${prompt}"$'\n\n'"Model ${previous_model} failed before this work could be handed off through its session. Continue from the current working tree without discarding existing changes."
+      prompt="${prompt}"$'\n\n'"Model ${previous_model} did not finish this work through its session. Continue from the current working tree without discarding existing changes."
     fi
   fi
 
@@ -93,10 +107,18 @@ opencode_run() {
       return 1
     fi
     if [[ -z "${MOCK_OPENCODE_NOOP:-}" || "${MOCK_OPENCODE_NOOP}" != "${model}" ]]; then
-      if [[ -d "${workdir}" && -w "${workdir}" ]]; then
-        printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
-        # Simulate the agent honouring the .commit-msg contract.
-        printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+      if [[ -z "${MOCK_OPENCODE_MESSAGE_ONLY:-}" || "${MOCK_OPENCODE_MESSAGE_ONLY}" != "${model}" ]]; then
+        if [[ -d "${workdir}" && -w "${workdir}" ]]; then
+          printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
+          # Simulate the agent honouring the .commit-msg contract.
+          printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+        fi
+      else
+        # A model that answered with a message instead of doing the work.
+        if [[ -d "${workdir}" && -w "${workdir}" ]]; then
+          printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+        fi
+        echo "opencode: mock message-only round for ${model} (message, no code change)" >&2
       fi
     else
       echo "opencode: mock no-op for ${model} (produces no changes)" >&2
