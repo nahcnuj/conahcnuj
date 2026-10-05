@@ -2,16 +2,17 @@
 # conahcnuj "already implemented, dirty workdir" flow test (offline).
 #
 # When the feature branch already carries the implementation the driver skips
-# the model fall-through and opens the PR directly - no implement round runs,
-# so no coding agent ever writes a .commit-msg. If the local workdir still
-# holds leftover files from an interrupted earlier run (scratch scripts, API
-# reply payloads, ...), those must NOT make the driver call commit_changes and
-# then die on the missing .commit-msg (that crashed a real run and filed a bug
-# report issue). The driver should leave the scratch files untouched and go
-# straight to the PR / review loop.
+# the model fall-through and opens the PR directly, so no implementation round
+# runs in this process. If the local workdir still holds leftover files from an
+# interrupted earlier run (scratch scripts, API reply payloads, ...), those must
+# NOT make the driver call commit_changes and sweep them into the implementation
+# (a round is only committed when it left a .commit-msg to say the change was
+# an implementation; that crashed a real run and filed a bug report issue). The
+# driver should leave the scratch files untouched and go straight to the PR /
+# review loop.
 #
 #   issue #10 read -> existing feature branch (already has a commit) and an
-#   untracked scratch file + no .commit-msg -> implement skipped -> PR #124
+#   untracked scratch file, no .commit-msg -> implement skipped -> PR #124
 #   created -> constraints pass -> APPROVED -> "ready to merge" -> exit 0,
 #   scratch file still present and uncommitted.
 #
@@ -44,8 +45,8 @@ printf 'implemented\n' >> "${WORK}/file.txt"
 git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm "existing implementation"
 
-# Leftover scratch files from an interrupted earlier run: untracked, and the
-# coding agent never got to write its .commit-msg. These must neither crash the
+# Leftover scratch files from an interrupted earlier run: untracked, with no
+# .commit-msg saying they were an implementation. These must neither crash the
 # driver nor get swept into a commit.
 printf 'scratch\n' > "${WORK}/scratch.txt"
 printf '{"reply": 1}\n' > "${WORK}/reply.json"
@@ -90,6 +91,7 @@ grep -q "Implementing with available models" "${LOG}" && { echo "FAIL: the drive
 grep -q "Created PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 grep -q "left no .commit-msg" "${LOG}" && { echo "FAIL: the driver still crashed on the missing commit message"; exit 1; }
+grep -q "labelling the commit" "${LOG}" && { echo "FAIL: the driver committed leftover files it was never asked to commit"; exit 1; }
 grep -q "Bug report issue" "${LOG}" && { echo "FAIL: the driver filed a bug report"; exit 1; }
 
 # The scratch files must be untouched and must not have been committed.

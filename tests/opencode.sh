@@ -28,19 +28,15 @@ test_opencode_build_prompt() {
   [[ "${prompt}" == *"Issue: Issue title"* ]]
   [[ "${prompt}" == *"Issue body"* ]]
   [[ "${prompt}" == *"extra ctx"* ]]
+  [[ "${prompt}" == *"Implement the changes needed to resolve this issue in the working tree"* ]] || { echo "FAIL: the prompt does not ask for the change"; exit 1; }
   [[ "${prompt}" == *"Do NOT create any commits"* ]]
-  [[ "${prompt}" == *".commit-msg"* ]]
+  # The prompt asks for the change and for nothing else. A commit message (or a
+  # pull request title) asked for beside it is a second, smaller deliverable,
+  # and a model that finishes that one instead has changed nothing: issue #146.
+  [[ "${prompt}" != *".commit-msg"* ]] || { echo "FAIL: the prompt still asks the agent for a commit message"; exit 1; }
+  [[ "${prompt}" != *"pull request title"* ]] || { echo "FAIL: the prompt still asks the agent for a pull request title"; exit 1; }
   # Follow-up rounds keep the existing branch: no branch-name instruction.
   [[ "${prompt}" != *".branch-name"* ]]
-  # Every round says the same short thing: the point of the run and who does
-  # what. Kept to one paragraph on purpose - a model once read a long list of
-  # instructions (banned commands, warnings about what is not a deliverable) as
-  # the task itself and answered with a commit message instead of code.
-  [[ "${prompt}" == *"to the owner's approval"* ]] || { echo "FAIL: the prompt does not state what the run is for"; exit 1; }
-  [[ "${prompt}" == *"Your part is the change in the working tree"* ]] || { echo "FAIL: the prompt does not name the working-tree change as the agent's part"; exit 1; }
-  [[ "${prompt}" == *"The driver names the branch and creates the commit, the push, the pull request and the review request"* ]] || { echo "FAIL: the prompt does not say the driver owns everything that needs GitHub"; exit 1; }
-  [[ "${prompt}" == *"gh pr create"* ]] && { echo "FAIL: the prompt enumerates commands the agent must not run"; exit 1; }
-  [[ "${prompt}" == *"counts as no work"* ]] && { echo "FAIL: the prompt lectures the agent about what it may not answer with"; exit 1; }
   echo "opencode_build_prompt passed"
 }
 
@@ -49,6 +45,10 @@ test_opencode_build_prompt_fresh() {
   prompt="$(opencode_build_prompt "Issue title" "Issue body")"
   # A fresh implementation round lets the agent choose the feature branch.
   [[ "${prompt}" == *".branch-name"* ]] || { echo "FAIL: the branch-name offer is missing"; exit 1; }
+  # The branch name is the one thing asked for besides the change, and it stays
+  # an offer: the driver names the branch when the round leaves none.
+  [[ "${prompt}" == *"if you leave the file absent, the driver picks a name for you"* ]] || { echo "FAIL: the branch-name offer is not optional"; exit 1; }
+  [[ "${prompt}" != *".commit-msg"* ]] || { echo "FAIL: the prompt still asks the agent for a commit message"; exit 1; }
   echo "opencode_build_prompt (fresh round, branch-name offered) passed"
 }
 
@@ -58,10 +58,10 @@ test_opencode_build_handoff_prompt() {
   [[ "${prompt}" == *"taking over unfinished work from model opencode/dead-model"* ]]
   [[ "${prompt}" == *"Continue this same session"* ]]
   [[ "${prompt}" == *"preserve all work already present"* ]]
-  [[ "${prompt}" == *".commit-msg"* ]]
-  # The handoff carries the same short statement of the division of labour.
-  [[ "${prompt}" == *"Your part is the change in the working tree"* ]] || { echo "FAIL: the handoff prompt does not name the working-tree change as the agent's part"; exit 1; }
-  [[ "${prompt}" == *"The driver names the branch and creates the commit"* ]] || { echo "FAIL: the handoff prompt does not say the driver owns everything that needs GitHub"; exit 1; }
+  [[ "${prompt}" == *"or create commits; the outer driver commits and pushes for you"* ]] || { echo "FAIL: the handoff prompt lets the takeover model commit"; exit 1; }
+  # A takeover round is asked for the rest of the change and nothing else.
+  [[ "${prompt}" != *".commit-msg"* ]] || { echo "FAIL: the handoff prompt still asks the agent for a commit message"; exit 1; }
+  [[ "${prompt}" != *"pull request title"* ]] || { echo "FAIL: the handoff prompt still asks the agent for a pull request title"; exit 1; }
   echo "opencode_build_handoff_prompt passed"
 }
 
@@ -71,21 +71,35 @@ test_opencode_run_message_only() {
   local tmp log out
   tmp="$(mktemp -d)"
   log="$(mktemp)"
-  # A model that answered with a message instead of doing the work.
+  # A round the driver has to survive: the model answered with a commit message
+  # and left the working tree alone.
   opencode_run "Issue" "Body" "${tmp}" "opencode/talker" >/dev/null 2>"${log}"
   [[ -s "${tmp}/.commit-msg" ]] || { echo "FAIL: the mock message-only round wrote no message"; cat "${log}" >&2; exit 1; }
   [[ ! -e "${tmp}/conahcnuj.mock" ]] || { echo "FAIL: the mock message-only round touched the tree"; exit 1; }
   # The next model is handed the same session and asked to finish the work.
   out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/talker")"
   [[ "${out}" == *"--session ses_mock"* ]]
-  [[ "${out}" == *"Your part is the change in the working tree"* ]] || { echo "FAIL: the handoff prompt lost the division of labour"; exit 1; }
-  [[ "${out}" == *"because it could not complete the task"* ]] || { echo "FAIL: the takeover prompt does not say why the previous round stopped"; exit 1; }
   [[ -f "${tmp}/conahcnuj.mock" ]]
-  [[ "$(cat "${tmp}/.commit-msg")" == "mock commit from opencode/second" ]] || { echo "FAIL: the second model's message did not replace the first"; exit 1; }
   rm -f "${log}"
   rm -rf "${tmp}"
   unset OPENCODE_TEST_MODE MOCK_OPENCODE_MESSAGE_ONLY OPENCODE_SESSION_ID
   echo "opencode_run (message-only round) passed"
+}
+
+test_opencode_run_no_message() {
+  export OPENCODE_TEST_MODE=1
+  export MOCK_OPENCODE_NO_MESSAGE="opencode/quiet"
+  local tmp out
+  tmp="$(mktemp -d)"
+  # The normal round now: the prompt asks for the change and nothing else, so
+  # the agent leaves no .commit-msg and the driver labels the commit itself.
+  out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/quiet")"
+  [[ "${out}" == *"opencode/quiet"* ]]
+  [[ -f "${tmp}/conahcnuj.mock" ]] || { echo "FAIL: the round produced no change"; exit 1; }
+  [[ ! -e "${tmp}/.commit-msg" ]] || { echo "FAIL: the mock wrote a commit message anyway"; exit 1; }
+  rm -rf "${tmp}"
+  unset OPENCODE_TEST_MODE MOCK_OPENCODE_NO_MESSAGE OPENCODE_SESSION_ID
+  echo "opencode_run (no commit message) passed"
 }
 
 test_opencode_run() {
@@ -99,7 +113,8 @@ test_opencode_run() {
   [[ "${out}" == *"Test Issue"* ]]
   [[ "${out}" == *"more ctx"* ]]
   # A mock change file is written (the driver relies on working-tree changes),
-  # and the mock honours the .commit-msg contract.
+  # and the mock also leaves the .commit-msg some repositories' own agent
+  # instructions ask for.
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
   rm -rf "${tmp}"
@@ -240,6 +255,7 @@ test_opencode_build_prompt_fresh
 test_opencode_build_handoff_prompt
 test_opencode_run
 test_opencode_run_message_only
+test_opencode_run_no_message
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
 test_opencode_run_renders_log

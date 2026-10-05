@@ -93,7 +93,7 @@ ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "mock commit from opencode/first" <<<"${ONELINE}" || { echo "FAIL: the agent's .commit-msg was not used for the commit"; exit 1; }
 FULL_LOG="$(git -C "${WORK}" log --format=%B)"
 grep -q "Model: opencode/first" <<<"${FULL_LOG}" || { echo "FAIL: model trailer missing"; exit 1; }
-# The fixed driver-side message must not reappear.
+# A driver-side label of its own must not appear in place of the agent's message.
 grep -q "conahcnuj:.*address review feedback" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
 
 echo "conahcnuj resume flow passed"

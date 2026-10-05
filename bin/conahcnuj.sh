@@ -2,15 +2,19 @@
 # conahcnuj - issue-driven autonomous development driver.
 #
 # Resolves a GitHub issue (or resumes a pull request) end-to-end. The coding
-# agent's part is the change in the working tree; the driver creates everything
-# that needs GitHub (the branch, the commit, the push, the pull request and the
-# review request). The agent only labels its work: it writes the commit message
-# (.commit-msg) and may choose the feature branch name (.branch-name; when the
-# agent leaves none out, the driver picks one). A PR number given on the command
-# line is detected and resumed automatically:
+# agent's job is the change in the working tree and nothing else: it is asked
+# for no commit message, no pull request title and no review bookkeeping,
+# because a second, smaller deliverable is a second thing it can finish instead
+# of the change (issue #146). Everything the driver needs to present that change
+# it produces itself: the branch name (conahcnuj/<n>-<slug>, or .branch-name
+# when the round happened to leave one), the commit message, the pull request
+# and the review request. A round is done when the working tree holds the change;
+# a round that only left driver metadata behind did nothing and is handed to the
+# next model. A PR number given on the command line is detected and resumed
+# automatically:
 #   1. checks out the latest default branch and implements the issue with
 #      opencode (handing the same session and working tree to another model
-#      when one fails), committing only with the agent's .commit-msg
+#      when one fails), committing the finished working tree
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
 #      mergeability) passes, then assigns the repository owner as reviewer.
 #      That hand-off to a human is the last thing a run owes the PR, so the
@@ -202,10 +206,10 @@ check_timeout() {
   fi
 }
 
-# True when the working tree holds real changes. The coding agent's
-# .commit-msg and .branch-name are metadata, not code changes, so they are
-# ignored: a model that writes nothing but a commit message or a branch name
-# must not count as having produced work.
+# True when the working tree holds real changes. .commit-msg and .branch-name
+# are the driver's metadata files, not code changes, so they are ignored: a model
+# that writes nothing but a commit message or a branch name must not count as
+# having produced work.
 workdir_changed() {
   local dir="${1}" changes
   changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' || true)"
@@ -264,28 +268,57 @@ apply_driver_commit_model() {
   fi
 }
 
-# Commit every working-tree change as a Verified commit, then sync the local
-# branch to the remote head api-commit.sh created. The commit message always
-# comes from the coding agent (.commit-msg); the driver never invents a fixed
-# message, so when the agent left none out it refuses to commit. Test mode:
-# plain local commit (no network / no secret) so flows can be exercised
-# offline. api-commit.sh appends the Model trailer from CONAHCNUJ_COMMIT_MODEL;
-# test mode adds the same trailer with a second -m paragraph.
-commit_changes() {
-  local message
-  # .branch-name is metadata, never part of the implementation.
-  rm -f .branch-name
-  if [[ ! -f ".commit-msg" ]]; then
-    echo "ERROR: the coding agent left no .commit-msg; refusing to commit with a fixed message." >&2
-    return 1
+# Resolve the one-line commit message for the change in the working tree.
+# Prints it on stdout and consumes the .commit-msg it used.
+#
+# The coding agent is not asked for a message. A message is a deliverable beside
+# the change, and a model handed two will sometimes finish the small one: it
+# answers with a commit message (or a pull request title) and leaves the working
+# tree empty, which is the round this driver has to survive (issue #146). So the
+# message comes from the driver. A .commit-msg that exists anyway - a repository
+# whose own agent instructions ask for one - is still honoured, and a missing one
+# costs the finished change nothing.
+# Args: title [subject]  (title = the issue / pull request title, subject = what
+# this round was asked to do, e.g. "Fix the failing checks")
+driver_commit_message() {
+  local title="${1}" subject="${2:-}" message
+  if [[ -f ".commit-msg" ]]; then
+    message="$(head -1 ".commit-msg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    rm -f .commit-msg
+    if [[ -n "${message}" ]]; then
+      echo "Using the coding agent's commit message: ${message}" >&2
+      printf '%s\n' "${message}"
+      return 0
+    fi
+    echo "WARNING: .commit-msg is empty; labelling the commit after the round instead." >&2
   fi
-  message="$(head -1 .commit-msg)"
-  rm -f .commit-msg
+  # The item's title is already a one-line summary of the work, so it labels the
+  # first round; a follow-up round (failing checks, review feedback) is better
+  # described by what it was asked to do than by the issue it belongs to.
+  message="$(printf '%s' "${subject:-${title}}" | head -1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
   if [[ -z "${message}" ]]; then
-    echo "ERROR: .commit-msg is empty; the coding agent must write a commit message." >&2
-    return 1
+    message="conahcnuj: implementation"
+    echo "WARNING: no commit message and no title to derive one from; using '${message}'." >&2
+  else
+    echo "No commit message from the coding agent; labelling the commit: ${message}" >&2
   fi
-  echo "Using coding agent's commit message: ${message}" >&2
+  printf '%s\n' "${message}"
+}
+
+# Commit every working-tree change as a Verified commit, then sync the local
+# branch to the remote head api-commit.sh created. The message is the coding
+# agent's .commit-msg when the round left one, otherwise the driver's own label
+# for the round (driver_commit_message): a finished change is never thrown away
+# over its label. Args: title [subject]. Test mode: plain local commit (no
+# network / no secret) so flows can be exercised offline. api-commit.sh appends
+# the Model trailer from CONAHCNUJ_COMMIT_MODEL; test mode adds the same trailer
+# with a second -m paragraph.
+commit_changes() {
+  local title="${1}" subject="${2:-}" message
+  # The driver's metadata files are never part of the implementation.
+  rm -f .branch-name
+  message="$(driver_commit_message "${title}" "${subject}")"
+  echo "Creating commit: ${message}" >&2
   git add -A
   apply_driver_commit_model
   if [[ "${TEST_MODE}" == "1" ]]; then
@@ -610,8 +643,9 @@ resolve_agent_branch_name() {
 
 # Run opencode until one model completes the work. A failed model hands its
 # session and working tree to the next model. Records tried models and handoffs.
-# A model that left the tree untouched and only wrote .commit-msg is logged as
-# such, because the run log is where that shows up.
+# The finished change in the working tree ends the loop; a run that only left
+# driver metadata behind (a .commit-msg and no code change) produced nothing and
+# is handed on like any other empty round.
 implement() {
   local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message
   workdir="$(pwd)"
@@ -637,20 +671,25 @@ implement() {
     fi
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
     wrote_message="false"
-    if [[ -s "${workdir}/.commit-msg" ]]; then
+    if [[ -f "${workdir}/.commit-msg" ]]; then
       wrote_message="true"
     fi
-    if workdir_changed "${workdir}" && [[ "${wrote_message}" == "true" ]]; then
+    # A failed run never ends the loop even if it left a partial change: the next
+    # model continues in the same working tree. A successful run that changed
+    # nothing did no work, whatever metadata it left behind.
+    if [[ "${run_failed}" != "true" ]] && workdir_changed "${workdir}"; then
       echo "Model ${model} completed the work." >&2
       OPENCODE_LAST_MODEL="${model}"
       return 0
     fi
+    # A label for a change that is not there would label the next model's
+    # change instead.
     rm -f "${workdir}/.commit-msg"
     previous_model="${model}"
     if [[ "${run_failed}" == "true" ]]; then
       echo "Model ${model} failed before completing the work; handing off to the next model." >&2
     elif [[ "${wrote_message}" == "true" ]]; then
-      echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
+      echo "Model ${model} left a commit message but no change in the working tree; handing off to the next model." >&2
     else
       echo "Model ${model} produced no complete work; handing off to the next model." >&2
     fi
@@ -881,15 +920,14 @@ drive() {
   while true; do
     check_timeout
 
-    # Commit leftovers from a previously interrupted run. Only possible while
-    # the interrupted run's agent had already written its .commit-msg: the
-    # driver never invents a commit message, so a dirty tree without one (e.g.
-    # when the branch is resumed / already implemented and no implement round
-    # ran in this process, leaving scratch files behind) has nothing the driver
-    # may commit. It keeps polling the PR instead of crashing over files it was
-    # never asked to commit.
+    # Commit leftovers from a previously interrupted run, but only when that run
+    # got as far as writing a .commit-msg: it is the only evidence that the
+    # leftover change was an implementation rather than scratch files from an
+    # interrupted run. A dirty tree without one (a resumed / already implemented
+    # branch, leftover scratch files) is left alone and the driver keeps working
+    # on the PR instead of sweeping unrelated files into a commit (issue #124).
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
+      commit_changes "${title}"
       # After committing our own fix, wait for CI to re-run instead of
       # immediately trying to implement (which would fail if nothing changed).
       continue
@@ -907,7 +945,7 @@ drive() {
         produced_change="true"
       fi
       if workdir_changed "$(pwd)"; then
-        commit_changes
+        commit_changes "${title}" "Add the change the pull request is missing"
         produced_change="true"
       fi
       if [[ "${produced_change}" != "true" ]]; then
@@ -934,7 +972,7 @@ drive() {
         produced_change="true"
       fi
       if workdir_changed "$(pwd)"; then
-        commit_changes
+        commit_changes "${title}" "Fix the pull request's failing checks"
         produced_change="true"
       fi
       if [[ "${produced_change}" != "true" ]]; then
@@ -980,7 +1018,7 @@ ${summary}"; then
         addressed="true"
       fi
       if workdir_changed "$(pwd)"; then
-        commit_changes
+        commit_changes "${title}" "Address the pull request review feedback"
         addressed="true"
       fi
       if [[ "${addressed}" == "true" ]]; then
@@ -1035,15 +1073,17 @@ start_issue() {
   if branch_has_commits "${default_oid}" "${default_branch}"; then
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
   elif workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
+    # An interrupted earlier run left both the change and its label behind (see
+    # drive's leftover path): commit that change instead of implementing again.
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
-    commit_changes
+    commit_changes "${title}"
   else
     if ! implement "${title}" "${body}"; then
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi
     branch="$(resolve_agent_branch_name "${owner}" "${repo}" "${default_oid}" "${branch}")"
-    commit_changes
+    commit_changes "${title}"
   fi
 
   drive "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}"

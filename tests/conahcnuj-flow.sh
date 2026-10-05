@@ -96,8 +96,8 @@ grep -q "Model opencode/second completed the work" "${LOG}" || { echo "FAIL: sec
 # Capture first, then grep via here-string: `git log | grep -q` under
 # `set -o pipefail` is flaky (grep -q exits on the first match, git gets
 # SIGPIPE, and pipefail reports a false failure).
-# The commit message always comes from the coding agent (.commit-msg), never
-# from a fixed driver-side fallback.
+# This round leaves a .commit-msg (the mock honours it), and the driver must
+# commit with it rather than with a label of its own.
 ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the handoff model's .commit-msg was not used"; exit 1; }
