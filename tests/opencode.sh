@@ -32,6 +32,18 @@ test_opencode_build_prompt() {
   [[ "${prompt}" == *".commit-msg"* ]]
   # Follow-up rounds keep the existing branch: no branch-name instruction.
   [[ "${prompt}" != *".branch-name"* ]]
+  # The contract: the working-tree change is the deliverable and the driver owns
+  # everything that needs GitHub. A model that reads the .commit-msg instruction
+  # as the task itself answers with a message (or a PR title) and changes
+  # nothing, which the driver can only count as no work.
+  [[ "${prompt}" == *"The deliverable is the change itself"* ]] || { echo "FAIL: the prompt does not name the working-tree change as the deliverable"; exit 1; }
+  [[ "${prompt}" == *"all the way to the owner's approval"* ]] || { echo "FAIL: the prompt does not state what the run is for"; exit 1; }
+  [[ "${prompt}" == *"is the driver's job"* ]] || { echo "FAIL: the prompt does not hand commit / push / PR creation to the driver"; exit 1; }
+  [[ "${prompt}" == *"do not write a pull request title or body yourself"* ]] || { echo "FAIL: the prompt invites the agent to name the pull request"; exit 1; }
+  [[ "${prompt}" == *"git commit, git push, git vc, gh pr create"* ]] || { echo "FAIL: the prompt does not forbid committing or opening a PR"; exit 1; }
+  # The message is a label for the driver's commit, and never the deliverable.
+  [[ "${prompt}" == *"never stands in for the work"* ]] || { echo "FAIL: the prompt does not demote .commit-msg to metadata"; exit 1; }
+  [[ "${prompt}" == *"counts as no work"* ]] || { echo "FAIL: the prompt does not say a message-only round is no work"; exit 1; }
   echo "opencode_build_prompt passed"
 }
 
@@ -39,7 +51,9 @@ test_opencode_build_prompt_fresh() {
   local prompt
   prompt="$(opencode_build_prompt "Issue title" "Issue body")"
   # A fresh implementation round lets the agent choose the feature branch.
-  [[ "${prompt}" == *".branch-name"* ]]
+  [[ "${prompt}" == *".branch-name"* ]] || { echo "FAIL: the branch-name offer is missing"; exit 1; }
+  # The branch name is metadata for the driver, not a stand-in for the work.
+  [[ "${prompt}" == *"not a substitute for the implementation"* ]] || { echo "FAIL: .branch-name is not marked as metadata"; exit 1; }
   echo "opencode_build_prompt (fresh round, branch-name offered) passed"
 }
 
@@ -50,7 +64,35 @@ test_opencode_build_handoff_prompt() {
   [[ "${prompt}" == *"Continue this same session"* ]]
   [[ "${prompt}" == *"preserve all work already present"* ]]
   [[ "${prompt}" == *".commit-msg"* ]]
+  # The handoff prompt carries the same contract: a takeover model that only
+  # writes a message has taken over nothing.
+  [[ "${prompt}" == *"The deliverable is the change itself"* ]] || { echo "FAIL: the handoff prompt does not name the working-tree change as the deliverable"; exit 1; }
+  [[ "${prompt}" == *"is the driver's job"* ]] || { echo "FAIL: the handoff prompt does not hand commit / push / PR creation to the driver"; exit 1; }
+  [[ "${prompt}" == *"it is not the deliverable and counts as no work"* ]] || { echo "FAIL: the handoff prompt does not demote .commit-msg to metadata"; exit 1; }
   echo "opencode_build_handoff_prompt passed"
+}
+
+test_opencode_run_message_only() {
+  export OPENCODE_TEST_MODE=1
+  export MOCK_OPENCODE_MESSAGE_ONLY="opencode/talker"
+  local tmp log out
+  tmp="$(mktemp -d)"
+  log="$(mktemp)"
+  # The misunderstanding this prompt guards against: the model answers with a
+  # commit message and leaves the working tree untouched.
+  opencode_run "Issue" "Body" "${tmp}" "opencode/talker" >/dev/null 2>"${log}"
+  [[ -s "${tmp}/.commit-msg" ]] || { echo "FAIL: the mock message-only round wrote no message"; cat "${log}" >&2; exit 1; }
+  [[ ! -e "${tmp}/conahcnuj.mock" ]] || { echo "FAIL: the mock message-only round touched the tree"; exit 1; }
+  # The next model is handed the same session and asked to finish the work.
+  out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/talker")"
+  [[ "${out}" == *"--session ses_mock"* ]]
+  [[ "${out}" == *"The deliverable is the change itself"* ]] || { echo "FAIL: the handoff prompt lost the deliverable contract"; exit 1; }
+  [[ -f "${tmp}/conahcnuj.mock" ]]
+  [[ "$(cat "${tmp}/.commit-msg")" == "mock commit from opencode/second" ]] || { echo "FAIL: the second model's message did not replace the first"; exit 1; }
+  rm -f "${log}"
+  rm -rf "${tmp}"
+  unset OPENCODE_TEST_MODE MOCK_OPENCODE_MESSAGE_ONLY OPENCODE_SESSION_ID
+  echo "opencode_run (message-only round) passed"
 }
 
 test_opencode_run() {
@@ -204,6 +246,7 @@ test_opencode_build_prompt
 test_opencode_build_prompt_fresh
 test_opencode_build_handoff_prompt
 test_opencode_run
+test_opencode_run_message_only
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
 test_opencode_run_renders_log
