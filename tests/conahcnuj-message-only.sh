@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # conahcnuj "message-only round" test (offline).
 #
-# The failure mode this guards: a coding agent that reads the driver's
-# .commit-msg instruction as the task itself answers with a commit message (or a
-# pull request title) and leaves the working tree untouched. The driver must
-# count that round as no work, say so in the run log, and hand the session to
-# the next model, whose change is what reaches the branch.
+# A model can finish its turn having written nothing but a commit message. The
+# driver has nothing to commit then, so that round counts as no work, is said so
+# in the run log, and the session goes to the next model, whose change is what
+# reaches the branch.
 #
 #   issue read -> branch -> implement (talker: message only, no change) ->
 #   hand off -> implement (second: real change) -> PR #126 created ->
@@ -71,7 +70,7 @@ echo "-----------------------------"
 
 [[ ${RC} -eq 0 ]] || { echo "FAIL: driver exited ${RC} (expected 0)"; exit 1; }
 
-grep -q "Model opencode/talker answered with a commit message but left the working tree untouched; the message is not the deliverable, so the next model must implement the change itself." "${LOG}" || { echo "FAIL: the message-only round was not reported as no work"; exit 1; }
+grep -q "Model opencode/talker left the working tree unchanged and only wrote .commit-msg" "${LOG}" || { echo "FAIL: the message-only round was not reported in the run log"; exit 1; }
 grep -q "produced no complete work" "${LOG}" && { echo "FAIL: the message-only round was reported as an ordinary empty round"; exit 1; }
 grep -q "Handing off session ses_mock from opencode/talker to opencode/second" "${LOG}" || { echo "FAIL: the session was not handed to the next model"; exit 1; }
 grep -q "Model opencode/second completed the work" "${LOG}" || { echo "FAIL: the second model was not adopted"; exit 1; }
@@ -85,7 +84,7 @@ grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the 
 grep -q "mock commit from opencode/talker" <<<"${ONELINE}" && { echo "FAIL: a message-only round was committed"; exit 1; }
 # init + implement = 2 commits from the branch tip.
 [[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "2" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
-# The talker's message is metadata the driver consumes, never committed content.
+# The talker's message is what the driver consumes, never committed content.
 [[ ! -e "${WORK}/.commit-msg" ]] || { echo "FAIL: the talker's message survived into the commit"; exit 1; }
 
 echo "conahcnuj message-only round passed"

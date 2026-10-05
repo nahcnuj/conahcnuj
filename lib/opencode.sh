@@ -25,17 +25,15 @@ opencode_get_models() {
   opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 }
 
-# The contract every round shares, whatever the model or the stage: the change
-# in the working tree is the deliverable, and everything that needs GitHub
-# belongs to the driver. Models that read the .commit-msg instruction as the
-# task itself answer with a message (and sometimes a pull request title) and
-# change nothing, which the driver can only count as no work, so the deliverable
-# and the driver's share are stated before any metadata instruction appears.
+# What every round shares, whatever the model or the stage: the point of the run
+# and who does what. This is deliberately one short paragraph. A model once read
+# a long list of instructions (banned commands, warnings that a message is not a
+# deliverable) as the task itself and answered with a commit message and a pull
+# request title instead of writing code, so the paragraph states the division of
+# labour and stops there: telling the coding agent how to work gets in its way.
 opencode_agent_contract() {
   cat <<'EOF'
-You are the coding agent in a driver that takes this issue (or the pull request being resumed) all the way to the owner's approval. The deliverable is the change itself: implement the issue for real in the working tree, run the repository's own validation, and leave the branch in a state a reviewer can approve. An analysis, a plan, or a description of what you would change is not a deliverable.
-
-Everything that needs GitHub is the driver's job once you finish: it names the branch, creates the commit, pushes it, opens the pull request with its title and description, and requests the review. So do not run git commit, git push, git vc, gh pr create or anything else that creates a commit, a branch or a pull request, and do not write a pull request title or body yourself.
+This run takes the issue (or the pull request being resumed) to the owner's approval. Your part is the change in the working tree: implement it and run the repository's own validation. The driver names the branch and creates the commit, the push, the pull request and the review request once you are done.
 EOF
 }
 
@@ -60,18 +58,20 @@ ${extra_context}"
 
 $(opencode_agent_contract)
 
-When the implementation is complete, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root, summarizing the changes you made. It is a one-line label the driver copies into the commit it makes for you, so it never stands in for the work: a round that only writes that file and leaves the working tree untouched counts as no work and is handed to the next model."
+Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
+
+When you are done, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root. The driver uses that line as the commit message it makes for you."
   if [[ -z "${extra_context}" ]]; then
     prompt="${prompt}
 
-If you want to choose the feature branch name, write your preferred branch name (one line, e.g. feature/my-work) to the file .branch-name in the repository root; if you leave the file absent, the driver picks a name for you. Like .commit-msg it is metadata for the driver, not a substitute for the implementation."
+If you want to choose the feature branch name, write your preferred branch name (one line, e.g. feature/my-work) to the file .branch-name in the repository root; if you leave the file absent, the driver picks a name for you."
   fi
   printf '%s\n' "${prompt}"
 }
 
 opencode_build_handoff_prompt() {
   local previous_model="${1}"
-  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch or discard existing work.\n\n%s\n\nWhen the implementation is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root. It is a one-line label the driver copies into the commit it makes for you: until the working tree holds the finished change it is not the deliverable and counts as no work.\n' "${previous_model}" "$(opencode_agent_contract)"
+  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits.\n\n%s\n\nWhen the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}" "$(opencode_agent_contract)"
 }
 
 # Run opencode with a specific model and publish its session ID in
@@ -85,7 +85,7 @@ opencode_run() {
   else
     prompt="$(opencode_build_prompt "${issue_title}" "${issue_body}" "${extra_context}")"
     if [[ -n "${previous_model}" ]]; then
-      prompt="${prompt}"$'\n\n'"Model ${previous_model} could not complete the work through its session (it may have failed, or answered with a commit message and no change). Continue from the current working tree without discarding existing changes."
+      prompt="${prompt}"$'\n\n'"Model ${previous_model} did not finish this work through its session. Continue from the current working tree without discarding existing changes."
     fi
   fi
 
@@ -114,8 +114,7 @@ opencode_run() {
           printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
         fi
       else
-        # The mistake the prompt text above is meant to prevent: the model
-        # answers with a commit message and leaves the working tree untouched.
+        # A model that answered with a message instead of doing the work.
         if [[ -d "${workdir}" && -w "${workdir}" ]]; then
           printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
         fi

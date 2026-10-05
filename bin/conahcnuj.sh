@@ -2,14 +2,12 @@
 # conahcnuj - issue-driven autonomous development driver.
 #
 # Resolves a GitHub issue (or resumes a pull request) end-to-end. The coding
-# agent's deliverable is the change in the working tree; everything that needs
-# GitHub (the commit, the push, the pull request with its title and body, the
-# review request) is this driver's job. The agent only labels its work: it
-# writes the commit message (.commit-msg) and may choose the feature branch
-# name (.branch-name; when the agent leaves none out, the driver picks one), and
-# a round that writes one of those without changing the tree counts as no work
-# and is handed to the next model. A PR number given on the command line is
-# detected and resumed automatically:
+# agent's part is the change in the working tree; the driver creates everything
+# that needs GitHub (the branch, the commit, the push, the pull request and the
+# review request). The agent only labels its work: it writes the commit message
+# (.commit-msg) and may choose the feature branch name (.branch-name; when the
+# agent leaves none out, the driver picks one). A PR number given on the command
+# line is detected and resumed automatically:
 #   1. checks out the latest default branch and implements the issue with
 #      opencode (handing the same session and working tree to another model
 #      when one fails), committing only with the agent's .commit-msg
@@ -612,10 +610,8 @@ resolve_agent_branch_name() {
 
 # Run opencode until one model completes the work. A failed model hands its
 # session and working tree to the next model. Records tried models and handoffs.
-# A model that only answered with a commit message (or a pull request title) and
-# left the tree untouched did no work at all: that round is reported as such, so
-# the run log says the message is not the deliverable instead of a bare
-# "produced no complete work".
+# A model that left the tree untouched and only wrote .commit-msg is logged as
+# such, because the run log is where that shows up.
 implement() {
   local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message
   workdir="$(pwd)"
@@ -654,7 +650,7 @@ implement() {
     if [[ "${run_failed}" == "true" ]]; then
       echo "Model ${model} failed before completing the work; handing off to the next model." >&2
     elif [[ "${wrote_message}" == "true" ]]; then
-      echo "Model ${model} answered with a commit message but left the working tree untouched; the message is not the deliverable, so the next model must implement the change itself." >&2
+      echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
     else
       echo "Model ${model} produced no complete work; handing off to the next model." >&2
     fi
