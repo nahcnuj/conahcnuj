@@ -60,8 +60,6 @@ ${extra_context}"
 
 $(opencode_agent_contract)
 
-Do NOT create any commits; just edit files in the working tree. The outer driver commits and pushes for you.
-
 When the implementation is complete, write a short, descriptive commit message (one line, no more than 72 characters) to the file .commit-msg in the repository root, summarizing the changes you made. It is a one-line label the driver copies into the commit it makes for you, so it never stands in for the work: a round that only writes that file and leaves the working tree untouched counts as no work and is handed to the next model."
   if [[ -z "${extra_context}" ]]; then
     prompt="${prompt}

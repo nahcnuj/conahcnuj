@@ -28,7 +28,11 @@ test_opencode_build_prompt() {
   [[ "${prompt}" == *"Issue: Issue title"* ]]
   [[ "${prompt}" == *"Issue body"* ]]
   [[ "${prompt}" == *"extra ctx"* ]]
-  [[ "${prompt}" == *"Do NOT create any commits"* ]]
+  # The contract owns the no-commit rule; a separate "Do NOT create any
+  # commits / just edit files" instruction reads as the task itself and is
+  # what made agents answer with a message instead of the change.
+  [[ "${prompt}" != *"Do NOT create any commits"* ]] || { echo "FAIL: the prompt narrows the task to 'do not commit'"; exit 1; }
+  [[ "${prompt}" != *"just edit files"* ]] || { echo "FAIL: the prompt narrows the task to 'editing files'"; exit 1; }
   [[ "${prompt}" == *".commit-msg"* ]]
   # Follow-up rounds keep the existing branch: no branch-name instruction.
   [[ "${prompt}" != *".branch-name"* ]]
