@@ -299,6 +299,47 @@ test_empty_and_unknown_events() {
   echo "render empty/unknown events passed"
 }
 
+test_replayed_part_rendered_once() {
+  local tmp out headers
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # The same part (same id, identical payload) arriving again -- session
+  # replay / stream reconnect -- must not print a second copy of the block,
+  # or a handoff chain prints the whole session once per round.
+  out="$(cat <<'EOF' |
+{"type":"text","part":{"id":"prt_a1","type":"text","text":"hello once"}}
+{"type":"text","part":{"id":"prt_a1","type":"text","text":"hello once"}}
+{"type":"tool_use","part":{"id":"prt_b2","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"/x\n","metadata":{"exit":0},"title":"pwd"}}}
+{"type":"tool_use","part":{"id":"prt_b2","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"/x\n","metadata":{"exit":0},"title":"pwd"}}}
+EOF
+    bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  headers="$(printf '%s\n' "${out}" | grep -c '\[main\]' || true)"
+  [[ "${headers}" == "2" ]] || fail "replayed part printed again (${headers} headers)" "${out}"
+  [[ "$(printf '%s\n' "${out}" | grep -c 'hello once')" == "1" ]] || fail "text duplicated" "${out}"
+  [[ "$(printf '%s\n' "${out}" | grep -c '✅ pwd')" == "1" ]] || fail "tool duplicated" "${out}"
+  rm -rf "${tmp}"
+  echo "render replayed part once passed"
+}
+
+test_distinct_parts_and_updates_still_render() {
+  local tmp out headers
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # Same content under a *different* part id is a real new event, and the
+  # same id carrying *changed* content is a real update: neither is a replay.
+  out="$(cat <<'EOF' |
+{"type":"text","part":{"id":"prt_c1","type":"text","text":"same words"}}
+{"type":"text","part":{"id":"prt_c2","type":"text","text":"same words"}}
+{"type":"text","part":{"id":"prt_c1","type":"text","text":"same words but revised"}}
+EOF
+    bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  headers="$(printf '%s\n' "${out}" | grep -c '\[main\]' || true)"
+  [[ "${headers}" == "3" ]] || fail "distinct/updated parts were deduplicated (${headers} headers)" "${out}"
+  assert_contains "${out}" "  same words but revised" "updated content rendered"
+  rm -rf "${tmp}"
+  echo "render distinct parts and updates passed"
+}
+
 test_header_context
 test_header_repo_from_remote
 test_header_dir_subdirectory
@@ -315,5 +356,7 @@ test_non_json_passthrough
 test_nothing_is_truncated
 test_outside_git_tree
 test_empty_and_unknown_events
+test_replayed_part_rendered_once
+test_distinct_parts_and_updates_still_render
 
 echo "All opencode-render tests passed"
