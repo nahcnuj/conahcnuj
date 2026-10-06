@@ -192,6 +192,7 @@ function emit(tag, raw,  v, n, a, i) {
   emit("errmsg", field(field(e, "data"), "message"))
   emit("errname", field(e, "name"))
   emit("text", field(p, "text"))
+  emit("id", field(p, "id"))
 }
 AWK
 
@@ -203,13 +204,18 @@ AWK
 declare -A F=(
   [type]="" [tool]="" [status]="" [title]="" [command]=""
   [output]="" [exit]="" [toolerror]="" [errmsg]="" [errname]="" [text]=""
+  [id]=""
 )
 declare -A SEEN=()
+# Part ids already rendered, mapped to their content fingerprint. opencode can
+# replay parts (session resumes, stream reconnects), and the same part must
+# never be printed twice in the run log or troubleshooting drowns in copies.
+declare -A SEEN_PARTS=()
 
 render_fields() {
   local tag value nl=$'\n'
   local -a keys=(
-    type tool status title command output exit toolerror errmsg errname text
+    type tool status title command output exit toolerror errmsg errname text id
   )
   local key
   for key in "${keys[@]}"; do
@@ -397,6 +403,17 @@ render_event() {
       ;;
   esac
   render_fields "${line}"
+  # Same part id and identical content again: a replay (resumed session /
+  # reconnected event stream), so print it once. Same id with *changed*
+  # content still renders, the log must never drop a real update.
+  local pid="${F[id]}"
+  if [[ -n "${pid}" ]]; then
+    local fp="${F[type]}|${F[status]}|${F[title]}|${F[command]}|${F[output]}|${F[exit]}|${F[toolerror]}|${F[errmsg]}|${F[errname]}|${F[text]}"
+    if [[ "${SEEN_PARTS[${pid}]:-}" == "${fp}" ]]; then
+      return 0
+    fi
+    SEEN_PARTS[${pid}]="${fp}"
+  fi
   case "${F[type]}" in
     text | reasoning) render_block_text ;;
     tool_use) render_block_tool ;;
