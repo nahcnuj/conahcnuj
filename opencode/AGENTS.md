@@ -24,4 +24,6 @@
   セッションのシェルへ注入する git alias で、内部で `gh-app/api-commit.sh` を
   正しい owner/repo/branch 付きで呼ぶ。**`api-commit.sh` を直接実行しないこと**
   （直接実行はフックに止められ `git vc` へ誘導される）。
+- **`gh-app/` 配下のファイル（特に `gh-app/api-commit.sh`）は編集・変更しないこと。**
+  これらは verified commit 機構の実装詳細であり、変更する必要はない。
 - コミットを求められていないタスクでは、コミットせず作業ツリーに変更を残す。

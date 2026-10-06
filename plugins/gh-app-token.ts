@@ -312,6 +312,8 @@ const COMMIT_RULES = [
   "tracked worktree changes) but GitHub creates and verifies the commit.",
   "Do not run `git commit`, and do not run gh-app/api-commit.sh or any other",
   "gh-app script directly: `git vc` is the supported wrapper around it.",
+  "Do not edit or modify files under `gh-app/` (including `gh-app/api-commit.sh`);",
+  "those are implementation details of the verified-commit mechanism.",
   "Commit only when the task asks for a commit; otherwise leave the change in",
   "the working tree.",
 ].join(" ")
