@@ -182,11 +182,15 @@ function Install-GlobalAgentsMd {
 Write-Host "Deploying gh-app to $DstGhAppConfig"
 Deploy-GhApp $DstGhAppConfig
 
-# 2. opencode plugin
+# 2. opencode plugin (the factory plus the pure commit-detection module it
+#    imports; opencode's loader treats every .ts in this dir as a plugin, so
+#    the helper module must NOT be named with a plugin suffix... it is only
+#    imported, never loaded on its own).
 New-Item -ItemType Directory -Force -Path $DstPlugins | Out-Null
-$PluginName = "gh-app-token.ts"
-Copy-Item -LiteralPath (Join-Path $SrcPlugins $PluginName) -Destination (Join-Path $DstPlugins $PluginName) -Force
-Write-Host "  copied $PluginName"
+foreach ($PluginName in @("gh-app-token.ts", "gh-app-commit.ts")) {
+    Copy-Item -LiteralPath (Join-Path $SrcPlugins $PluginName) -Destination (Join-Path $DstPlugins $PluginName) -Force
+    Write-Host "  copied $PluginName"
+}
 
 # 3. global opencode rules (opencode/AGENTS.md -> <Destination>/AGENTS.md)
 Install-GlobalAgentsMd $Destination

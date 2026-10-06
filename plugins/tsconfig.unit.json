@@ -5,5 +5,5 @@
     "rootDir": ".",
     "outDir": "../test/.unit/out"
   },
-  "include": ["gh-app-token.ts"]
+  "include": ["gh-app-token.ts", "gh-app-commit.ts"]
 }

@@ -39,6 +39,7 @@ INST="${TMP}/inst"
 #    path-injection), hence the fixed ./.smoke/ location.
 mkdir -p "${STAGE}/src" "${STAGE}/gh-app"
 cp "${INST}/plugins/gh-app-token.ts" "${STAGE}/src/"
+cp "${INST}/plugins/gh-app-commit.ts" "${STAGE}/src/" 2>/dev/null || true
 cp "${INST}/gh-app/"*.sh "${STAGE}/gh-app/"
 # Seed the bot-ID cache: keeps this test deterministic and offline-safe
 # (the public-API lookup behind it shares runner IPs and gets rate-limited).
@@ -67,7 +68,7 @@ cat > "${STAGE}/src/tsconfig.json" <<'EOF'
     "outDir": "../out",
     "types": ["node"]
   },
-  "include": ["gh-app-token.ts"]
+  "include": ["gh-app-token.ts", "gh-app-commit.ts"]
 }
 EOF
 
