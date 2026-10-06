@@ -314,6 +314,11 @@ commit_changes() {
 # report (a failed report files nothing further).
 BUG_REPORT_INPUT=""
 BUG_REPORTED="0"
+# Set when implement() gave up because every model round died on an
+# environment error (providers unreachable / credentials rejected). The bug
+# report then words its opening and closing so the failure reads as the
+# environment, not a driver defect (#149).
+ENVIRONMENT_DOWN="0"
 # Exit code captured by the EXIT trap at runtime ($? is not preserved across a
 # function call). Pre-declared so the trap string's reference is valid.
 bug_exit_code=""
@@ -388,7 +393,7 @@ report_bug_title() {
 
 report_bug_body() {
   local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}"
-  local ended label log_tail log_block
+  local ended label log_tail log_block opener closing
   ended="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)"
   label=""
   if [[ -n "${input}" ]]; then
@@ -397,6 +402,13 @@ report_bug_body() {
     label="${owner}/${repo}#${input} (invoked as \`conahcnuj ${input}\`)"
   else
     label="unknown (no issue/PR number was given; repository: ${owner}/${repo})"
+  fi
+  if [[ "${ENVIRONMENT_DOWN}" == "1" ]]; then
+    opener="The conahcnuj driver stopped early on issue #${input}: every model round died on an environment error (provider unreachable or credentials rejected), so no model ever got to work. This issue was filed automatically to record the failed run (re-run: conahcnuj ${input})."
+    closing="Nothing in the log below points at a driver defect: the run's providers were unreachable or their credentials were rejected for the whole run. Re-run the driver once its providers are reachable."
+  else
+    opener="The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This issue was filed automatically so the driver bug can be fixed (re-run: conahcnuj ${input})."
+    closing="The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick this report up."
   fi
   log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
   if [[ -n "${log_tail}" ]]; then
@@ -407,7 +419,7 @@ ${log_tail}
     log_block="_No driver output was captured before the exit._"
   fi
   cat <<EOF
-The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This issue was filed automatically so the driver bug can be fixed (re-run: conahcnuj ${input}).
+${opener}
 
 ## Context
 
@@ -421,7 +433,7 @@ The conahcnuj driver terminated abnormally and could not resolve the item it was
 
 ${log_block}
 
-The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick this report up.
+${closing}
 EOF
 }
 
@@ -612,8 +624,17 @@ resolve_agent_branch_name() {
 # session and working tree to the next model. Records tried models and handoffs.
 # A model that left the tree untouched and only wrote .commit-msg is logged as
 # such, because the run log is where that shows up.
+#
+# A round that dies on an environment error (provider unreachable, credentials
+# rejected) says nothing about the model: no other model of the same provider
+# can reach it either, so the provider is given up on and its remaining models
+# are skipped. When every failure was environmental, the run ends with that
+# diagnosis and the bug report says so, instead of blaming the driver for an
+# environment that was down all along (#149).
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider
+  local dead_providers="" failed_rounds=0 env_failed_rounds=0 ran_without_failure=0
+  ENVIRONMENT_DOWN="0"
   workdir="$(pwd)"
   echo "Implementing with available models..." >&2
   OPENCODE_USED_MODELS=""
@@ -622,6 +643,11 @@ implement() {
   for model in $(opencode_get_models); do
     [[ -z "${model}" ]] && continue
     check_timeout
+    provider="${model%%/*}"
+    if [[ " ${dead_providers} " == *" ${provider} "* ]]; then
+      echo "Skipping ${model}: provider ${provider} already failed on an environment error, and no other of its models can change that." >&2
+      continue
+    fi
     now="$(date +%s)"
     run_timeout=$((MAX_DURATION - (now - START_TIME) - 30))
     (( run_timeout > 0 )) || run_timeout=1
@@ -648,14 +674,28 @@ implement() {
     rm -f "${workdir}/.commit-msg"
     previous_model="${model}"
     if [[ "${run_failed}" == "true" ]]; then
-      echo "Model ${model} failed before completing the work; handing off to the next model." >&2
-    elif [[ "${wrote_message}" == "true" ]]; then
-      echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
+      failed_rounds=$((failed_rounds + 1))
+      if [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+        env_failed_rounds=$((env_failed_rounds + 1))
+        dead_providers="${dead_providers} ${provider}"
+        echo "Model ${model} failed before completing the work: environment error (provider unreachable or credentials rejected); giving up on provider ${provider} for the rest of this run." >&2
+      else
+        echo "Model ${model} failed before completing the work; handing off to the next model." >&2
+      fi
     else
-      echo "Model ${model} produced no complete work; handing off to the next model." >&2
+      ran_without_failure=$((ran_without_failure + 1))
+      if [[ "${wrote_message}" == "true" ]]; then
+        echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
+      else
+        echo "Model ${model} produced no complete work; handing off to the next model." >&2
+      fi
     fi
   done
   echo "ERROR: no available model completed the work (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
+  if [[ "${failed_rounds}" -gt 0 && "${env_failed_rounds}" -eq "${failed_rounds}" && "${ran_without_failure}" -eq 0 ]]; then
+    ENVIRONMENT_DOWN="1"
+    echo "ERROR: every model round died on an environment error (provider unreachable or credentials rejected; providers given up on: ${dead_providers# }). Nothing the driver can do about that -- re-run it once its providers are reachable." >&2
+  fi
   return 1
 }
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # opencode wrapper for conahcnuj
 # Provides model enumeration and hands the same opencode session to the next
-# model when the current model cannot complete the work.
+# model when the current model cannot complete the work. A failed round sets
+# OPENCODE_ROUND_ENVIRONMENT, so the driver can tell "this provider is down"
+# apart from "this model is not good enough".
 #
 # opencode's own output is a stream of JSON events; lib/opencode-render.sh
 # turns it into the driver's run log, one context header per block. The stream
@@ -15,6 +17,14 @@ set -euo pipefail
 # paths. Sourcing a lib must not clobber the caller's variables.
 OPENCODE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPENCODE_RENDER_SH="${OPENCODE_LIB_DIR}/opencode-render.sh"
+
+# Whether the round that just finished died on an environment error: the
+# provider is unreachable, its credentials were rejected, or the transport
+# broke. Anything else (a model that cannot do the work) leaves this "false".
+# opencode_run sets it for every round so the driver can tell "this provider
+# is down" apart from "this model is not good enough" -- only the former says
+# anything about the provider's other models (#149).
+OPENCODE_ROUND_ENVIRONMENT="false"
 
 # List available models, one per line. Test mode: $MOCK_OPENCODE_MODELS.
 opencode_get_models() {
@@ -74,12 +84,28 @@ opencode_build_handoff_prompt() {
   printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits.\n\n%s\n\nWhen the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}" "$(opencode_agent_contract)"
 }
 
+# True when the round's JSON event stream carries an environment error
+# (provider unreachable, credentials rejected, transport broken).
+# Matched against the raw error-event lines, message and error name together,
+# so no JSON value extraction is needed: those messages embed quoted JSON of
+# their own ("xAI token refresh failed (400): {\"error\":...}"), which a value
+# extractor would cut at the first escaped quote. Text events are ignored on
+# purpose -- a model that merely writes the words in its answer is not an
+# environment failure.
+opencode_round_is_environment() {
+  local file="${1}"
+  [[ -f "${file}" ]] || return 1
+  grep -F '"type":"error"' "${file}" 2>/dev/null |
+    grep -Eiq 'token refresh failed|invalid_grant|cannot connect to api|unable to connect|was there a typo in the url|transport error|fetch failed|endpoint is unavailable|upstream request failed|upstream error|service temporarily overloaded|socket connection|providerautherror|authenticationerror|unauthorized|enotfound|econnrefused|econnreset|etimedout|getaddrinfo'
+}
+
 # Run opencode with a specific model and publish its session ID in
 # OPENCODE_SESSION_ID so a later model can continue the same conversation.
 # Args: title body workdir model [extra_context] [session_id] [previous_model]
 opencode_run() {
   local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}"
   local prompt
+  OPENCODE_ROUND_ENVIRONMENT="false"
   if [[ -n "${session_id}" ]]; then
     prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
   else
@@ -99,7 +125,12 @@ opencode_run() {
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
-    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" ]]; then
+    # MOCK_OPENCODE_ENV_ERROR lists the models whose round dies on an
+    # environment error (it implies MOCK_OPENCODE_ERROR for those models).
+    if [[ " ${MOCK_OPENCODE_ENV_ERROR:-} " == *" ${model} "* ]]; then
+      OPENCODE_ROUND_ENVIRONMENT="true"
+    fi
+    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
       if [[ -d "${workdir}" && -w "${workdir}" ]]; then
         printf 'partial change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
       fi
@@ -176,6 +207,11 @@ opencode_run() {
     render=(cat)
   fi
   "${executable[@]}" "${args[@]}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
+  # Only a failed round is classified: a round that ended fine may still carry
+  # a retried-and-recovered error event, which says nothing about the provider.
+  if [[ "${status}" != "0" ]] && opencode_round_is_environment "${output_file}"; then
+    OPENCODE_ROUND_ENVIRONMENT="true"
+  fi
   local detected_session
   detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
   if [[ "${detected_session}" =~ ^ses_[A-Za-z0-9_-]+$ ]]; then
