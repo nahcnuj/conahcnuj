@@ -6,9 +6,12 @@
 # repository. Exercises the resume path:
 #
 #   PR #15 state read -> head branch checked out -> constraints pass ->
-#   review requested -> CHANGES_REQUESTED feedback detected -> addressed and
-#   committed -> constraints re-verified -> replied -> polled again ->
-#   APPROVED + constraints -> "ready to merge" -> exit 0
+#   CHANGES_REQUESTED feedback detected -> addressed and committed ->
+#   constraints re-verified -> owner assigned as reviewer again -> replied ->
+#   "review requested" -> exit 0
+#
+# A resumed run handles one feedback round and hands the PR back to the
+# reviewer; the approval itself is the human's part.
 #
 # No secrets, no network.
 set -euo pipefail
@@ -33,9 +36,7 @@ git -C "${WORK}" commit -qm init
 # Mocked response tape, in call order:
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (stub body
 #   -> real issue body), update_pr (body sync on the reuse path), conditions,
-#   request_review, fetch_reviews (CHANGES_REQUESTED), conditions,
-#   request_review, post_comment, fetch_reviews (fingerprint refresh after the
-#   reply), conditions, fetch_reviews (APPROVED), conditions.
+#   fetch_reviews (CHANGES_REQUESTED), conditions, request_review, post_comment.
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit
 # path runs `git add -A`).
 TAPE="${ROOT}/tape.txt"
@@ -46,15 +47,10 @@ cat > "${TAPE}" <<'EOF'
 {}
 {"id":889}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}
 {"id":888}
-{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Addressed the review feedback:\n\nreviewDecision: CHANGES_REQUESTED","author":{"login":"conahcnuj[bot]"}}]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -62,6 +58,11 @@ export GH_API_TEST_MODE=1
 export OPENCODE_TEST_MODE=1
 export MOCK_OPENCODE_MODELS="opencode/first"
 export CONAHCNUJ_REPO="nahcnuj/conahcnuj"
+
+# A wrapping agent session (the conahcnuj opencode plugin) exports these for
+# the real driver runs; the mock trailer check below must not see them.
+unset CONAHCNUJ_COMMIT_MODEL CONAHCNUJ_MODEL_LABEL_FILE CONAHCNUJ_SESSION_MODEL \
+  CONAHCNUJ_RUN_TIMEOUT_SECONDS OPENCODE_LAST_MODEL
 
 LOG="${ROOT}/run.log"
 RC=0
@@ -78,7 +79,9 @@ echo "-----------------------------"
 
 grep -q "PR #15" "${LOG}" || { echo "FAIL: PR #15 was not processed"; exit 1; }
 grep -q "is a pull request; resuming it in place" "${LOG}" || { echo "FAIL: PR input was not auto-detected"; exit 1; }
-grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
+grep -q "Review requested on PR #15 (reviewer: nahcnuj): https://github.com/nahcnuj/conahcnuj/pull/15" "${LOG}" || { echo "FAIL: the driver did not hand the PR back to the owner as reviewer"; exit 1; }
+grep -q "Assigned nahcnuj as reviewer on PR #15" "${LOG}" || { echo "FAIL: review was not re-requested from the owner after the fix"; exit 1; }
+grep -q "Ready to merge" "${LOG}" && { echo "FAIL: the driver waited for an approval that never came"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
 grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
 

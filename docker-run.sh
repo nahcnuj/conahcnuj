@@ -95,8 +95,7 @@ trap 'rm -rf "${RUN_DIR}"' EXIT
 # Forward driver overrides that are actually set.
 env_args=()
 for name in CONAHCNUJ_REPO CONAHCNUJ_MAX_SECONDS \
-            CONAHCNUJ_POLL_CONDITIONS_MIN CONAHCNUJ_POLL_CONDITIONS_MAX \
-            CONAHCNUJ_POLL_REVIEWS_MIN CONAHCNUJ_POLL_REVIEWS_MAX; do
+            CONAHCNUJ_POLL_CONDITIONS_MIN CONAHCNUJ_POLL_CONDITIONS_MAX; do
   if [[ -n "${!name:-}" ]]; then
     env_args+=(-e "${name}=${!name}")
   fi
