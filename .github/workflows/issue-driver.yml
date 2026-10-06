@@ -41,8 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: conahcnuj
-    # Do not chase the driver's own outputs: its bug-report issues are
-    # authored by bots, and running the driver on them would loop forever.
+    # Do not chase the driver's own outputs: its bug reports (discussions, or
+    # issue fallbacks) are authored by bots, and running the driver on one would loop forever.
     # A job-level `if` cannot read the `secrets` context (and APP_SLUG is
     # not needed here), so any bot-authored issue is skipped by type. Missing
     # secrets are not pre-checked either: the run fails loudly and the driver

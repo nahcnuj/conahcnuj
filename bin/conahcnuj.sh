@@ -24,7 +24,7 @@
 #      Verified commit, re-verifies the non-reviewer constraints, replies on
 #      the PR and re-requests review before exiting
 #   4. on an abnormal exit (timeout, no model completed the work, unexpected
-#      errors) automatically files a bug report issue in the repository so a
+#      errors) automatically files a bug report in the repository so a
 #      run the driver could not resolve is never silently lost. The report
 #      carries the tail of the run's console output as a detailed error log
 #
@@ -306,7 +306,7 @@ commit_changes() {
 
 # --- bug reporting ----------------------------------------------------------
 
-# When the driver terminates abnormally it files a bug report issue in the
+# When the driver terminates abnormally it files a bug report in the
 # repository it was working on, so a failed run is never silently lost and the
 # next driver invocation can pick the report up (the driver resolves issues).
 # Best-effort only: the report must never change the exit code, never trigger
@@ -462,19 +462,69 @@ report_bug_on_exit() {
   oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
   title="$(report_bug_title "${code}" "${input}")"
   body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
-  echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
-  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
+  echo "Driver exited abnormally (code ${code}); filing a bug report in ${owner}/${repo}." >&2
+  local kind num url
+  if read -r kind num url < <(file_bug_report "${owner}" "${repo}" "${title}" "${body}"); then
     if [[ -n "${num}" ]]; then
-      echo "Bug report issue #${num} created: https://github.com/${owner}/${repo}/issues/${num}" >&2
+      case "${kind}" in
+        discussion)
+          echo "Bug report discussion #${num} created: ${url}" >&2
+          ;;
+        comment)
+          echo "Bug report discussion #${num} updated (same failure mode): ${url}" >&2
+          ;;
+        *)
+          echo "Bug report issue #${num} created: ${url}" >&2
+          ;;
+      esac
       BUG_REPORTED="1"
       run_log_cleanup
       return 0
     fi
   fi
-  echo "WARNING: could not file a bug report issue (exit code ${code})." >&2
+  echo "WARNING: could not file a bug report (exit code ${code})." >&2
   BUG_REPORTED="1"
   run_log_cleanup
   return 0
+}
+
+# File the bug report in the repository's "Bug report" Discussions category.
+# Reports titled identically are the same failure mode, so a repeat appends a
+# comment to the existing discussion thread instead of opening a new one.
+# Only when Discussions are unavailable (no Bug report category, or the lookup
+# failed) do we fall back to creating an issue, so the report is never lost.
+# Output: "<discussion|comment|issue> <number> <url>".
+file_bug_report() {
+  local owner="${1}" repo="${2}" title="${3}" body="${4}"
+  local category_id match
+  category_id="$(gh_api_discussion_category_id "${owner}" "${repo}" "Bug report" 2>/dev/null || true)"
+  if [[ -n "${category_id}" ]]; then
+    match="$(gh_api_find_discussion_by_title "${owner}" "${repo}" "${title}" 2>/dev/null || true)"
+    if [[ -n "${match}" ]]; then
+      local did num url
+      did="${match%%|*}"
+      num="$(printf '%s' "${match}" | cut -d'|' -f2)"
+      url="$(printf '%s' "${match}" | cut -d'|' -f3)"
+      [[ -n "${url}" ]] || url="https://github.com/${owner}/${repo}/discussions/${num}"
+      if gh_api_add_discussion_comment "${did}" "${body}" >/dev/null; then
+        printf 'comment %s %s\n' "${num}" "${url}"
+        return 0
+      fi
+      echo "WARNING: could not comment on discussion #${num}; falling back to a new report." >&2
+    fi
+    local num2
+    if num2="$(gh_api_create_discussion "${owner}" "${repo}" "${category_id}" "${title}" "${body}")" && [[ -n "${num2}" ]]; then
+      printf 'discussion %s https://github.com/%s/%s/discussions/%s\n' "${num2}" "${owner}" "${repo}" "${num2}"
+      return 0
+    fi
+    echo "WARNING: could not create a discussion; falling back to an issue." >&2
+  fi
+  local num3
+  if num3="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")" && [[ -n "${num3}" ]]; then
+    printf 'issue %s https://github.com/%s/%s/issues/%s\n' "${num3}" "${owner}" "${repo}" "${num3}"
+    return 0
+  fi
+  return 1
 }
 
 # --- branches ---------------------------------------------------------------
@@ -1158,7 +1208,7 @@ main() {
   repo="${repo_info#*/}"
   echo "Repository: ${owner}/${repo}" >&2
 
-  # File a bug report issue when the run terminates abnormally. Registered only
+  # File a bug report when the run terminates abnormally. Registered only
   # once owner/repo and the input are known: a usage error or a failed repo
   # detection has no target to report to and stays quiet.
   BUG_REPORT_INPUT="${input}"

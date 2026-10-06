@@ -233,6 +233,76 @@ gh_api_json_num() {
   printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" | head -1
 }
 
+# Extract a JSON string field value, escape-aware: walks the text after
+# "key": and stops at the first quote that is not preceded by a backslash, so
+# embedded \" quotes inside the value do not truncate it. Also handles
+# pretty-printed responses.
+_gh_api_json_value() {
+  printf '%s\n' "${1}" | awk -v key="\"$2\":" '
+    {
+      i = index($0, key)
+      if (i == 0) next
+      s = substr($0, i + length(key))
+      sub(/^[ \t]*"/, "", s)
+      out = ""
+      n = length(s)
+      for (j = 1; j <= n; j++) {
+        c = substr(s, j, 1)
+        if (c == "\\") { out = out substr(s, j, 2); j++; continue }
+        if (c == "\"") break
+        out = out c
+      }
+      print out
+      exit
+    }'
+}
+
+# Split a (pretty or compact) JSON document into the objects at depth 2 (the
+# elements of a top-level array such as search results' "items"). String-aware,
+# so braces inside JSON strings do not split the object.
+_gh_api_json_array_items() {
+  awk '
+    { s = s $0 }
+    END {
+      depth = 0; in_str = 0; esc = 0; out = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (in_str) {
+          if (esc) esc = 0
+          else if (c == "\\") esc = 1
+          else if (c == "\"") in_str = 0
+          if (depth == 2) out = out c
+          continue
+        }
+        if (c == "\"") { in_str = 1; if (depth == 2) out = out c; continue }
+        if (c == "{") { depth++; if (depth == 2) out = "{"; continue }
+        if (c == "}") { if (depth == 2) { print out "}"; out = "" }; depth--; continue }
+        if (depth == 2) out = out c
+      }
+    }'
+}
+
+# List the driver's previously auto-filed bug-report issues (titles starting
+# with "conahcnuj:"). Output: "number|title_b64|body_b64|html_url" per line.
+gh_api_list_bug_report_issues() {
+  local owner="${1}" repo="${2}" json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_call GET "https://api.github.com/search/issues?q=repo:${owner}/${repo}+in:title+conahcnuj:+is:issue")"
+  fi
+  local item num title body html_url
+  while IFS= read -r item; do
+    [[ -n "${item}" ]] || continue
+    num="$(gh_api_json_num "${item}" "number")"
+    title="$(gh_api_unescape "$(_gh_api_json_value "${item}" "title")")"
+    body="$(gh_api_unescape "$(_gh_api_json_value "${item}" "body")")"
+    html_url="$(_gh_api_json_value "${item}" "html_url")"
+    [[ -n "${num}" && -n "${title}" ]] || continue
+    printf '%s|%s|%s|%s\n' "${num}" "$(gh_api_b64 "${title}")" "$(gh_api_b64 "${body}")" "${html_url}"
+  done < <(printf '%s\n' "${json}" | _gh_api_json_array_items)
+}
+
 # --- Issues / PRs -----------------------------------------------------------
 
 # Fetch an issue (PRs are issues too). Output: title_b64|body_b64|labels_b64|is_pr
@@ -668,6 +738,96 @@ gh_api_create_issue() {
   local json
   json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")"
   gh_api_json_num "${json}" "number"
+}
+
+# Discussion category node id by name. Args: owner repo category-name.
+# Output: category id (empty when the category does not exist).
+gh_api_discussion_category_id() {
+  local owner="${1}" repo="${2}" name="${3}" json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    local query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { discussionCategories(first: 50) { nodes { id name } } } }"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}")"
+  fi
+  local node
+  printf '%s\n' "${json}" | tr '{' '\n' | while IFS= read -r node; do
+    if printf '%s' "${node}" | grep -q "\"name\"[[:space:]]*:[[:space:]]*\"${name}\""; then
+      gh_api_json_str "${node}" "id"
+      break
+    fi
+  done
+}
+
+# Find a discussion with this exact title (any category).
+# Output: "node_id|number|url" (empty when none matches).
+gh_api_find_discussion_by_title() {
+  local owner="${1}" repo="${2}" title="${3}" json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    local query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { discussions(first: 100) { nodes { id number title url } } } }"
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}")"
+  fi
+  local node
+  printf '%s\n' "${json}" | tr '{' '\n' | while IFS= read -r node; do
+    if printf '%s' "${node}" | grep -q "\"title\"[[:space:]]*:[[:space:]]*\"${title}\""; then
+      local id num url
+      id="$(gh_api_json_str "${node}" "id")"
+      num="$(gh_api_json_num "${node}" "number")"
+      url="$(gh_api_json_str "${node}" "url")"
+      if [[ -n "${id}" && -n "${num}" ]]; then
+        printf '%s|%s|%s\n' "${id}" "${num}" "${url}"
+      fi
+      break
+    fi
+  done
+}
+
+# Create a discussion. Args: owner repo category_id title body.
+# Output: discussion number. Like gh_api_create_pr, in test mode it consumes
+# two mocked lines (repository id, then the createDiscussion mutation).
+gh_api_create_discussion() {
+  local owner="${1}" repo="${2}" category_id="${3}" title="${4}" body="${5}"
+
+  local id_query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { id } }"
+  local id_json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    id_json="$(gh_api_read_line)"
+  else
+    id_json="$(gh_api_graphql "${id_query}" -F owner="${owner}" -F repo="${repo}")"
+  fi
+  local repo_id
+  repo_id="$(gh_api_json_str "${id_json}" "id")"
+  if [[ -z "${repo_id}" ]]; then
+    echo "ERROR: could not resolve the repository id for ${owner}/${repo}." >&2
+    return 1
+  fi
+
+  local query
+  query="mutation { createDiscussion(input: { repositoryId: \"${repo_id}\", categoryId: \"${category_id}\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\" }) { discussion { number } } }"
+
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+  gh_api_json_num "${json}" "number"
+}
+
+# Comment on a discussion. Args: discussion_node_id body. Output: comment id.
+gh_api_add_discussion_comment() {
+  local node_id="${1}" body="${2}"
+  local query
+  query="mutation { addDiscussionComment(input: { discussionId: \"${node_id}\", body: \"$(gh_api_escape "${body}")\" }) { comment { id } } }"
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+  gh_api_json_str "${json}" "id"
 }
 
 # Merge a PR (SQUASH). Args: owner repo pr  (output: true/false)

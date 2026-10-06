@@ -438,6 +438,38 @@ test_create_issue() {
   echo "gh_api_create_issue passed"
 }
 
+test_discussion_category_id() {
+  local out
+  out="$(printf '%s\n' '{"data":{"repository":{"discussionCategories":{"nodes":[{"id":"DIC_kwDO123","name":"General"},{"id":"DIC_kwDO456","name":"Bug report"}]}}}}' | gh_api_discussion_category_id "nahcnuj" "conahcnuj" "Bug report")"
+  [[ "${out}" == "DIC_kwDO456" ]]
+  out="$(printf '%s\n' '{"data":{"repository":{"discussionCategories":{"nodes":[{"id":"DIC_kwDO123","name":"General"}]}}}}' | gh_api_discussion_category_id "nahcnuj" "conahcnuj" "Bug report")"
+  [[ -z "${out}" ]]
+  echo "gh_api_discussion_category_id passed"
+}
+
+test_find_discussion_by_title() {
+  local out
+  out="$(printf '%s\n' '{"data":{"repository":{"discussions":{"nodes":[{"id":"D_1","number":25,"title":"conahcnuj: driver terminated abnormally (exit 1)","url":"https://github.com/nahcnuj/conahcnuj/discussions/25"},{"id":"D_2","number":26,"title":"other","url":"https://github.com/nahcnuj/conahcnuj/discussions/26"}]}}}}' | gh_api_find_discussion_by_title "nahcnuj" "conahcnuj" "conahcnuj: driver terminated abnormally (exit 1)")"
+  [[ "${out}" == "D_1|25|https://github.com/nahcnuj/conahcnuj/discussions/25" ]]
+  out="$(printf '%s\n' '{"data":{"repository":{"discussions":{"nodes":[]}}}}' | gh_api_find_discussion_by_title "nahcnuj" "conahcnuj" "none")"
+  [[ -z "${out}" ]]
+  echo "gh_api_find_discussion_by_title passed"
+}
+
+test_create_discussion() {
+  local out
+  out="$(printf '%s\n' '{"data":{"repository":{"id":"R_kgDO123"}}}' '{"data":{"createDiscussion":{"discussion":{"number":25}}}}' | gh_api_create_discussion "nahcnuj" "conahcnuj" "DIC_kwDO456" "title" "body")"
+  [[ "${out}" == "25" ]]
+  echo "gh_api_create_discussion passed"
+}
+
+test_add_discussion_comment() {
+  local out
+  out="$(printf '%s\n' '{"data":{"addDiscussionComment":{"comment":{"id":"DIC_1"}}}}' | gh_api_add_discussion_comment "D_1" "body")"
+  [[ "${out}" == "DIC_1" ]]
+  echo "gh_api_add_discussion_comment passed"
+}
+
 test_merge_pr() {
   gh_api_merge_pr "nahcnuj" "conahcnuj" 15 < <(printf '%s\n' '{}' '{}')
   echo "gh_api_merge_pr passed"
@@ -459,6 +491,10 @@ test_requested_reviewers
 test_requested_reviewers_pretty
 test_post_comment
 test_create_issue
+test_discussion_category_id
+test_find_discussion_by_title
+test_create_discussion
+test_add_discussion_comment
 test_merge_pr
 
 echo "All gh-api tests passed"

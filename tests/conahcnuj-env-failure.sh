@@ -39,13 +39,16 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape: fetch_issue, get_repo, find_pr_by_head_any (empty),
-# create_issue. Reused by both runs (the sub-shell reopens it).
+# discussion category, empty discussions, repo id, createDiscussion. Reused by both runs (the sub-shell reopens it).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"number": 14, "title": "test issue, providers down", "body": "dummy body", "labels": [], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
-{"number": 25}
+{"data":{"repository":{"discussionCategories":{"nodes":[{"id":"DIC_kwDO123","name":"Bug report"}]}}}}
+{"data":{"repository":{"discussions":{"nodes":[]}}}}
+{"data":{"repository":{"id":"R_kgDO123"}}}
+{"data":{"createDiscussion":{"discussion":{"number":25,"url":"https://github.com/nahcnuj/conahcnuj/discussions/25"}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -79,7 +82,7 @@ grep -q "partial change from envdown/b" "${WORK}/conahcnuj.mock" && { echo "FAIL
 grep -q "partial change from netdown/d" "${WORK}/conahcnuj.mock" && { echo "FAIL: netdown/d ran despite its dead provider"; exit 1; }
 # The run names the environment instead of blaming a driver defect.
 grep -q "every model round died on an environment error" "${LOG1}" || { echo "FAIL: no environment diagnosis in the log"; exit 1; }
-grep -q "Bug report issue #25 created" "${LOG1}" || { echo "FAIL: no bug report was filed"; exit 1; }
+grep -q "Bug report discussion #25 created" "${LOG1}" || { echo "FAIL: no bug report was filed"; exit 1; }
 
 LOG2="${ROOT}/run2.log"
 RC2=0
@@ -116,6 +119,7 @@ gh_api_create_issue() {
   printf '%s\n' "${4}" > "${ROOT}/captured-env.txt"
   printf '99\n'
 }
+gh_api_discussion_category_id() { return 1; }
 
 (
   ENVIRONMENT_DOWN=1

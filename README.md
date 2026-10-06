@@ -105,9 +105,10 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開・
    レビュー依頼の失敗で PR を引き渡せなかった場合など、終了コード非 0 で
    終わる場合）は、ドライバが対象
-   リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
-   `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
-   実行ログ末尾を含む）。
+   リポジトリの Discussions の Bug report カテゴリへ投稿する（同じタイトルの
+   既存スレッドにはコメントを追加。Discussions が使えない場合は
+   `gh_api_create_issue` で issue にフォールバック。終了コード・対象 #番号・
+   ブランチ・HEAD・実行ログ末尾を含む）。
 
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
@@ -125,8 +126,9 @@ offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
 open 中の draft でない同一リポジトリの PR に `approved` 以外の review が
 submit・編集・dismiss された場合も、PR 番号でドライバを再開します。
 同じ PR で実行中の場合は、concurrency により新しい実行を待機させます。
-失敗時はドライバがバグ報告 issue を自動作成し、その issue（bot が開いたもの）
-は再帰防止のためワークフローから除外されます。
+失敗時はドライバがバグ報告を
+Discussions の Bug report カテゴリへ投稿し、バグ報告由来の再帰実行は
+ワークフローから除外されます。
 
 - **タイムアウトは Actions 側で制御**します（ジョブの `timeout-minutes: 60`）。
   `CONAHCNUJ_MAX_SECONDS=3540` をその直下に設定し、ジョブが強制終了される前に
