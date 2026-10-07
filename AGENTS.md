@@ -14,7 +14,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 - Windows で `bash` の素コマンドは WSL（`C:\Windows\System32\bash.exe`）に解決されることがある。スクリプト・プラグインで bash を起動するときは必ず `BASH_EXE`（`C:/Program Files/Git/bin/bash.exe`）を使う。
 - 作業後に opencode を再起動しないとプラグイン変更は反映されない（プラグインは起動時ロード）。
 - ドライバの整形ログ（`lib/opencode-render.sh`）は truncate しない。行数・桁数で省略せず、モデルが書いた行もコマンドが出力した行も全文が出る（`CONAHCNUJ_RENDER_MAX_LINES` / `CONAHCNUJ_RENDER_MAX_COLS` に相当する省略は行わない。両変数は廃止済み）。このログは run の唯一の記録で、異常終了時はその一部がバグ報告に載るため、省略は「モデルがそう言わなかったこと」と区別できない穴になる。
-- コーディングエージェントへのプロンプトに指示を積み増さない。`opencode_agent_contract` が伝えるのは「この issue／PR を owner の Approve まで導く・エージェントの担当は作業ツリーの変更、GitHub 側の操作はドライバ」だけにする（禁止コマンドの一覧や「これは成果物ではない」「やっても no work」といった注意は書かない）。実際に禁止と注意を並べた長い contract を入れたとき、エージェントがそれを任務と誤解してコミットメッセージだけ出して終わるので、_owner のレビューで「エージェントの仕事を邪魔している」と弾かれる_（`tests/opencode.sh` がプロンプトに禁止コマンド列と「counts as no work」が現れないことを検証する）。
+- コーディングエージェントへのプロンプトに指示を積み増さない。`opencode_agent_contract` が伝えるのは「この issue／PR を owner の Approve まで導く・エージェントの担当は作業ツリーの変更、GitHub 側の操作はドライバ」だけにする（禁止コマンドの一覧や「これは成果物ではない」「やっても no work」といった注意は書かない）。実際に禁止と注意を並べた長い contract を入れたとき、エージェントがそれを任務と誤解してコミットメッセージだけ出して終わるので、_owner のレビューで「エージェントの仕事を邪魔している」と弾かれる_（`driver-tests/opencode.sh` がプロンプトに禁止コマンド列と「counts as no work」が現れないことを検証する）。
 
 ## ファイルガイド
 
@@ -28,13 +28,13 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/tests/run.sh` | offline モックテストのランナー（同ディレクトリの観点別テストを順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする。`BOT_USER_ID` は書かない（公開 API から自動解決。手動上書き時のみ追加） |
 | `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `api-commit-trailer` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`run.sh` から実行 |
-| `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`tool.execute.before` で `git commit` をブロック。セッションのモデル表示名と variant を `CONAHCNUJ_COMMIT_MODEL` に入れる | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決。`CONAHCNUJ_SESSION_MODEL`（`provider/model`）が設定されているときはそのモデルだけを記録する |
-| `test/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約と commit 誘導を検証。`plugins/` 外に置くのは opencode の自動ロード対象外にするため） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
+| `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`tool.execute.before` で `git commit` をブロック。セッションの provider / model / effort を `provider (model/effort)` にして `CONAHCNUJ_COMMIT_MODEL` へ入れる | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決。`CONAHCNUJ_SESSION_MODEL`（`provider/model`）が設定されているときはそのモデルだけを記録する |
+| `plugin-tests/`（`smoke.sh` / `smoke-run.js` / `e2e-opencode.sh`） | プラグインの runtime テスト。smoke は `install.ps1`→読込→env 契約と commit 誘導、e2e は実 opencode run で `git vc` が表面化することを検証（`plugins/` 外に置くのは opencode の自動ロード対象外にするため） | smoke は node/npm と pwsh、e2e は opencode 本体が必要。CI の `plugin-smoke` / `e2e-opencode` で実行 |
 | `plugins/package.json`・`package-lock.json`・`tsconfig.json` | 型チェック基盤（`@types/node` と `@opencode-ai/plugin` は plugins/package.json＋lock から取得） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
-| `bin/conahcnuj.sh` | issue駆動自律開発ドライバ（issue→フィーチャーブランチ→PR→owner を reviewer にアサインしてレビュー依頼＝終了。既に Approved なら ready to merge で終了） | `lib/`・`tests/`・`test.sh` とセット。実行は `conahcnuj <issue番号>`（PR番号なら自動で再開）。ブランチ名・コミットメッセージはコーディングエージェントが決める（`.branch-name` / `.commit-msg`）。環境変数上書き・offline テストモードはヘッダーコメント参照。異常終了時はバグ報告 issue を対象リポジトリへ自動作成（`gh_api_create_issue`）。ブランチの fetch に失敗すると作業ツリーが古いまま進み、既コミットの実装を消しかねないため、`checkout_branch_head` はその場で停止する。`request_review_from_owner` は依頼 API の失敗を鵜呑みにせず、まず `request_review_with_retry` で 1 回だけ再試行し（同じ reviewer を二重登録しても GitHub 側に要求は残らないので冪等）、それでも失敗したら `gh_api_requested_reviewers` で PR を読み返す（GitHub が記録した後の通信エラーは拒否と区別できず、そのままだと完了した run が exit 1 でバグ報告される。#134 / #139）。**読み返しが「誰も依頼されていない」と答えたときだけ** run を失敗させ、読み返し自体が失敗した場合は PR は完成済みなので WARNING で終了する（`REVIEW_HANDOFF_CONFIRMED` が false のときは `log_review_handoff` が「依頼を確認できなかった」文言を出す。「読めなかった」を「誰も聞いていません」と読むと検証不能な引き渡しをバグ報告に 바꾸てしまう） |
+| `bin/conahcnuj.sh` | issue駆動自律開発ドライバ（issue→フィーチャーブランチ→PR→owner を reviewer にアサインしてレビュー依頼＝終了。既に Approved なら ready to merge で終了） | `lib/`・`driver-tests/` とセット。実行は `conahcnuj <issue番号>`（PR番号なら自動で再開）。ブランチ名・コミットメッセージはコーディングエージェントが決める（`.branch-name` / `.commit-msg`）。環境変数上書き・offline テストモードはヘッダーコメント参照。異常終了時はバグ報告 issue を対象リポジトリへ自動作成（`gh_api_create_issue`）。ブランチの fetch に失敗すると作業ツリーが古いまま進み、既コミットの実装を消しかねないため、`checkout_branch_head` はその場で停止する。`request_review_from_owner` は依頼 API の失敗を鵜呑みにせず、まず `request_review_with_retry` で 1 回だけ再試行し（同じ reviewer を二重登録しても GitHub 側に要求は残らないので冪等）、それでも失敗したら `gh_api_requested_reviewers` で PR を読み返す（GitHub が記録した後の通信エラーは拒否と区別できず、そのままだと完了した run が exit 1 でバグ報告される。#134 / #139）。**読み返しが「誰も依頼されていない」と答えたときだけ** run を失敗させ、読み返し自体が失敗した場合は PR は完成済みなので WARNING で終了する（`REVIEW_HANDOFF_CONFIRMED` が false のときは `log_review_handoff` が「依頼を確認できなかった」文言を出す。「読めなかった」を「誰も聞いていません」と読むと検証不能な引き渡しをバグ報告に 바꾸てしまう） |
 | `lib/` | ドライバ用ライブラリ（`gh-api.sh` / `opencode.sh` / `opencode-render.sh` / `rate-limit.sh`） | `opencode.sh` は失敗したモデルから `sessionID` と作業ツリーを次モデルへ引き継ぐ。プロンプト（`opencode_agent_contract` が全ラウンド共通の契約）は 1 段落だけで、「この issue／PR を owner の Approve まで導く・エージェントの担当は作業ツリーの変更、ブランチ名・コミット・push・PR の作成（タイトルと本文）・レビュー依頼はドライバ」を伝えるだけに留める。`opencode-render.sh` は opencode の JSON イベント列を実行中に整形して stderr へ出す（`jq`/node 不要・純 awk）。同じ part id の同じ内容が再送された場合（セッション再開・イベントストリーム再接続）は 1 度だけ表示する。出力はドライバの実行ログに入るので、異常終了時のバグ報告にもモデルの行動が残る。表示量は `CONAHCNUJ_OPENCODE_LOG_LEVEL`（既定 `WARN`。`--print-logs` の既定 INFO はモデルごとに 30 行近い起動ログを出す）と `CONAHCNUJ_RENDER_MAX_LINES` / `CONAHCNUJ_RENDER_MAX_COLS`（既定 200 行 / 400 桁。省略分は必ず明示される）で調整する。`gh-api.sh` は `GH_API_TEST_MODE=1` で stdin からモック応答を 1 コール 1 行読み、ネットワーク I/O をしない。`gh_api_call` の HTTP ステータスは curl のヘッダダンプの**最後の**ステータス行から読む（複数ブロック時に 1 行目を読むと応答を取り違える）もので、2xx 以外はメソッド・URL・ステータス・レスポンス本文を stderr に出す（呼び出し側は stdout を捨てるため、理由がそこしか残らない）。REST の JSON は GraphQL と違って整形済み（`"login": "x"` のようにコロン後に空白）で返るので、REST 応答を絞る正規表現は空白を許容すること（コンパクトな綴りだけを前提にしたモックテープでは通っていても実応答では 1 件も見つからず、`gh_api_requested_reviewers` の読み戻しが「誰も依頼されていない」と答えて、PR 側は依頼済みでもレビュー引き渡しが失敗扱いになる #136）。`gh_api_fetch_pr_conditions` は `statusCheckRollup.contexts` を集計し、ドライバ自身の workflow（既定 `Issue auto-drive,Owner-approved auto-merge`。`CONAHCNUJ_OWN_WORKFLOWS` で変更可）の check を制約から除外する。自分の run と merge 待ちの job を待ち続けるデッドロックと、キャンセル済み run を「直せない制約」とみなすループを防ぐため。出力は `checks|mergeable|mergeStateStatus|pr_state` で、poll 中に merge 済みの PR は終了処理へ移る |
-| `tests/`・`test.sh` | ドライバの offline モックテスト（モック API tape ＋ モック opencode でフロー検証。`auto-merge-outstanding-checks.sh` は workflow 内の jq を抽出して実 payload で検証する。jq 不在時は skip） | 秘密鍵・ネットワーク不要。CI の `mock-test` で `test.sh` を実行。`conahcnuj-branch-head.sh` はローカルの bare リポジトリを origin にして、fetch 失敗時に古い head で続行せず停止することを検証。`conahcnuj-message-only.sh` は `.commit-msg` だけ書いたモデル（作業ツリーは無変更）を no work として次モデルへ引き継ぎ、その変更だけがブランチに乗ることを検証（`MOCK_OPENCODE_MESSAGE_ONLY` で再現可） |
-| `tests/conahcnuj-env-failure.sh` | provider ごと環境エラーで落ちたラウンドのスキップ・診断・バグ報告文言と、環境エラーでない失敗では provider を落とさないことを検証 | `MOCK_OPENCODE_ENV_ERROR` で再現可。判定は `lib/opencode.sh` の `opencode_round_is_environment`（失敗ラウンドの生 JSON イベント行を grep。テキストイベントは対象外、status が 0 以外のときだけ分類）。全ラウンドが環境エラーだったときの `ENVIRONMENT_DOWN=1` とバグ報告の書き出し・締めの文言切替は `bin/conahcnuj.sh`（#149） |
+| `driver-tests/`（`run.sh` がランナー） | ドライバ（`bin/`・`lib/`）の offline モックテスト（モック API tape ＋ モック opencode でフロー検証。`auto-merge-outstanding-checks.sh` は workflow 内の jq を抽出して実 payload で検証する。jq 不在時は skip） | 秘密鍵・ネットワーク不要。CI の `mock-test` で `driver-tests/run.sh` を実行。対象はドライバだけで、gh-app スクリプトは `gh-app/tests/`、プラグインの実ランタイムは `plugin-tests/` が担当。`conahcnuj-branch-head.sh` はローカルの bare リポジトリを origin にして、fetch 失敗時に古い head で続行せず停止することを検証。`conahcnuj-message-only.sh` は `.commit-msg` だけ書いたモデル（作業ツリーは無変更）を no work として次モデルへ引き継ぎ、その変更だけがブランチに乗ることを検証（`MOCK_OPENCODE_MESSAGE_ONLY` で再現可） |
+| `driver-tests/conahcnuj-env-failure.sh` | provider ごと環境エラーで落ちたラウンドのスキップ・診断・バグ報告文言と、環境エラーでない失敗では provider を落とさないことを検証 | `MOCK_OPENCODE_ENV_ERROR` で再現可。判定は `lib/opencode.sh` の `opencode_round_is_environment`（失敗ラウンドの生 JSON イベント行を grep。テキストイベントは対象外、status が 0 以外のときだけ分類）。全ラウンドが環境エラーだったときの `ENVIRONMENT_DOWN=1` とバグ報告の書き出し・締めの文言切替は `bin/conahcnuj.sh`（#149） |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置。加えて `conahcnuj` バイナリ（既定 `~/.local/bin`）と bin 側 `gh-app/`・`lib/` を配置 | gh-app は**2 箇所**へ配備（opencode 設定用とドライバ用）。実 `app.env` があればそれを、無ければ example から作成 |
 | `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
 | `docker-run.sh` | 上記イメージでドライバを実行するラッパー（対象リポジトリを `/work` へマウント、コンテナ用 `app.env` を生成し秘密鍵を読み取り専用マウント） | テストではなく**実走行**用（実キー・ネットワーク・opencode 設定が必要） |
@@ -50,15 +50,15 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 
 ```bash
 # 構文チェック（Ubuntu で確認）
-bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
-shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh   # -x で app.env.example を追従（チェックは無効化しない）
+bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh driver-tests/*.sh
+shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh driver-tests/*.sh   # -x で app.env.example を追従（チェックは無効化しない）
 
 # プラグイン型チェック（@types/node は plugins/package.json＋lock から取得）
 (cd plugins && npm ci --no-audit --no-fund && ./node_modules/.bin/tsc -p ../plugins --noEmit)
 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/tests/run.sh
-bash test.sh   # ドライバの offline テスト（bin/・lib/・tests/）
+bash driver-tests/run.sh   # ドライバの offline テスト（bin/・lib/）
 
 # ドキュメントの検証（docs/ のリンク・index 目次・llms.txt 収録 + HTML 生成）
 python3 docs/build.py            # 依存: python の markdown パッケージ
@@ -103,7 +103,7 @@ bash gh-app/api-commit.sh -m "message" -a --dry-run   # owner/repo/branch 自動
   # またはこのリポジトリ内では直接スクリプトでも同じ
   bash gh-app/api-commit.sh -m "message" [-a]
   ```
-  `CONAHCNUJ_COMMIT_MODEL` があれば `api-commit.sh` が本文へ `Model: <ラベル>` trailer を足す。OpenCode 上の `git vc` はプラグインがラベルを入れる。未設定なら trailer は付かない。
+  `CONAHCNUJ_COMMIT_MODEL` があれば `api-commit.sh` が本文へ `Co-Authored-By: <値>` trailer を足す（OpenCode ではプラグインが `provider (model/effort)` 形の値を入れ、ドライバのフォールバックは `provider/model` を同じ形に整形する）。未設定なら trailer は付かない。本文に既に `Co-Authored-By` があれば足さない。
   `git vc` はプラグインが注入する git alias（組み込みの上書きは不可のため新規名 `vc`）。
   owner/repo/branch は `git remote` と現在ブランチから自動検出される。
 - `api-commit.sh` の仕様:

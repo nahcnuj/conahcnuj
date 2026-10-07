@@ -102,7 +102,7 @@ ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the handoff model's .commit-msg was not used"; exit 1; }
 FULL_LOG="$(git -C "${WORK}" log --format=%B)"
-grep -q "Model: opencode/second" <<<"${FULL_LOG}" || { echo "FAIL: handoff model trailer missing"; exit 1; }
+grep -q "Co-Authored-By: opencode (second)" <<<"${FULL_LOG}" || { echo "FAIL: handoff model trailer missing"; exit 1; }
 # init + implement = 2 commits from the branch tip (no feedback round here).
 [[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "2" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
 

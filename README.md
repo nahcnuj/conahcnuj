@@ -22,9 +22,9 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
-├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
-├── tests/                     # ドライバの offline モックテスト
-├── test.sh                    # tests/ のランナー
+├── plugin-tests/               # プラグインの runtime テスト（smoke＋e2e。node/npm・pwsh・opencode が必要）
+├── driver-tests/               # ドライバの offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
+│   └── run.sh                  #   driver-tests/ 全体のランナー
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
@@ -74,9 +74,11 @@ CI の `Build docs site` ジョブが同じビルドを PR でも検証します
 bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
 GitHub 自身にコミットを作成させるしかない。
 
-`CONAHCNUJ_COMMIT_MODEL` にラベル（例: `Grok 4.7 (medium)`）が入っているとき、
-コミット本文の末尾へ Git trailer `Model: <ラベル>` を足す。未設定なら足さない。
-OpenCode ではプラグインがセッションの表示名と variant をこの変数へ入れる。
+`CONAHCNUJ_COMMIT_MODEL` に値（例: `xai (grok-4.7/medium)`）が入っているとき、
+コミット本文の末尾へ Git trailer `Co-Authored-By: <値>` を足す。未設定なら足さない。
+OpenCode ではプラグインがセッションの provider・model・effort を
+`provider (model/effort)` の形でこの変数へ入れる（本文に既に
+`Co-Authored-By` があれば足さない）。
 別のエージェントや手元のシェルは、同じ変数に好きな文字列を入れて使える。
 
 ## issue駆動自律開発（conahcnuj）

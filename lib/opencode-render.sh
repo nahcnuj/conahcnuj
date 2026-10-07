@@ -235,9 +235,10 @@ render_fields() {
 
 # --- context header ---------------------------------------------------------
 
-# Model label: the plugin writes the session's display name plus its effort
-# variant into CONAHCNUJ_MODEL_LABEL_FILE while the run is in flight, so read
-# it live and fall back to the model id the driver asked for.
+# Model label: the plugin writes the session's attribution
+# (provider (model/effort)) into CONAHCNUJ_MODEL_LABEL_FILE while the run is
+# in flight, so read it live and fall back to the model id the driver asked
+# for.
 render_model_label() {
   local label=""
   if [[ -n "${CONAHCNUJ_MODEL_LABEL_FILE:-}" && -s "${CONAHCNUJ_MODEL_LABEL_FILE}" ]]; then
