@@ -93,7 +93,7 @@ owner/repo/branch は自動検出なのでどのリポジトリでも動きま�
 
 - 型チェック: `cd plugins && npm ci && ./node_modules/.bin/tsc -p ../plugins --noEmit`
   （CI の `Typecheck opencode plugin`）
-- 実行時スモーク: `bash test/smoke.sh`（env 契約と commit 誘導を検証。CI の
+- 実行時スモーク: `bash plugin-tests/smoke.sh`（env 契約と commit 誘導を検証。CI の
   `Plugin runtime smoke test`）
 
 ## 関連ページ

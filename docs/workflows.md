@@ -21,8 +21,8 @@
 | `mock-test` | `Mock tests (no secrets / no network) (<os>)` | Ubuntu / Windows |
 | `lint-ts` | `Typecheck opencode plugin` | Ubuntu |
 | `plugin-smoke` | `Plugin runtime smoke test (<os>)` | Ubuntu / Windows |
-| `e2e-opencode` | `E2E opencode run (opencode free model)` | Windows |
 | `docs` | `Build docs site` | Ubuntu |
+| `e2e-opencode` | `E2E opencode run (opencode free model)` | Windows |
 
 `main` の ruleset が要求する **必須ステータスチェック**は次の 5 件です
 （これらが green でない PR はマージできません）:
