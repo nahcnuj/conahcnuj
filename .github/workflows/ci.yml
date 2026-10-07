@@ -96,7 +96,8 @@ jobs:
             "gh-app/api-commit.sh",
             "gh-app/bot-user-id.sh",
             "gh-app/app.env.example",
-            "plugins/gh-app-token.ts"
+            "plugins/gh-app-token.ts",
+            "plugins/lib/gh-app-commit.ts"
           )
           foreach ($rel in $required) {
             $p = Join-Path $dest $rel
@@ -132,7 +133,9 @@ jobs:
             Write-Error "AGENTS.md does not tell agents to commit with git vc"
             exit 1
           }
-          # Only gh-app-token.ts may live in the deployed plugins dir:
+          # Only gh-app-token.ts may live at the top level of the deployed
+          # plugins dir (opencode loads every top-level file there as a
+          # plugin; the helper module sits in plugins/lib/):
           # package.json/lock, tsconfig, node_modules are local typecheck
           # tooling and must never be deployed. @( ) because a single
           # result has no .Count.
@@ -154,6 +157,7 @@ jobs:
             @($dest, "gh-app/bot-user-id.sh", "gh-app/bot-user-id.sh"),
             @($dest, "gh-app/app.env.example", "gh-app/app.env.example"),
             @($dest, "plugins/gh-app-token.ts", "plugins/gh-app-token.ts"),
+            @($dest, "plugins/lib/gh-app-commit.ts", "plugins/lib/gh-app-commit.ts"),
             @($binSide, "gh-app/get-token.sh", "gh-app/get-token.sh"),
             @($binSide, "gh-app/setup-git.sh", "gh-app/setup-git.sh"),
             @($binSide, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),

@@ -26,4 +26,5 @@ trap 'rm -rf "${STAGE}"' EXIT
 # resolve from plugins/node_modules) and only turns on emit into the stage.
 "${PLUGINS_DIR}/node_modules/.bin/tsc" -p "${PLUGINS_DIR}/tsconfig.unit.json"
 
+node "${STAGE}/out/lib/gh-app-commit.test.js"
 node "${HERE}/unit-run.js"

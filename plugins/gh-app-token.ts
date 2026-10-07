@@ -322,7 +322,7 @@ import {
   API_COMMIT_SCRIPT,
   isDirectApiCommitCommand,
   isGitCommitCommand,
-} from "./gh-app-commit"
+} from "./lib/gh-app-commit"
 
 interface ShellIdentity {
   botName: string

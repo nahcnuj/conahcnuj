@@ -13,6 +13,7 @@
 #                                       (resolves gh-app relative to itself)
 # plus:
 #   - <Destination>/plugins/gh-app-token.ts   opencode plugin
+#   - <Destination>/plugins/lib/gh-app-commit.ts   helper module (not auto-loaded)
 #   - <Destination>/AGENTS.md                 global opencode rules: the
 #                                            managed conahcnuj commit block is
 #                                            merged into whatever is there
@@ -182,14 +183,21 @@ function Install-GlobalAgentsMd {
 Write-Host "Deploying gh-app to $DstGhAppConfig"
 Deploy-GhApp $DstGhAppConfig
 
-# 2. opencode plugin (the factory plus the pure commit-detection module it
-#    imports; opencode's loader treats every .ts in this dir as a plugin, so
-#    the helper module must NOT be named with a plugin suffix... it is only
-#    imported, never loaded on its own).
-New-Item -ItemType Directory -Force -Path $DstPlugins | Out-Null
-foreach ($PluginName in @("gh-app-token.ts", "gh-app-commit.ts")) {
-    Copy-Item -LiteralPath (Join-Path $SrcPlugins $PluginName) -Destination (Join-Path $DstPlugins $PluginName) -Force
-    Write-Host "  copied $PluginName"
+# 2. opencode plugin. opencode auto-loads every top-level plugins/*.ts and
+#    treats each export as a plugin, so only the factory lives there; the pure
+#    commit-detection module it imports goes in plugins/lib/, which the loader
+#    does not scan.
+$DstPluginsLib = Join-Path $DstPlugins "lib"
+New-Item -ItemType Directory -Force -Path $DstPluginsLib | Out-Null
+Copy-Item -LiteralPath (Join-Path $SrcPlugins "gh-app-token.ts") -Destination (Join-Path $DstPlugins "gh-app-token.ts") -Force
+Write-Host "  copied gh-app-token.ts"
+Copy-Item -LiteralPath (Join-Path (Join-Path $SrcPlugins "lib") "gh-app-commit.ts") -Destination (Join-Path $DstPluginsLib "gh-app-commit.ts") -Force
+Write-Host "  copied lib/gh-app-commit.ts"
+# Drop the helper where earlier installs put it (the loader would run it).
+$LegacyHelper = Join-Path $DstPlugins "gh-app-commit.ts"
+if (Test-Path -LiteralPath $LegacyHelper) {
+    Remove-Item -LiteralPath $LegacyHelper -Force
+    Write-Host "  removed legacy gh-app-commit.ts from the auto-loaded plugins dir"
 }
 
 # 3. global opencode rules (opencode/AGENTS.md -> <Destination>/AGENTS.md)

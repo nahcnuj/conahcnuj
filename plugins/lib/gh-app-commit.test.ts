@@ -39,7 +39,7 @@ function testCommandWords() {
     ["git", "commit", "-m", "hi"],
     ["git", "push"],
   ])
-  assertDeepEqual(commandWords("FOO=bar git commit"), [["git", "commit"]])
+  assertDeepEqual(commandWords("FOO=bar git commit"), [["FOO=bar", "git", "commit"]])
   assertDeepEqual(commandWords("bash -c \"git commit -m x\""), [
     ["bash", "-c", "git commit -m x"],
   ])

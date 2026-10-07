@@ -37,9 +37,9 @@ INST="${TMP}/inst"
 #    relative layout (so __dirname resolution finds the staged gh-app dir).
 #    smoke-run.js must not require() an argv-provided path (CodeQL
 #    path-injection), hence the fixed ./.smoke/ location.
-mkdir -p "${STAGE}/src" "${STAGE}/gh-app"
+mkdir -p "${STAGE}/src/lib" "${STAGE}/gh-app"
 cp "${INST}/plugins/gh-app-token.ts" "${STAGE}/src/"
-cp "${INST}/plugins/gh-app-commit.ts" "${STAGE}/src/" 2>/dev/null || true
+cp "${INST}/plugins/lib/gh-app-commit.ts" "${STAGE}/src/lib/"
 cp "${INST}/gh-app/"*.sh "${STAGE}/gh-app/"
 # Seed the bot-ID cache: keeps this test deterministic and offline-safe
 # (the public-API lookup behind it shares runner IPs and gets rate-limited).
@@ -68,7 +68,7 @@ cat > "${STAGE}/src/tsconfig.json" <<'EOF'
     "outDir": "../out",
     "types": ["node"]
   },
-  "include": ["gh-app-token.ts", "gh-app-commit.ts"]
+  "include": ["gh-app-token.ts", "lib/gh-app-commit.ts"]
 }
 EOF
 
