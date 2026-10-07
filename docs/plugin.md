@@ -44,6 +44,7 @@ bash ツールが `git commit`（`git.exe commit`、`-C <dir> commit` も含む�
 そのファイルへ 1 行で書き込みます（パスはシステムの temp ディレクトリ配下に
 限定）。`CONAHCNUJ_SESSION_MODEL` が設定されているときは、そのモデル
 （`provider/model`）だけを記録します。ドライバはこのファイルを
+`provider (model/effort)`（例: `xai (grok-4.7/medium)`）の形で、そのまま
 `CONAHCNUJ_COMMIT_MODEL` として [api-commit.sh](cli.md#api-commitsh) に渡します。
 
 ## `git vc`

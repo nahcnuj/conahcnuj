@@ -82,7 +82,7 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 | `CONAHCNUJ_MAX_SECONDS` | `259200`（72 h） | 1 実行全体の時間予算 |
 | `CONAHCNUJ_HANDOFF_RETRY_SECONDS` | `15` | レビュー依頼リトライ前の待機（`0` で禁止） |
 | `CONAHCNUJ_POLL_CONDITIONS_MIN` / `_MAX` | `15` / `300` | 制約ポーリングの間隔幅（秒・ジッター付き） |
-| `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer の Model ラベル。プラグインが設定する |
+| `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer（`Co-Authored-By: <値>`。プラグインが `provider (model/effort)` を設定する） |
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level`（デバッグは `DEBUG`） |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード（モック API テープ + モック opencode） |

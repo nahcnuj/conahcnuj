@@ -119,12 +119,13 @@ bash gh-app/api-commit.sh -m "<メッセージ>" --create-branch --dry-run
 - 既存ブランチに unsigned コミットが混ざっている場合は、先に
   `git fetch origin` → `git reset --hard origin/<branch>` で作り直してから使うこと
 
-### Model trailer
+### Co-Authored-By trailer
 
-`CONAHCNUJ_COMMIT_MODEL` が 1 行のラベルなら、コミット本文末尾に
-`Model: <ラベル>` trailer を追加します（既に `Model:` を含むメッセージは無改変）。
-未設定なら付きません。opencode では [plugin.md](plugin.md) がセッションのモデル名を
-この変数へ入れています。
+`CONAHCNUJ_COMMIT_MODEL` が 1 行のラベルなら、その値を `Co-Authored-By: <値>`
+trailer としてコミット本文末尾に追加します（本文に既に `Co-Authored-By` があれば
+無改変）。値に旧 `Model:` プレフィックスが付いていても `Co-Authored-By:` へ読み替えます。
+未設定なら trailer は付きません。opencode では [plugin.md](plugin.md) が
+`provider (model/effort)`（例: `xai (grok-4.7/medium)`）をこの変数へ入れています。
 
 ### 入出力
 

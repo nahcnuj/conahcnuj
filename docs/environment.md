@@ -34,7 +34,7 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `CONAHCNUJ_HANDOFF_RETRY_SECONDS` | `15` | レビュー依頼リトライ前の待機秒（`0` で禁止） |
 | `CONAHCNUJ_POLL_CONDITIONS_MIN` | `15` | 制約ポーリングの最短間隔（秒） |
 | `CONAHCNUJ_POLL_CONDITIONS_MAX` | `300` | 制約ポーリングの最長間隔（秒） |
-| `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer `Model: <ラベル>`。未設定なら trailer なし |
+| `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer（`Co-Authored-By: <値>`。プラグインが `provider (model/effort)` を設定）。未設定なら trailer なし |
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level` |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow 名（カンマ区切り） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード |
