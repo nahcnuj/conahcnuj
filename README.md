@@ -197,6 +197,9 @@ cd <対象リポジトリ>
 bash <このリポジトリ>/docker-run.sh <issue-or-PR番号>
 ```
 
+- ドライバはフィーチャーブランチを呼び出し元のブランチとは別の git worktree
+  （`<対象リポジトリ>.worktrees/<ブランチ名>`）で作業する。コンテナ実行では
+  このディレクトリも `/work.worktrees` にマウントされ、終了後も残る。
 - 対象リポジトリは `/work` にバインドマウントされ、コンテナ内のドライバが
   そこを操作する（ホストのリポジトリは直接汚さない）。
 - `gh-app/app.env` から `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /

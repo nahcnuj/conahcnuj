@@ -8,8 +8,8 @@
 # (.commit-msg) and may choose the feature branch name (.branch-name; when the
 # agent leaves none out, the driver picks one). A PR number given on the command
 # line is detected and resumed automatically:
-#   1. checks out the latest default branch and implements the issue with
-#      opencode (handing the same session and working tree to another model
+#   1. checks out the feature branch in a separate worktree and implements the
+#      issue with opencode (handing the same session and working tree to another model
 #      when one fails), committing only with the agent's .commit-msg
 #   2. opens a PR, waits until every non-reviewer constraint (CI checks,
 #      mergeability) passes, then assigns the repository owner as reviewer.
@@ -479,6 +479,41 @@ report_bug_on_exit() {
 
 # --- branches ---------------------------------------------------------------
 
+branch_worktree_path() {
+  local root
+  root="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+  [[ -n "${root}" ]] || return 1
+  printf '%s.worktrees/%s\n' "${root}" "${1}"
+}
+
+checkout_branch_worktree() {
+  local branch="${1}" path current
+  if ! git fetch origin "${branch}" 1>&2; then
+    echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
+    return 1
+  fi
+  path="$(branch_worktree_path "${branch}")" || return 1
+  if [[ -e "${path}" ]]; then
+    current="$(git -C "${path}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [[ "${current}" != "${branch}" ]] || ! git worktree list --porcelain | grep -Fxq "worktree ${path}"; then
+      echo "ERROR: ${path} is not the worktree for ${branch}; refusing to overwrite it." >&2
+      return 1
+    fi
+    if [[ -n "$(git -C "${path}" status --porcelain)" ]]; then
+      if [[ "$(git -C "${path}" rev-parse HEAD)" != "$(git -C "${path}" rev-parse "origin/${branch}")" ]]; then
+        echo "ERROR: ${path} has uncommitted changes and ${branch} advanced; refusing to discard them." >&2
+        return 1
+      fi
+    else
+      git -C "${path}" reset --hard "origin/${branch}" 1>&2 || return 1
+    fi
+  else
+    mkdir -p "$(dirname "${path}")" || return 1
+    git worktree add -B "${branch}" "${path}" "origin/${branch}" 1>&2 || return 1
+  fi
+  echo "Working in ${path}" >&2
+}
+
 issue_branch_name() {
   local num="${1}" title="${2}" slug
   slug="$(printf '%s' "${title}" | sed 's/[^a-zA-Z0-9]/-/g' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-30)"
@@ -553,11 +588,11 @@ ensure_issue_branch() {
     # `|| return 1` rather than relying on errexit: this function runs inside a
     # command substitution, where bash does not honour it, and every command
     # after the checkout would otherwise run on the stale head.
-    checkout_branch_head "${branch}" || return 1
+    checkout_branch_worktree "${branch}" || return 1
     echo "Using existing feature branch ${branch} (resume)." >&2
   else
     gh_api_create_branch "${owner}" "${repo}" "${branch}" "${default_oid}" >/dev/null 2>&1 || echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
-    checkout_branch_head "${branch}" || return 1
+    checkout_branch_worktree "${branch}" || return 1
     echo "Created feature branch ${branch}." >&2
   fi
   printf '%s\n' "${branch}"
@@ -571,7 +606,7 @@ ensure_pr_branch_head() {
     git checkout -B "${head}" >/dev/null 2>&1 || git checkout -b "${head}"
     return 0
   fi
-  checkout_branch_head "${head}"
+  checkout_branch_worktree "${head}"
 }
 
 # Let the coding agent choose the feature branch. If the implementation round
@@ -609,10 +644,10 @@ resolve_agent_branch_name() {
       printf '%s\n' "${current}"
       return 0
     fi
-    git fetch origin "${want}" 1>&2
-    git checkout -B "${want}" "origin/${want}" 1>&2
+    git fetch origin "${want}" 1>&2 || return 1
+    git checkout -B "${want}" "origin/${want}" 1>&2 || return 1
   else
-    git checkout -B "${want}" >/dev/null 2>&1
+    git checkout -B "${want}" >/dev/null 2>&1 || return 1
   fi
   echo "Using the coding agent's feature branch: ${want}" >&2
   printf '%s\n' "${want}"
@@ -1066,6 +1101,9 @@ start_issue() {
   base_branch="$(issue_branch_name "${num}" "${title}")"
   branch="$(next_free_branch "${owner}" "${repo}" "${base_branch}")"
   branch="$(ensure_issue_branch "${owner}" "${repo}" "${num}" "${title}" "${default_branch}" "${default_oid}" "${branch}")"
+  if [[ "${TEST_MODE}" != "1" ]]; then
+    cd "$(branch_worktree_path "${branch}")" || return 1
+  fi
 
   # An earlier run may have already committed the implementation to this
   # branch. In that case there is nothing left to implement, so skip the
@@ -1082,7 +1120,15 @@ start_issue() {
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi
+    local original_branch="${branch}"
     branch="$(resolve_agent_branch_name "${owner}" "${repo}" "${default_oid}" "${branch}")"
+    if [[ "${TEST_MODE}" != "1" && "${branch}" != "${original_branch}" ]]; then
+      local new_path
+      new_path="$(branch_worktree_path "${branch}")"
+      mkdir -p "$(dirname "${new_path}")"
+      git worktree move "$(pwd)" "${new_path}"
+      cd "${new_path}" || return 1
+    fi
     commit_changes
   fi
 
@@ -1133,6 +1179,9 @@ resume_pr() {
   esac
 
   ensure_pr_branch_head "${owner}" "${repo}" "${head}"
+  if [[ "${TEST_MODE}" != "1" ]]; then
+    cd "$(branch_worktree_path "${head}")" || return 1
+  fi
   drive "${owner}" "${repo}" "${pr}" "${head}" "${base}" "${title}" "${body}" "${closes}"
 }
 

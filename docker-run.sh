@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Run the conahcnuj driver inside an isolated Docker container.
 #
-# The target repository is bind-mounted at /work; the driver, opencode and the
-# tooling live in the image. The GitHub App secrets (app.env + private key) are
+# The target repository is bind-mounted at /work; the driver works on each
+# feature branch in a git worktree at /work.worktrees/<branch>, so
+# <target>.worktrees is mounted too and the worktrees survive the container.
+# The driver, opencode and the tooling live in the image. The GitHub App secrets (app.env + private key) are
 # mounted read-only and never baked into the image, so the container can reach
 # GitHub without the host repo being touched by the autonomous agent.
 #
@@ -133,8 +135,10 @@ fi
 
 # Common run arguments: all mounts, driver overrides and the positional
 # driver arguments. Shared by foreground and daemon modes.
+mkdir -p "${TARGET}.worktrees"
 run_args=(
   -v "$(host_path "${TARGET}"):/work"
+  -v "$(host_path "${TARGET}.worktrees"):/work.worktrees"
   -v "$(host_path "${RUN_DIR}/app.env"):/opt/conahcnuj/gh-app/app.env:ro"
   -v "$(host_path "${PEM_HOST}"):/run/secrets/app.pem:ro"
   "${oc_args[@]}"
