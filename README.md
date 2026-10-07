@@ -22,9 +22,9 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
-├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
-├── tests/                     # ドライバの offline モックテスト
-├── test.sh                    # tests/ のランナー
+├── plugin-tests/               # プラグインの runtime テスト（smoke＋e2e。node/npm・pwsh・opencode が必要）
+├── driver-tests/               # ドライバの offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
+│   └── run.sh                  #   driver-tests/ 全体のランナー
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
