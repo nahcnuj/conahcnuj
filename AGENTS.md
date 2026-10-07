@@ -28,7 +28,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `gh-app/tests/run.sh` | offline モックテストのランナー（同ディレクトリの観点別テストを順に実行） | 秘密鍵・ネットワーク不要。CI の `mock-test` はこのファイルを実行する |
 | `gh-app/app.env.example` | 設定テンプレート | プレースホルダ値のままにしてコミットする。`BOT_USER_ID` は書かない（公開 API から自動解決。手動上書き時のみ追加） |
 | `gh-app/tests/` | 観点別テスト（`get-token-cache` / `git-credential-helper` / `api-commit-args` / `api-commit-dryrun` / `api-commit-trailer` / `bot-user-id`） | いずれも秘密鍵・ネットワーク不要。`run.sh` から実行 |
-| `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`tool.execute.before` で `git commit` をブロック。セッションのモデル表示名と variant を `CONAHCNUJ_COMMIT_MODEL` に入れる | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決。`CONAHCNUJ_SESSION_MODEL`（`provider/model`）が設定されているときはそのモデルだけを記録する |
+| `plugins/gh-app-token.ts` | opencode プラグイン。`shell.env` で `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`。配列生成）注入、`tool.execute.before` で `git commit` をブロック。セッションの provider / model / effort を `provider (model/effort)` にして `CONAHCNUJ_COMMIT_MODEL` へ入れる | `BASH_EXE` で get-token.sh を実行。`loadAppEnv()` で app.env をパース。`BOT_USER_ID` 未設定時は `bot-user-id.sh` で自動解決。`CONAHCNUJ_SESSION_MODEL`（`provider/model`）が設定されているときはそのモデルだけを記録する |
 | `test/smoke.sh` / `smoke-run.js` | プラグインの runtime smoke テスト（`install.ps1`→読込→env 契約と commit 誘導を検証。`plugins/` 外に置くのは opencode の自動ロード対象外にするため） | node/npm と pwsh が必要。CI の `plugin-smoke` で実行 |
 | `plugins/package.json`・`package-lock.json`・`tsconfig.json` | 型チェック基盤（`@types/node` と `@opencode-ai/plugin` は plugins/package.json＋lock から取得） | CI の `lint-ts` で実行。`node_modules/` は gitignore |
 | `bin/conahcnuj.sh` | issue駆動自律開発ドライバ（issue→フィーチャーブランチ→PR→owner を reviewer にアサインしてレビュー依頼＝終了。既に Approved なら ready to merge で終了） | `lib/`・`tests/`・`test.sh` とセット。実行は `conahcnuj <issue番号>`（PR番号なら自動で再開）。ブランチ名・コミットメッセージはコーディングエージェントが決める（`.branch-name` / `.commit-msg`）。環境変数上書き・offline テストモードはヘッダーコメント参照。異常終了時はバグ報告 issue を対象リポジトリへ自動作成（`gh_api_create_issue`）。ブランチの fetch に失敗すると作業ツリーが古いまま進み、既コミットの実装を消しかねないため、`checkout_branch_head` はその場で停止する。`request_review_from_owner` は依頼 API の失敗を鵜呑みにせず、まず `request_review_with_retry` で 1 回だけ再試行し（同じ reviewer を二重登録しても GitHub 側に要求は残らないので冪等）、それでも失敗したら `gh_api_requested_reviewers` で PR を読み返す（GitHub が記録した後の通信エラーは拒否と区別できず、そのままだと完了した run が exit 1 でバグ報告される。#134 / #139）。**読み返しが「誰も依頼されていない」と答えたときだけ** run を失敗させ、読み返し自体が失敗した場合は PR は完成済みなので WARNING で終了する（`REVIEW_HANDOFF_CONFIRMED` が false のときは `log_review_handoff` が「依頼を確認できなかった」文言を出す。「読めなかった」を「誰も聞いていません」と読むと検証不能な引き渡しをバグ報告に 바꾸てしまう） |
@@ -97,7 +97,7 @@ bash gh-app/api-commit.sh -m "message" -a --dry-run   # owner/repo/branch 自動
   # またはこのリポジトリ内では直接スクリプトでも同じ
   bash gh-app/api-commit.sh -m "message" [-a]
   ```
-  `CONAHCNUJ_COMMIT_MODEL` があれば `api-commit.sh` が本文へ `Model: <ラベル>` trailer を足す。OpenCode 上の `git vc` はプラグインがラベルを入れる。未設定なら trailer は付かない。
+  `CONAHCNUJ_COMMIT_MODEL` があれば `api-commit.sh` が本文へ `Co-Authored-By: <値>` trailer を足す（OpenCode ではプラグインが `provider (model/effort)` 形の値を入れ、ドライバのフォールバックは `provider/model` を同じ形に整形する）。未設定なら trailer は付かない。本文に既に `Co-Authored-By` があれば足さない。
   `git vc` はプラグインが注入する git alias（組み込みの上書きは不可のため新規名 `vc`）。
   owner/repo/branch は `git remote` と現在ブランチから自動検出される。
 - `api-commit.sh` の仕様:

@@ -157,7 +157,7 @@ opencode_run() {
     return 0
   fi
 
-  # Private temp file (mkdtemp). The plugin writes the display name only
+  # Private temp file (mkdtemp). The plugin writes the trailer value only
   # when the path stays inside Node's temp directory. A side model is
   # ignored when CONAHCNUJ_SESSION_MODEL is the model this run selected.
   local label_file

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Model trailer on api-commit.sh --dry-run. No token, no network.
+# Co-Authored-By trailer on api-commit.sh --dry-run. No token, no network.
 # Usage: bash api-commit-trailer.sh <staged gh-app dir>
 set -euo pipefail
 
@@ -29,42 +29,53 @@ run_dry() {
   )
 }
 
-OUT="$(CONAHCNUJ_COMMIT_MODEL='Grok 4.7 (medium)' run_dry)"
+OUT="$(CONAHCNUJ_COMMIT_MODEL='xai (grok-4.7/medium)' run_dry)"
 if [[ "${OUT}" != *"Message:    fix: record the sample"* ]]; then
   echo "FAIL: headline changed:" >&2
   echo "${OUT}" >&2
   exit 1
 fi
-if [[ "${OUT}" != *"Body:       Model: Grok 4.7 (medium)"* ]]; then
-  echo "FAIL: model trailer missing:" >&2
+if [[ "${OUT}" != *"Body:       Co-Authored-By: xai (grok-4.7/medium)"* ]]; then
+  echo "FAIL: attribution trailer missing:" >&2
   echo "${OUT}" >&2
   exit 1
 fi
-echo "PASS model label becomes a Model trailer"
+echo "PASS model value becomes a Co-Authored-By trailer"
 
 OUT="$(run_dry)"
 if [[ "${OUT}" == *"Body:"* ]]; then
-  echo "FAIL: trailer added without a label:" >&2
+  echo "FAIL: trailer added without a value:" >&2
   echo "${OUT}" >&2
   exit 1
 fi
 echo "PASS unset CONAHCNUJ_COMMIT_MODEL adds no trailer"
 
-OUT="$(CONAHCNUJ_COMMIT_MODEL=$'Grok 4.7\n(medium)' run_dry)"
-if [[ "${OUT}" != *"Body:       Model: Grok 4.7 (medium)"* ]]; then
-  echo "FAIL: multiline label was not collapsed:" >&2
+OUT="$(CONAHCNUJ_COMMIT_MODEL=$'xai (grok-4.7\nmedium)' run_dry)"
+if [[ "${OUT}" != *"Body:       Co-Authored-By: xai (grok-4.7 medium)"* ]]; then
+  echo "FAIL: multiline value was not collapsed:" >&2
   echo "${OUT}" >&2
   exit 1
 fi
-echo "PASS multiline model label collapses to one trailer line"
+echo "PASS multiline model value collapses to one trailer line"
 
 OUT="$(
   cd "${FIX}"
-  CONAHCNUJ_COMMIT_MODEL='other' bash "${APICOMMIT}" o/r b -m $'fix: kept\n\nModel: already' --dry-run
+  CONAHCNUJ_COMMIT_MODEL='Co-Authored-By: openai (gpt-5/medium)' bash "${APICOMMIT}" o/r b -m "fix: record the sample" --dry-run
 )"
-if [[ "${OUT}" != *"Body:       Model: already"* ]] || [[ "${OUT}" == *"other"* ]]; then
-  echo "FAIL: existing Model trailer was rewritten:" >&2
+if [[ "${OUT}" != *"Body:       Co-Authored-By: openai (gpt-5/medium)"* ]]; then
+  echo "FAIL: a value that already carries the key was doubled:" >&2
   echo "${OUT}" >&2
   exit 1
 fi
-echo "PASS existing Model trailer is kept"
+echo "PASS a carried trailer key is not repeated"
+
+OUT="$(
+  cd "${FIX}"
+  CONAHCNUJ_COMMIT_MODEL='xai (grok-4.7/medium)' bash "${APICOMMIT}" o/r b -m $'fix: kept\n\nCo-Authored-By: someone <someone@example.com>' --dry-run
+)"
+if [[ "${OUT}" != *"Body:       Co-Authored-By: someone <someone@example.com>"* ]] || [[ "${OUT}" == *"grok-4.7"* ]]; then
+  echo "FAIL: existing Co-Authored-By trailer was rewritten:" >&2
+  echo "${OUT}" >&2
+  exit 1
+fi
+echo "PASS existing Co-Authored-By trailer is kept"
