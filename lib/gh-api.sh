@@ -53,11 +53,31 @@ gh_api_unescape() {
 # JSON-escape a string for embedding inside a GraphQL query string or a JSON
 # body. Escapes backslashes and quotes; converts literal line breaks into \n
 # sequences (raw newlines are invalid inside GraphQL string literals, and
-# multi-line title/body/comment text is the norm).
+# multi-line title/body/comment text is the norm). Every other control byte
+# (tab, CR, ESC, BEL, ...) becomes a \u00XX escape, DEL included for the same
+# reason: a raw control byte inside a JSON string makes GitHub refuse the whole
+# request with 400 "Problems parsing JSON" and the caller loses the call. Such
+# bytes do reach this function - the bug report body is the tail of the run
+# log, and the renderer decodes opencode's \t / \r escapes into real tab and
+# carriage-return bytes before printing them (issue #156: the bug report for
+# #155 was rejected on exactly that, so the report itself was lost).
 gh_api_escape() {
   printf '%s' "${1}" |
     sed 's/\\/\\\\/g; s/"/\\"/g' |
-    awk '{ if (NR > 1) printf "\\n"; printf "%s", $0 }'
+    awk '
+      BEGIN {
+        for (i = 1; i < 32; i++) ctl[sprintf("%c", i)] = i
+        ctl[sprintf("%c", 127)] = 127
+      }
+      NR > 1 { printf "\\n" }
+      {
+        n = length($0)
+        for (i = 1; i <= n; i++) {
+          c = substr($0, i, 1)
+          if (c in ctl) printf "\\u%04x", ctl[c]
+          else printf "%s", c
+        }
+      }'
 }
 
 # Read a single line from stdin (used by every test-mode function so that a
