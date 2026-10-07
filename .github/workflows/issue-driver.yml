@@ -43,10 +43,10 @@ jobs:
     environment: conahcnuj
     # Do not chase the driver's own outputs: its bug-report issues are
     # authored by bots, and running the driver on them would loop forever.
-    # A job-level `if` cannot read the `secrets` context (and APP_SLUG is
-    # not needed here), so any bot-authored issue is skipped by type. Missing
-    # secrets are not pre-checked either: the run fails loudly and the driver
-    # files its own bug report (no silent skip).
+    # A job-level `if` cannot read the `secrets` context, so any bot-authored
+    # issue is skipped by type. Missing secrets are not pre-checked either:
+    # the run fails loudly and the driver files its own bug report
+    # (no silent skip).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
@@ -75,12 +75,14 @@ jobs:
 
       # The driver reads gh-app/app.env like any local run. The private key is
       # staged from the sealed secret, outside the work tree, so `git add -A`
-      # can never pick it up.
+      # can never pick it up. The App slug is not staged from a secret: it is
+      # public (the <slug>[bot] login, and here also the repository name), and
+      # a secret with that value made Actions mask the repository name in the
+      # whole job log - the created PR URL included.
       - name: Stage App private key and app.env
         env:
           APP_ID: ${{ secrets.APP_ID }}
           INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
-          APP_SLUG: ${{ secrets.APP_SLUG }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: |
           pem="$RUNNER_TEMP/conahcnuj-app.pem"
@@ -89,10 +91,11 @@ jobs:
           cat > gh-app/app.env <<EOF
           APP_ID="$APP_ID"
           INSTALLATION_ID="$INSTALLATION_ID"
-          APP_SLUG="$APP_SLUG"
           PRIVATE_KEY_PATH="$pem"
           BASH_EXE="/usr/bin/bash"
           EOF
+          APP_SLUG="$(bash gh-app/app-slug.sh)"
+          printf 'APP_SLUG="%s"\n' "${APP_SLUG}" >> gh-app/app.env
 
       - name: Run the conahcnuj driver
         env:

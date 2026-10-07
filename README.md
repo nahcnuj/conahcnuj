@@ -134,10 +134,16 @@ submit・編集・dismiss された場合も、PR 番号でドライバを再開
   `CONAHCNUJ_MAX_SECONDS=3540` をその直下に設定し、ジョブが強制終了される前に
   ドライバが自己終了してバグ報告を残せるようにしています。予算を変えるときは
   両方を合わせて変更してください。
-- 必要な repo secrets: `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /
-  `PRIVATE_KEY`（App の秘密鍵 PEM）。runner 上の `GITHUB_TOKEN` は
-  `contents: read` のみで、書き込み（ブランチ・コミット・PR・レビュー依頼・
-  コメント）はすべてローカル実行と同じく App のインストールトークンで行われます。
+- 必要な repo secrets: `APP_ID` / `INSTALLATION_ID` / `PRIVATE_KEY`
+  （App の秘密鍵 PEM）。`APP_SLUG` はシークレットにしません。実行時に
+  `gh-app/app-slug.sh` が App 自身（`GET /app`）からスラッグを解決して
+  `gh-app/app.env` へ書きます。スラッグは `<slug>[bot]` のログイン名という
+  公開情報であり、シークレットにしてしまうと Actions がその値をログから
+  `***` に塗り潰すため、リポジトリ名を含む行（作成した PR の URL など）が
+  読めなくなる（既存の `APP_SLUG` シークレットは削除してよい）。
+- runner 上の `GITHUB_TOKEN` は `contents: read` のみで、書き込み（ブランチ・
+  コミット・PR・レビュー依頼・コメント）はすべてローカル実行と同じく App の
+  インストールトークンで行われます。
 
 ## owner 承認後の自動マージ（GitHub Actions）
 
