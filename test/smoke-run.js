@@ -60,8 +60,8 @@ async function main() {
   await before({ tool: "bash" }, { args: { command: "git status" }, env: {} })
   await before({ tool: "read" }, { args: { filePath: "x" }, env: {} })
 
-  // OpenCode reports the variant on the user message and the display name
-  // on chat.params. The shell that runs `git vc` must see one trailer label.
+  // OpenCode reports the effort variant on the user message and the model id
+  // on chat.params. The shell that runs `git vc` must see one trailer value.
   const fs = require("node:fs")
   const os = require("node:os")
   const path = require("node:path")
@@ -96,8 +96,8 @@ async function main() {
   )
   const labeled = { env: {} }
   await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, labeled)
-  assert.strictEqual(labeled.env.CONAHCNUJ_COMMIT_MODEL, "Grok 4.7 (medium)")
-  assert.strictEqual(fs.readFileSync(labelFile, "utf8").trim(), "Grok 4.7 (medium)")
+  assert.strictEqual(labeled.env.CONAHCNUJ_COMMIT_MODEL, "xai (grok-4.7/medium)")
+  assert.strictEqual(fs.readFileSync(labelFile, "utf8").trim(), "xai (grok-4.7/medium)")
   process.env.CONAHCNUJ_MODEL_LABEL_FILE = outside
   await plugin["chat.params"](
     {

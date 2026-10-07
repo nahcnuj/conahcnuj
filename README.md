@@ -56,9 +56,11 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
 GitHub 自身にコミットを作成させるしかない。
 
-`CONAHCNUJ_COMMIT_MODEL` にラベル（例: `Grok 4.7 (medium)`）が入っているとき、
-コミット本文の末尾へ Git trailer `Model: <ラベル>` を足す。未設定なら足さない。
-OpenCode ではプラグインがセッションの表示名と variant をこの変数へ入れる。
+`CONAHCNUJ_COMMIT_MODEL` に値（例: `xai (grok-4.7/medium)`）が入っているとき、
+コミット本文の末尾へ Git trailer `Co-Authored-By: <値>` を足す。未設定なら足さない。
+OpenCode ではプラグインがセッションの provider・model・effort を
+`provider (model/effort)` の形でこの変数へ入れる（本文に既に
+`Co-Authored-By` があれば足さない）。
 別のエージェントや手元のシェルは、同じ変数に好きな文字列を入れて使える。
 
 ## issue駆動自律開発（conahcnuj）

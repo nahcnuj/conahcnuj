@@ -95,12 +95,12 @@ test_model_label_file_wins() {
   local tmp out
   tmp="$(mktemp -d)"
   fixture_repo "${tmp}/repo"
-  printf 'Space Bunny (medium)\n' > "${tmp}/label.txt"
+  printf 'opencode/space-bunny-free (medium)\n' > "${tmp}/label.txt"
   out="$(printf '%s\n' '{"type":"text","part":{"type":"text","text":"x"}}' |
     CONAHCNUJ_MODEL_LABEL_FILE="${tmp}/label.txt" \
     bash "${RENDER}" --model "opencode/space-bunny-free" --dir "${tmp}/repo")"
-  # The plugin's display name plus effort wins over the raw model id.
-  assert_contains "${out}" "Space Bunny (medium)@" "plugin label used"
+  # The plugin's attribution label wins over the raw model id.
+  assert_contains "${out}" "opencode/space-bunny-free (medium)@" "plugin label used"
   assert_not_contains "${out}" "opencode/space-bunny-free@" "model id not used when a label exists"
   rm -rf "${tmp}"
   echo "render_model_label passed"

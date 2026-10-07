@@ -348,8 +348,9 @@ async function injectShellEnv(
  * path instead. Throws to block, returns silently to allow.
  */
 interface SeenModel {
-  name: string
-  variant: string
+  provider: string
+  model: string
+  effort: string
 }
 
 const seenModels = new Map<string, SeenModel>()
@@ -379,19 +380,20 @@ function oneLine(value: string): string {
 }
 
 /**
- * Display label for a commit trailer. Variant is the OpenCode effort
- * ("medium", ...), appended only when the name does not already include it.
+ * Value for the commit's Co-Authored-By trailer: `provider (model/effort)`,
+ * e.g. `xai (grok-4.7/medium)`. The effort is the OpenCode variant
+ * ("medium", ...); without one the parens hold just the model id.
  */
-function formatModelLabel(name: string, variant: string): string {
-  const base = oneLine(name)
-  const effort = oneLine(variant)
-  if (!base) {
-    return ""
+function formatModelLabel(provider: string, model: string, effort: string): string {
+  const p = oneLine(provider)
+  const m = oneLine(model)
+  const e = oneLine(effort)
+  if (!p || !m) {
+    // A hook that reported only part of the id falls back to that part.
+    const id = [p, m].filter(Boolean).join("/")
+    return e && id ? `${id}/${e}` : id
   }
-  if (!effort || base.endsWith(`(${effort})`)) {
-    return base
-  }
-  return `${base} (${effort})`
+  return e ? `${p} (${m}/${e})` : `${p} (${m})`
 }
 
 /**
@@ -414,18 +416,22 @@ function matchesSessionModel(providerID: string, modelID: string): boolean {
 
 function rememberModel(
   sessionID: string,
-  patch: { name?: string; variant?: string }
+  patch: { provider?: string; model?: string; effort?: string }
 ): void {
-  const prev = seenModels.get(sessionID) ?? { name: "", variant: "" }
-  const name =
-    patch.name !== undefined && oneLine(patch.name) ? oneLine(patch.name) : prev.name
-  const variant = patch.variant !== undefined ? oneLine(patch.variant) : prev.variant
-  if (!name && !variant) {
+  const prev = seenModels.get(sessionID) ?? { provider: "", model: "", effort: "" }
+  const provider =
+    patch.provider !== undefined && oneLine(patch.provider)
+      ? oneLine(patch.provider)
+      : prev.provider
+  const model =
+    patch.model !== undefined && oneLine(patch.model) ? oneLine(patch.model) : prev.model
+  const effort = patch.effort !== undefined ? oneLine(patch.effort) : prev.effort
+  if (!provider && !model) {
     return
   }
-  seenModels.set(sessionID, { name, variant })
+  seenModels.set(sessionID, { provider, model, effort })
   latestSessionID = sessionID
-  const label = formatModelLabel(name, variant)
+  const label = formatModelLabel(provider, model, effort)
   if (!label) {
     return
   }
@@ -442,7 +448,7 @@ function labelForSession(sessionID: string | undefined): string {
   if (!seen) {
     return ""
   }
-  return formatModelLabel(seen.name, seen.variant)
+  return formatModelLabel(seen.provider, seen.model, seen.effort)
 }
 
 function blockUnsignedCommit(
@@ -481,13 +487,11 @@ export const GhAppTokenPlugin: Plugin = async () => {
       if (model && !matchesSessionModel(model.providerID, model.modelID)) {
         return
       }
-      // Keep a display name from chat.params. The id is only a stand-in
-      // until that hook has supplied model.name.
-      const prev = seenModels.get(input.sessionID)
-      const name = model ? `${model.providerID}/${model.modelID}` : undefined
+      // The ids come with the model on this message; an absent effort leaves
+      // the one already recorded alone.
       rememberModel(input.sessionID, {
-        ...(prev?.name ? {} : { name }),
-        variant: input.variant,
+        ...(model ? { provider: model.providerID, model: model.modelID } : {}),
+        effort: input.variant,
       })
     },
     "chat.params": async (input) => {
@@ -496,12 +500,13 @@ export const GhAppTokenPlugin: Plugin = async () => {
         return
       }
       rememberModel(input.sessionID, {
-        name: model.name || `${model.providerID}/${model.id}`,
+        provider: model.providerID,
+        model: model.id,
       })
     },
     "shell.env": async (input, output) => {
       await injectShellEnv(output.env, { botName, botEmail, vcCmd })
-      // An explicit label (the user, or a caller that already chose one) wins.
+      // An explicit value (the user, or a caller that already chose one) wins.
       if (!output.env.CONAHCNUJ_COMMIT_MODEL) {
         const label = labelForSession(input.sessionID)
         if (label) {
