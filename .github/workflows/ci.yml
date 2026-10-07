@@ -70,19 +70,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Seed a user AGENTS.md and run install into temp dir
+      # The AGENTS.md merge (Install-GlobalAgentsMd) has its own test file:
+      # personal rules are kept, the managed conahcnuj block appears exactly
+      # once and re-running install is idempotent. It runs the real
+      # install.ps1 against temp destinations.
+      - name: Test the global AGENTS.md merge
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./test/install-agents-md.ps1
+
+      - name: Install into temp dir for deployment verification
         shell: pwsh
         run: |
           $dest = Join-Path $env:RUNNER_TEMP "opencode-deploy-test"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          # Users may already keep personal global rules here: install must
-          # merge the conahcnuj block, never overwrite the file.
-          [IO.File]::WriteAllText(
-            (Join-Path $dest "AGENTS.md"),
-            "# My personal rules`nkeep-me`n",
-            (New-Object System.Text.UTF8Encoding $false))
-          & ./install.ps1 -Destination $dest
-          # Re-running install must replace the block, not stack a second copy.
           & ./install.ps1 -Destination $dest
 
       - name: Verify deployed files
@@ -115,24 +116,8 @@ jobs:
             Write-Error "app.env was not created from example"
             exit 1
           }
-          # Global AGENTS.md: the conahcnuj block is merged in exactly once
-          # and the user's own rules survive.
-          $agents = Get-Content -Raw -LiteralPath (Join-Path $dest "AGENTS.md")
-          if ($agents -notmatch "keep-me") {
-            Write-Error "install overwrote the user's global AGENTS.md"
-            exit 1
-          }
-          foreach ($marker in @("<!-- conahcnuj:begin -->", "<!-- conahcnuj:end -->")) {
-            $hits = ([regex]::Matches($agents, [regex]::Escape($marker))).Count
-            if ($hits -ne 1) {
-              Write-Error "AGENTS.md marker '$marker' appears $hits times (want 1)"
-              exit 1
-            }
-          }
-          if ($agents -notmatch "git vc") {
-            Write-Error "AGENTS.md does not tell agents to commit with git vc"
-            exit 1
-          }
+          # The AGENTS.md merge assertions live in test/install-agents-md.ps1
+          # (runs above); this step only verifies the deployed file tree.
           # Only gh-app-token.ts may live at the top level of the deployed
           # plugins dir (opencode loads every top-level file there as a
           # plugin; the helper module sits in plugins/lib/):

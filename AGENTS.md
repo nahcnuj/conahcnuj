@@ -39,6 +39,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `tests/`・`test.sh` | ドライバの offline モックテスト（モック API tape ＋ モック opencode でフロー検証。`auto-merge-outstanding-checks.sh` は workflow 内の jq を抽出して実 payload で検証する。jq 不在時は skip） | 秘密鍵・ネットワーク不要。CI の `mock-test` で `test.sh` を実行。`conahcnuj-branch-head.sh` はローカルの bare リポジトリを origin にして、fetch 失敗時に古い head で続行せず停止することを検証。`conahcnuj-message-only.sh` は `.commit-msg` だけ書いたモデル（作業ツリーは無変更）を no work として次モデルへ引き継ぎ、その変更だけがブランチに乗ることを検証（`MOCK_OPENCODE_MESSAGE_ONLY` で再現可） |
 | `tests/conahcnuj-env-failure.sh` | provider ごと環境エラーで落ちたラウンドのスキップ・診断・バグ報告文言と、環境エラーでない失敗では provider を落とさないことを検証 | `MOCK_OPENCODE_ENV_ERROR` で再現可。判定は `lib/opencode.sh` の `opencode_round_is_environment`（失敗ラウンドの生 JSON イベント行を grep。テキストイベントは対象外、status が 0 以外のときだけ分類）。全ラウンドが環境エラーだったときの `ENVIRONMENT_DOWN=1` とバグ報告の書き出し・締めの文言切替は `bin/conahcnuj.sh`（#149） |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置。加えて `conahcnuj` バイナリ（既定 `~/.local/bin`）と bin 側 `gh-app/`・`lib/` を配置 | gh-app は**2 箇所**へ配備（opencode 設定用とドライバ用）。実 `app.env` があればそれを、無ければ example から作成 |
+| `test/install-agents-md.ps1` | `Install-GlobalAgentsMd`（グローバル AGENTS.md への管理ブロック merge）のテスト。実物の `install.ps1` を一時 Destination＋InstallPath で実行し、新規作成・個人ルール保持・再実行の冪等性・未終端ブロックの書換・end マーカー後の個人ルール生存を検証 | pwsh のみ。CI の `install-test` が実行。
 | `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
 | `docker-run.sh` | 上記イメージでドライバを実行するラッパー（対象リポジトリを `/work` へマウント、コンテナ用 `app.env` を生成し秘密鍵を読み取り専用マウント） | テストではなく**実走行**用（実キー・ネットワーク・opencode 設定が必要） |
 | `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-unit` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
@@ -64,6 +65,9 @@ bash test/smoke.sh  # install.ps1 → 読込 → フック契約の runtime テ�
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/tests/run.sh
 bash test.sh   # ドライバの offline テスト（bin/・lib/・tests/）
+
+# install.ps1 のグローバル AGENTS.md merge テスト（pwsh のみ）
+pwsh -NoProfile -File test/install-agents-md.ps1
 
 # e2e は CI の `e2e-opencode` ジョブで実行（手順は ci.yml に直接記載）。
 # ローカルで流す場合は opencode 本体・node・pwsh を用意し、ジョブの手順をなぞる
