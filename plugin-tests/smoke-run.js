@@ -1,5 +1,5 @@
 // Plugin runtime smoke test runner (plain Node, no deps).
-// Usage: bash plugins/smoke.sh (which stages ./.smoke/ first)
+// Usage: bash plugin-tests/smoke.sh (which stages ./.smoke/ first)
 //   or: node smoke-run.js <expected app slug>
 //
 // Loads the compiled plugin with a fake gh-app dir (fake app.env; the bot

@@ -38,10 +38,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Syntax check
-        run: bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
+        run: bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh driver-tests/*.sh
 
       - name: ShellCheck
-        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
+        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh driver-tests/*.sh
 
   lint-ps:
     name: Check install.ps1 syntax
@@ -165,14 +165,14 @@ jobs:
 
       # Full offline suite: token cache, credential helper, api-commit.sh
       # arg validation and --dry-run worktree collection (gh-app/tests/).
-      - name: Run tests/run.sh suite
+      - name: Run gh-app/tests/run.sh suite
         run: bash gh-app/tests/run.sh
 
       # Driver suite: conahcnuj end-to-end flow tests driven by a mocked
-      # API tape + mocked opencode (bin/, lib/, tests/, no secrets,
+      # API tape + mocked opencode (bin/, lib/, driver-tests/, no secrets,
       # no network).
       - name: Run driver test suite
-        run: bash test.sh
+        run: bash driver-tests/run.sh
 
   lint-ts:
     name: Typecheck opencode plugin
@@ -230,7 +230,7 @@ jobs:
       # identity + alias.vc) and the git-commit redirect.
       # Needs node/npm from the runner; no secrets, no GitHub network.
       - name: Run plugin smoke test
-        run: bash test/smoke.sh
+        run: bash plugin-tests/smoke.sh
 
   e2e-opencode:
     name: E2E opencode run (opencode free model)
@@ -302,4 +302,4 @@ jobs:
       # no remote); anything else fails the run.
       - name: Run opencode and assert git vc surfaces
         run: |
-          bash test/e2e-opencode.sh
+          bash plugin-tests/e2e-opencode.sh
