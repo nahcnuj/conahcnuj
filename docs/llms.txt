@@ -1,0 +1,21 @@
+# conahcnuj
+
+> GitHub App の名義で git / gh CLI / opencode を動かすための設定・スクリプト集。
+> issue を PR まで自律的に運ぶドライバ `conahcnuj` を含む。
+
+conahcnuj は GitHub App「conahcnuj」のインストールトークンを発行し、git 操作と
+GitHub API を bot 名義（`<slug>[bot]`）で行うためのツール群です。付属のドライバは
+issue を実装・Verified コミット・PR 作成・owner レビュー依頼まで自動で運び、
+マージはしません。常に最新版のドキュメント（Markdown 原文）をこの配信先で公開しています:
+https://nahcnuj.github.io/conahcnuj/
+
+## Docs
+
+- [index.md](index.md): 全体像・対象範囲・この索引の読み方
+- [configuration.md](configuration.md): `gh-app/app.env` のキー、fallback、キャッシュファイル、`GH_APP_API_BASE`
+- [cli.md](cli.md): `get-token.sh` / `git-credential-helper.sh` / `setup-git.sh` / `bot-user-id.sh` / `api-commit.sh` の入出力と終了コード
+- [driver.md](driver.md): ドライバ `conahcnuj` の使い方、フロー、エージェント契約（`.commit-msg` / `.branch-name`）、終了コード
+- [plugin.md](plugin.md): opencode プラグインのフック、注入する `GH_TOKEN` / `GIT_CONFIG_*`、`git vc`、Model ラベル
+- [environment.md](environment.md): 環境変数の全量（ドライバ・Docker・Actions・テスト専用・内部変数）
+- [workflows.md](workflows.md): GitHub Actions 5 本、必須ステータスチェック、reusable auto-merge workflow の入力、Pages 配信
+- [installation.md](installation.md): `install.ps1` と Docker による配置・実行、導入後の確認

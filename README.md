@@ -28,13 +28,31 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
+├── docs/                      # AI 向けリファレンス（GitHub Pages で配信。build.py が検証・HTML 化）
 ├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
 ├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
 ├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
 ├── .github/workflows/owner-approved-auto-merge.yml # 再利用用 auto-merge workflow
+├── .github/workflows/pages.yml        # docs/ を GitHub Pages へデプロイ
 ├── .gitignore
 └── AGENTS.md
 ```
+
+## ドキュメント（GitHub Pages）
+
+アプリとその API（設定・CLI・ドライバ・プラグイン・環境変数・ワークフロー）の
+リファレンスを `docs/` に置き、GitHub Pages で配信しています。常に最新版のみで、
+バージョン切り替えはありません。
+
+- サイト: <https://nahcnuj.github.io/conahcnuj/>
+- 機械可読な索引: <https://nahcnuj.github.io/conahcnuj/llms.txt>
+- 各ページは Markdown 原文（同じパスの `.md`）と HTML の両方で開けます
+
+`docs/*.md` がソースで、`.github/workflows/pages.yml` が push to main のたびに
+`docs/build.py`（リンク検証 + HTML 生成 → `_site/`）を実行してデプロイします。
+**初回のみ** Settings → Pages → Source = **GitHub Actions** を設定してください。
+CI の `Build docs site` ジョブが同じビルドを PR でも検証します。ローカルでは
+`python3 docs/build.py`（検証のみは `--check`）で確認できます。
 
 ## 仕組み
 

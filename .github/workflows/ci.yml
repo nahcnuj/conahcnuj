@@ -303,3 +303,20 @@ jobs:
       - name: Run opencode and assert git vc surfaces
         run: |
           bash test/e2e-opencode.sh
+
+  docs:
+    name: Build docs site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # Same build as pages.yml: link/coverage checks + HTML render of docs/.
+      # Not a required status check, so a docs-only regression never blocks
+      # a code PR.
+      - name: Build and validate docs
+        run: |
+          python3 -m pip install --disable-pip-version-check markdown==3.11
+          python3 docs/build.py
