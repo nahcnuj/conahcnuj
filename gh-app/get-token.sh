@@ -47,7 +47,9 @@ if [[ "${1:-}" == "--print-pem-path" ]]; then
 fi
 
 # Return cached token if still valid (installation tokens live ~1h).
-if [[ -f "${CACHE_FILE}" ]]; then
+# --print-jwt never takes this path: the cache holds installation tokens,
+# not App JWTs.
+if [[ "${1:-}" != "--print-jwt" && -f "${CACHE_FILE}" ]]; then
   CACHE_EXPIRES="$(sed -n '1{s/^\([0-9][0-9]*\)|.*$/\1/p}' "${CACHE_FILE}")"
   CACHE_TOKEN="$(sed -n '1{s/^[0-9][0-9]*|//p}' "${CACHE_FILE}")"
   if [[ -n "${CACHE_EXPIRES}" && -n "${CACHE_TOKEN}" && "$(date +%s)" -lt "${CACHE_EXPIRES}" ]]; then
@@ -72,6 +74,13 @@ SIGNING_INPUT="${HEADER}.${PAYLOAD}"
 # 2) Sign with the app private key (RS256)
 SIG="$(printf '%s' "${SIGNING_INPUT}" | openssl dgst -sha256 -binary -sign "${PEM_PATH}" | b64url)"
 JWT="${SIGNING_INPUT}.${SIG}"
+
+# --print-jwt callers want only the signed JWT (app-level auth such as
+# GET /app, used by app-slug.sh): stop before the exchange.
+if [[ "${1:-}" == "--print-jwt" ]]; then
+  printf '%s\n' "${JWT}"
+  exit 0
+fi
 
 # 3) Exchange JWT for an installation access token
 RESP="$(curl -fsSL \
