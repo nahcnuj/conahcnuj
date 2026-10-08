@@ -20,8 +20,6 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
-├── bin/auto-drive-report.sh   # auto-drive 実行ログの週次解析（レポート生成）
-├── bin/auto-drive-workflow.sh # 週次自己研鑽ループ（収集→公開→findings をドライバへ）
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── plugin-tests/               # プラグインの runtime テスト（smoke＋e2e。node/npm・pwsh・opencode が必要）
@@ -33,7 +31,6 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── docs/                      # AI 向けリファレンス（GitHub Pages で配信。build.py が検証・HTML 化）
 ├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
 ├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
-├── .github/workflows/weekly-self-improvement.yml # 週次で auto-drive ログ解析し自己研鑽
 ├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
 ├── .github/workflows/owner-approved-auto-merge.yml # 再利用用 auto-merge workflow
 ├── .github/workflows/pages.yml        # docs/ を GitHub Pages へデプロイ
@@ -164,17 +161,6 @@ submit・編集・dismiss された場合も、PR 番号でドライバを再開
   `PRIVATE_KEY`（App の秘密鍵 PEM）。runner 上の `GITHUB_TOKEN` は
   `contents: read` のみで、書き込み（ブランチ・コミット・PR・レビュー依頼・
   コメント）はすべてローカル実行と同じく App のインストールトークンで行われます。
-
-## 自己研鑽（週次の auto-drive ログ解析）
-
-`.github/workflows/weekly-self-improvement.yml` は毎週、直近 1 週間の
-`issue-driver.yml` 実行ログを Actions API で集め、`bin/auto-drive-report.sh` が
-解析したレポートを「auto-drive weekly self-improvement log」issue へ投稿します。
-その週に actionable な finding（バグ報告・全モデル失敗・時間予算枯渇・想定外の
-終わり方など）があれば、「auto-drive findings」issue にまとめて次のドライバ実行
-へ引き渡します。findings は `github-actions[bot]` が作るため `issues-opened`
-トリガで自動再実行はされず、唯一の入口は `workflow_dispatch` です。詳細は
-[docs/self-improvement.md](docs/self-improvement.md) を参照してください。
 
 ## owner 承認後の自動マージ（GitHub Actions）
 

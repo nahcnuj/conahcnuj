@@ -1,13 +1,13 @@
 # GitHub Actions
 
-`.github/workflows/` の 6 本です。このリポジトリのポリシーとして、利用する
+`.github/workflows/` の各ワークフローです。このリポジトリのポリシーとして、利用する
 `actions/*` は **full-length SHA でピン留め**します。
 
 | ファイル | 名前 | 触発 | 役割 |
 | --- | --- | --- | --- |
 | `ci.yml` | CI | push to main / PR | lint・offline テスト・型チェック・smoke・e2e・docs ビルド |
 | `issue-driver.yml` | Issue auto-drive | issue open/reopen、非 approve の review、手動 | ドライバを Actions 上で実行 |
-| `weekly-self-improvement.yml` | Weekly auto-drive self-improvement | schedule（月曜）/ 手動 | 直近の auto-drive 実行ログを解析し、週次の findings をドライバへ引き渡す |
+| `weekly-self-improvement.yml` | Weekly auto-drive self-improvement | schedule（月曜） | 直近の auto-drive 実行ログを解析し、findings を Project とドライバへ引き渡す |
 | `auto-merge.yml` | Owner-approved auto-merge | owner が approve | 再利用 workflow を呼び出してマージ |
 | `owner-approved-auto-merge.yml` | Owner-approved auto-merge | `workflow_call` | マージ処理本体（他リポジトリからも利用可） |
 | `pages.yml` | Docs to GitHub Pages | push to main / 手動 | `docs/` を GitHub Pages へ配信 |
@@ -25,7 +25,7 @@
 | `docs` | `Build docs site` | Ubuntu |
 | `e2e-opencode` | `E2E opencode run (opencode free model)` | Windows |
 
-`main` の ruleset が要求する **必須ステータスチェック**は次の 5 件です
+`main` の ruleset が要求する **必須ステータスチェック**は次のとおりです
 （これらが green でない PR はマージできません）:
 
 1. `Lint shell scripts (ubuntu-latest)`
@@ -46,7 +46,9 @@ CI では行いません。
 - 触発: issue の `opened` / `reopened`、open で draft でない同リポジトリ PR への
   **approve 以外の** review（`submitted` / `edited` / `dismissed`）、
   手動実行（`workflow_dispatch` + `number` 入力）
-- bot（`user.type == Bot`）が作った issue / review は再帰防止のためスキップ
+- bot（`user.type == Bot`）が作った issue / review は再帰防止のためスキップ。
+  例外は `self-improvement` ラベル付きの issue（週次 findings）で、自己研鑽
+  ループだけは自分の入口として起動できる
 - `timeout-minutes: 60` と `CONAHCNUJ_MAX_SECONDS=3540` をセットで持ち、
   ランナーに切られる前にドライバが自己終了してバグ報告を残す
 - 必要な repo secrets: `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /
@@ -62,21 +64,23 @@ CI では行いません。
 毎週、直近 1 週間の `issue-driver.yml` 実行ログを解析し、次の週の改善 issue に
 取り込む自己研鑽ループです。詳細は [self-improvement.md](self-improvement.md)。
 
-- 触発: schedule（既定 月曜 01:17 UTC）/ 手動（`workflow_dispatch`）
-- 手動入力: `lookback-days`（既定 `7`）と `drive`（既定 `true`。`false` で
-  レポート公開のみ・ドライバ未起動）
-- 権限は `GITHUB_TOKEN` の `actions: write` / `issues: write` のみ。
-  **シークレットは不要**（トークン発行・ネットワークテストは CI では行わない）
+- 触発: schedule のみ（既定 月曜 01:17 UTC）。人手の入力は無い
+- 権限: `GITHUB_TOKEN` の `actions: write` / `issues: write` に加え、findings
+  issue を App 名義で作るため repo secrets `APP_ID` / `INSTALLATION_ID` /
+  `APP_SLUG` / `PRIVATE_KEY` を使う（`GITHUB_TOKEN` で作った issue は workflow
+  を起動できず、`issues: opened` でドライバを動かせないため）
 - ロジックの本体は `bin/auto-drive-workflow.sh`（`gh` API でのログ収集 →
-  レポート作成 → トラッキング issue へ公開 → actionable 時のみ findings を
-  `workflow_dispatch`）。ドライバを再帰起動しない衛生ルールは
+  レポート作成 → トラッキング issue へ公開 → actionable 時に findings issue を
+  更新し `self-improvement` を付与）。Project への投入は Project 側の組み込み
+  auto-add（`label:self-improvement`）が行い、Projects API は呼ばない。ドライバを
+  再帰起動しない衛生ルールは
   [self-improvement.md](self-improvement.md#ループの衛生再帰しない理由) を参照
 
 ## Owner-approved auto-merge（`auto-merge.yml` + `owner-approved-auto-merge.yml`）
 
 owner が open 中の draft でない PR を approve すると auto-merge を有効化し、
 必要な checks が green ならその場で（green でなければ達成後に）マージします。
-**マージ方法は 3 種（`merge` / `squash` / `rebase`）**、既定は `merge` です。
+**マージ方法は `merge` / `squash` / `rebase`** で、既定は `merge` です。
 
 ### 再利用 workflow の入力（`workflow_call`）
 

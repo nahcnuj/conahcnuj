@@ -8,36 +8,41 @@
 #      through `gh` (Actions API),
 #   2. turns them into a markdown report with auto-drive-report.sh and posts
 #      that report on a standing tracking issue,
-#   3. and only when the report carries actionable findings (actionable>0 on the
-#      report's meta line) and --drive is enabled, keeps ONE open
-#      "auto-drive findings" issue up to date (creating it if none) and
-#      dispatches the driver on it via workflow_dispatch.
+#   3. and when the report carries actionable findings (actionable>0 on the
+#      report's meta line), keeps the standing "auto-drive findings" issue up
+#      to date and labels it `self-improvement`.
 #
-# The robot loop is never self-triggering: the findings issue is authored by
-# github-actions[bot], so the issues-opened trigger skips it (only the explicit
-# workflow_dispatch starts the driver), and every driver run still ends at the
-# owner's review.
+# The label is the loop's single marker: it is what the rest of the loop keys
+# off, so the process stays autonomous without any per-run manual input.
+#
+#   - issue-driver.yml lets a bot-authored issue through only when it carries
+#     the label, and the findings issue is created with the App installation
+#     token on purpose: events raised through the workflow's GITHUB_TOKEN never
+#     start workflows, so a GITHUB_TOKEN issue could not reach the driver on its
+#     own. A labelled App issue starts it on `issues: opened`.
+#   - the repository's GitHub Project runs its built-in "auto-add" workflow on
+#     `label:self-improvement`, so the item lands on the board without any
+#     Projects API call (the GITHUB_TOKEN cannot reach Projects v2, and a
+#     user-owned Project is outside a GitHub App installation). The Project
+#     then drives status with its own built-in rules (for example, a closed
+#     item moves to Done).
+#
+# At most one findings issue is open: a new week's findings are appended to the
+# existing issue and the driver is dispatched once as a retry, while a freshly
+# created issue starts the driver by itself.
 #
 # Everything writes through `gh`, which is the test seam: offline driver tests
-# put a mock `gh` earlier on PATH. No secrets are needed (least-privilege
-# GITHUB_TOKEN: actions: write + issues: write).
+# put a mock `gh` earlier on PATH. No secrets are needed beyond the App token
+# the workflow stages for the findings issue (GITHUB_TOKEN covers the rest).
 #
 # Usage:
 #   auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
-#                          [--lookback-days N] [--drive true|false]
-#                          [--ref BRANCH]
-#                          [--project-owner OWNER] [--project-number N]
-#                          [--project-id ID]
+#                          [--lookback-days N] [--ref BRANCH]
 #
 #   --repo OWNER/REPO     default: $GITHUB_REPOSITORY (required otherwise)
 #   --runs-url-prefix P   link run-<id>.log files to P/<id>
 #   --lookback-days N     default 7 (>= 1)
-#   --drive true|false    default true; false publishes the report but never
-#                         dispatches the driver
-#   --ref BRANCH          workflow_dispatch ref (default $GITHUB_REF_NAME)
-#   --project-owner OWNER owner of GitHub Project (default repo owner)
-#   --project-number N    project number to add issues to
-#   --project-id ID       project ID to add issues to
+#   --ref BRANCH          retry dispatch ref (default $GITHUB_REF_NAME)
 #
 # Report -> stdout, progress -> stderr. Exit 0 on success; > 0 on any failure
 # so the Actions job fails loudly.
@@ -48,40 +53,35 @@ REPORT_SCRIPT="${SCRIPT_DIR}/auto-drive-report.sh"
 MAX_RUNS=40
 TRACKING_TITLE="auto-drive weekly self-improvement log"
 FINDINGS_PREFIX="auto-drive findings"
+SELF_IMPROVEMENT_LABEL="self-improvement"
+LABEL_COLOR="5319e7"
+LABEL_DESCRIPTION="weekly auto-drive self-improvement finding"
 
 usage() {
   cat <<'EOF'
 Usage: auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
-                              [--lookback-days N] [--drive true|false]
-                              [--ref BRANCH]
+                              [--lookback-days N] [--ref BRANCH]
 
 Weekly self-improvement loop: collect the "Issue auto-drive" run logs through
 `gh`, analyze them (auto-drive-report.sh, stdout), publish the report on a
-tracking issue, and dispatch the driver on one findings issue when the report
-has actionable findings. No secrets required. See the script header for the
-loop-hygiene rules.
+tracking issue, and keep the standing "auto-drive findings" issue up to date
+with the `self-improvement` label when the report has actionable findings. The
+label lets issue-driver.yml pick the issue up by itself and lets the GitHub
+Project auto-add it. See the script header for the loop-hygiene rules.
 EOF
 }
 
 repo=""
 runs_url_prefix=""
 lookback_days="7"
-drive="true"
 dispatch_ref=""
-project_owner=""
-project_number=""
-project_id=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) repo="${2:-}"; shift 2 ;;
     --runs-url-prefix) runs_url_prefix="${2:-}"; shift 2 ;;
     --lookback-days) lookback_days="${2:-}"; shift 2 ;;
-    --drive) drive="${2:-}"; shift 2 ;;
     --ref) dispatch_ref="${2:-}"; shift 2 ;;
-    --project-owner) project_owner="${2:-}"; shift 2 ;;
-    --project-number) project_number="${2:-}"; shift 2 ;;
-    --project-id) project_id="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -96,31 +96,25 @@ if [[ -z "${repo}" ]]; then
 fi
 [[ "${repo}" =~ ^[^/]+/[^/]+$ ]] || { echo "Invalid repo: ${repo}" >&2; exit 1; }
 [[ "${lookback_days}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid lookback-days: ${lookback_days}" >&2; exit 1; }
-[[ "${drive}" == "true" || "${drive}" == "false" ]] || { echo "Invalid drive: ${drive}" >&2; exit 1; }
-[[ -z "${project_number}" || "${project_number}" =~ ^[0-9]+$ ]] || { echo "Invalid project-number: ${project_number}" >&2; exit 1; }
 
 command -v gh >/dev/null 2>&1 || { echo "gh CLI is required" >&2; exit 1; }
 [[ -x "${REPORT_SCRIPT}" || -f "${REPORT_SCRIPT}" ]] || { echo "missing ${REPORT_SCRIPT}" >&2; exit 1; }
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
-add_to_project() {
-  local issue_url="$1"
-  [[ -n "${issue_url}" ]] || return 0
-  if [[ -n "${project_id}" ]]; then
-    gh project item-add "${project_id}" --url "${issue_url}" >/dev/null 2>&1 || echo "warning: failed to add item to project ${project_id}" >&2
-    return 0
-  fi
-  if [[ -n "${project_number}" ]]; then
-    local owner="${project_owner}"
-    if [[ -z "${owner}" ]]; then
-      owner="${repo%%/*}"
-    fi
-    gh project item-add "${project_number}" --owner "${owner}" --url "${issue_url}" >/dev/null 2>&1 || echo "warning: failed to add item to project #${project_number}" >&2
-    return 0
+
+# Issue and label mutations that must raise an `issues` event run as the App:
+# events raised through the workflow's GITHUB_TOKEN never start workflows, so a
+# findings issue created with it would not reach issue-driver.yml on its own.
+# The workflow stages the App key and exports GH_APP_TOKEN (get-token.sh);
+# offline tests leave it unset, exercising the GITHUB_TOKEN path.
+gh_app() {
+  if [[ -n "${GH_APP_TOKEN:-}" ]]; then
+    GH_TOKEN="${GH_APP_TOKEN}" gh "$@"
+  else
+    gh "$@"
   fi
 }
-
 
 # --- 1. collect --------------------------------------------------------------
 since="$(date -u -d "${lookback_days} days ago" +%Y-%m-%dT%H:%M:%SZ)"
@@ -179,15 +173,10 @@ if [[ -n "${tracking}" ]]; then
   echo "appended this week's report to tracking issue #${tracking}" >&2
 else
   url="$(gh issue create --repo "${repo}" --title "${TRACKING_TITLE}" --body-file "${comment}")"
-  add_to_project "${url}"
   echo "created the tracking issue: ${url}" >&2
 fi
 
 # --- 4. hand actionable findings to the driver --------------------------------
-if [[ "${drive}" != "true" ]]; then
-  echo "drive is false; not touching the driver." >&2
-  exit 0
-fi
 if [[ "${actionable}" -eq 0 ]]; then
   echo "No actionable findings this period; nothing for the driver to take." >&2
   exit 0
@@ -205,6 +194,11 @@ printf '%s\n' \
   '' > "${body}"
 cat "${report_file}" >> "${body}"
 
+# The label is the marker both issue-driver.yml (bot-authored exception) and the
+# Project's built-in auto-add key off, so make sure it exists before it is used.
+gh_app label create "${SELF_IMPROVEMENT_LABEL}" --repo "${repo}" \
+  --color "${LABEL_COLOR}" --description "${LABEL_DESCRIPTION}" --force >/dev/null
+
 num="$(gh issue list --repo "${repo}" --state open --limit 200 \
   --json number,title \
   --jq '.[] | select(.title | startswith("auto-drive findings")) | .number' \
@@ -212,19 +206,21 @@ num="$(gh issue list --repo "${repo}" --state open --limit 200 \
 if [[ -n "${num}" ]]; then
   gh issue comment "${num}" --repo "${repo}" --body-file "${body}"
   echo "added this week's findings to issue #${num}" >&2
+  # An existing issue raises no `issues: opened`, so dispatch the driver once
+  # for this week's findings; a freshly created issue starts it by itself.
+  if [[ -n "${dispatch_ref}" ]]; then
+    gh workflow run issue-driver.yml --repo "${repo}" --ref "${dispatch_ref}" -f number="${num}"
+  else
+    gh workflow run issue-driver.yml --repo "${repo}" -f number="${num}"
+  fi
+  echo "dispatched Issue auto-drive (workflow_dispatch number=${num})" >&2
 else
-  url="$(gh issue create --repo "${repo}" --title "${FINDINGS_PREFIX}: ${stamp}" --body-file "${body}")"
+  url="$(gh_app issue create --repo "${repo}" --title "${FINDINGS_PREFIX}: ${stamp}" \
+    --label "${SELF_IMPROVEMENT_LABEL}" --body-file "${body}")"
   num="${url##*/}"
   [[ "${num}" =~ ^[0-9]+$ ]] || { echo "could not read the new issue number from ${url}" >&2; exit 1; }
-  add_to_project "${url}"
+  # Created as the App with the self-improvement label: issue-driver.yml accepts
+  # the bot-authored issue and starts on `issues: opened`; the Project auto-adds
+  # it. No dispatch here, so the driver never runs twice for one opening.
   echo "created findings issue #${num}" >&2
 fi
-
-# The findings issue is bot-authored, so opening it never triggers
-# issue-driver.yml; this explicit dispatch is the only entry point.
-if [[ -n "${dispatch_ref}" ]]; then
-  gh workflow run issue-driver.yml --repo "${repo}" --ref "${dispatch_ref}" -f number="${num}"
-else
-  gh workflow run issue-driver.yml --repo "${repo}" -f number="${num}"
-fi
-echo "dispatched Issue auto-drive (workflow_dispatch number=${num})" >&2
