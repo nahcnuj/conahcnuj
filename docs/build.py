@@ -13,6 +13,9 @@ Render (default):
   * _site/llms.txt      raw copy
   * then every rendered fragment link (page#id) must resolve
 
+Heading ids keep their Unicode text (toc's slugify_unicode), so Japanese
+headings are linkable as-is instead of turning into `_1`, `_2`, ...
+
 Usage:
   python3 docs/build.py           check + render (needs the `markdown` package)
   python3 docs/build.py --check   check only (no third-party dependency)
@@ -167,11 +170,16 @@ def render(md_files):
         shutil.rmtree(SITE)
     SITE.mkdir(parents=True)
 
+    from markdown.extensions.toc import slugify_unicode
+
     for md in md_files:
         text = md.read_text(encoding="utf-8")
         title = page_title(text) or md.name
         body = markdown.markdown(
-            text, extensions=["extra", "toc"], output_format="html5"
+            text,
+            extensions=["extra", "toc"],
+            extension_configs={"toc": {"slugify": slugify_unicode}},
+            output_format="html5",
         )
         page = TEMPLATE.format(
             title=html.escape(title),
