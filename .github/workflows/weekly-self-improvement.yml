@@ -29,7 +29,8 @@ name: Weekly auto-drive self-improvement
 
 on:
   schedule:
-    - cron: '17 7 * * 5'
+    - cron: '20 7 * * 5'
+      timezone: 'Asia/Tokyo'
 
 permissions:
   contents: read
