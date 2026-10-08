@@ -3,7 +3,9 @@
 # feedback must fingerprint as EMPTY (so the driver only re-requests review
 # instead of firing a spurious implementation round), while real feedback or an
 # actionable decision (CHANGES_REQUESTED / COMMENTED with no body) must
-# fingerprint as non-empty and change when the feedback changes.
+# fingerprint as non-empty and change when the feedback changes. The bot's own
+# in-thread replies must NOT change it (the agent answers the reviewer in the
+# thread, and counting that answer would loop forever).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,5 +42,17 @@ CHANGED_FEEDBACK='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGE
 f2="$(gh_api_review_fingerprint "${CHANGED_FEEDBACK}")"
 [[ "${f1}" != "${f2}" ]] || fail "changed feedback must change the fingerprint"
 echo "changed feedback -> fingerprint changes: passed"
+
+# The agent answers a review thread by posting a reply as the bot. That reply
+# is a review comment too, so it must be dropped before hashing: otherwise
+# every answer would read as fresh feedback and the driver would answer its own
+# answer forever.
+THREAD_FEEDBACK='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":321,"body":"Inline note","author":{"login":"reviewer"}}]}}]}}}}'
+THREAD_FEEDBACK_AND_BOT_REPLY='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":321,"body":"Inline note","author":{"login":"reviewer"}},{"databaseId":322,"body":"Fixed in the latest commit","author":{"login":"conahcnuj[bot]"}}]}}]}}}}'
+f3="$(gh_api_review_fingerprint "${THREAD_FEEDBACK}")"
+f4="$(gh_api_review_fingerprint "${THREAD_FEEDBACK_AND_BOT_REPLY}")"
+[[ -n "${f3}" ]] || fail "thread feedback must fingerprint non-empty"
+[[ "${f3}" == "${f4}" ]] || fail "the bot's own reply must not change the fingerprint"
+echo "bot reply in a thread -> fingerprint unchanged: passed"
 
 echo "All review-fingerprint tests passed"

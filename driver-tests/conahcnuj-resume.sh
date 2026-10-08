@@ -7,9 +7,9 @@
 #
 #   PR #15 state read -> head branch checked out -> collected context
 #   (open review threads + README/AGENTS of the checkout) -> constraints pass
-#   -> CHANGES_REQUESTED feedback detected -> addressed and committed ->
-#   constraints re-verified -> owner assigned as reviewer again -> replied ->
-#   "review requested" -> exit 0
+#   -> CHANGES_REQUESTED feedback detected -> the agent addresses it (and
+#   answers the thread itself) and commits -> owner assigned as reviewer again
+#   -> constraints re-verified -> "review requested" -> exit 0
 #
 # A resumed run handles one feedback round and hands the PR back to the
 # reviewer; the approval itself is the human's part. The collected context
@@ -42,8 +42,10 @@ git -C "${WORK}" commit -qm init
 # Mocked response tape, in call order:
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (stub
 #   body -> real issue body), fetch_reviews (collection: one open thread, one
-#   resolved), update_pr (body sync on the reuse path), conditions,
-#   fetch_reviews (CHANGES_REQUESTED), conditions, request_review, post_comment.
+#   resolved), update_pr (body sync on the reuse path), post_comment (the PR
+#   continuation comment), conditions, fetch_reviews (CHANGES_REQUESTED with an
+#   open thread), request_review, conditions. The feedback round posts no comment
+#   of its own: the agent answers the reviewer in the thread.
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit
 # path runs `git add -A`).
 TAPE="${ROOT}/tape.txt"
@@ -51,14 +53,13 @@ cat > "${TAPE}" <<'EOF'
 {"title":"Fix something","body":"stub","labels":[],"pull_request":{}}
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"Closes #10","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"CHANGES_REQUESTED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}
 {"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
-{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Please document the collected context"}]}},{"isResolved":true,"comments":{"nodes":[{"body":"Already settled thread"}]}}]}}}}}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":101,"body":"Please document the collected context","author":{"login":"reviewer"}}]}},{"isResolved":true,"comments":{"nodes":[{"databaseId":102,"body":"Already settled thread","author":{"login":"reviewer"}}]}}]}}}}}
 {}
 {"id":889}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":12345,"body":"What is Input?","author":{"login":"reviewer"}}]}}]}}}}}
 {}
-{"id":888}
+{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -91,7 +92,12 @@ grep -q "Review requested on PR #15 (reviewer: nahcnuj): https://github.com/nahc
 grep -q "Assigned nahcnuj as reviewer on PR #15" "${LOG}" || { echo "FAIL: review was not re-requested from the owner after the fix"; exit 1; }
 grep -q "Ready to merge" "${LOG}" && { echo "FAIL: the driver waited for an approval that never came"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
-grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
+# The driver no longer posts a reply of its own: the agent answers the reviewer
+# in the thread, so the prompt must name the thread's comment id and the reply
+# endpoint for the agent to use.
+grep -q "Addressed the review feedback" "${LOG}" && { echo "FAIL: the driver still posts its own review-feedback comment"; exit 1; }
+grep -q "comment 12345 by reviewer" "${LOG}" || { echo "FAIL: the feedback prompt does not name the thread comment to answer"; exit 1; }
+grep -q "POST https://api.github.com/repos/nahcnuj/conahcnuj/pulls/15/comments/<comment_id>/replies" "${LOG}" || { echo "FAIL: the feedback prompt does not tell the agent the reply endpoint"; exit 1; }
 
 # The prompt carries the collected context: the PR's open thread and the
 # checkout's orientation files, but never the resolved thread.
