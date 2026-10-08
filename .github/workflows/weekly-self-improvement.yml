@@ -36,6 +36,18 @@ on:
         description: Hand actionable findings to the driver (true/false)
         required: false
         default: 'true'
+      project-owner:
+        description: GitHub Project owner (optional)
+        required: false
+        default: ''
+      project-number:
+        description: GitHub Project number (optional)
+        required: false
+        default: ''
+      project-id:
+        description: GitHub Project ID (optional)
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -57,6 +69,9 @@ jobs:
     env:
       LOOKBACK_DAYS: ${{ inputs.lookback-days || '7' }}
       DRIVE: ${{ inputs.drive || 'true' }}
+      PROJECT_OWNER: ${{ inputs.project-owner || '' }}
+      PROJECT_NUMBER: ${{ inputs.project-number || '' }}
+      PROJECT_ID: ${{ inputs.project-id || '' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -71,5 +86,8 @@ jobs:
             --lookback-days "${LOOKBACK_DAYS}" \
             --drive "${DRIVE}" \
             --ref "${GITHUB_REF_NAME}" \
+            ${PROJECT_OWNER:+--project-owner "${PROJECT_OWNER}"} \
+            ${PROJECT_NUMBER:+--project-number "${PROJECT_NUMBER}"} \
+            ${PROJECT_ID:+--project-id "${PROJECT_ID}"} \
             > "${RUNNER_TEMP}/report.md"
           cat "${RUNNER_TEMP}/report.md" >> "${GITHUB_STEP_SUMMARY}"

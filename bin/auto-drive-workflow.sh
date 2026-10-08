@@ -26,6 +26,8 @@
 #   auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
 #                          [--lookback-days N] [--drive true|false]
 #                          [--ref BRANCH]
+#                          [--project-owner OWNER] [--project-number N]
+#                          [--project-id ID]
 #
 #   --repo OWNER/REPO     default: $GITHUB_REPOSITORY (required otherwise)
 #   --runs-url-prefix P   link run-<id>.log files to P/<id>
@@ -33,6 +35,9 @@
 #   --drive true|false    default true; false publishes the report but never
 #                         dispatches the driver
 #   --ref BRANCH          workflow_dispatch ref (default $GITHUB_REF_NAME)
+#   --project-owner OWNER owner of GitHub Project (default repo owner)
+#   --project-number N    project number to add issues to
+#   --project-id ID       project ID to add issues to
 #
 # Report -> stdout, progress -> stderr. Exit 0 on success; > 0 on any failure
 # so the Actions job fails loudly.
@@ -63,6 +68,9 @@ runs_url_prefix=""
 lookback_days="7"
 drive="true"
 dispatch_ref=""
+project_owner=""
+project_number=""
+project_id=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,6 +79,9 @@ while [[ $# -gt 0 ]]; do
     --lookback-days) lookback_days="${2:-}"; shift 2 ;;
     --drive) drive="${2:-}"; shift 2 ;;
     --ref) dispatch_ref="${2:-}"; shift 2 ;;
+    --project-owner) project_owner="${2:-}"; shift 2 ;;
+    --project-number) project_number="${2:-}"; shift 2 ;;
+    --project-id) project_id="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -86,12 +97,30 @@ fi
 [[ "${repo}" =~ ^[^/]+/[^/]+$ ]] || { echo "Invalid repo: ${repo}" >&2; exit 1; }
 [[ "${lookback_days}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid lookback-days: ${lookback_days}" >&2; exit 1; }
 [[ "${drive}" == "true" || "${drive}" == "false" ]] || { echo "Invalid drive: ${drive}" >&2; exit 1; }
+[[ -z "${project_number}" || "${project_number}" =~ ^[0-9]+$ ]] || { echo "Invalid project-number: ${project_number}" >&2; exit 1; }
 
 command -v gh >/dev/null 2>&1 || { echo "gh CLI is required" >&2; exit 1; }
 [[ -x "${REPORT_SCRIPT}" || -f "${REPORT_SCRIPT}" ]] || { echo "missing ${REPORT_SCRIPT}" >&2; exit 1; }
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
+add_to_project() {
+  local issue_url="$1"
+  [[ -n "${issue_url}" ]] || return 0
+  if [[ -n "${project_id}" ]]; then
+    gh project item-add "${project_id}" --url "${issue_url}" >/dev/null 2>&1 || echo "warning: failed to add item to project ${project_id}" >&2
+    return 0
+  fi
+  if [[ -n "${project_number}" ]]; then
+    local owner="${project_owner}"
+    if [[ -z "${owner}" ]]; then
+      owner="${repo%%/*}"
+    fi
+    gh project item-add "${project_number}" --owner "${owner}" --url "${issue_url}" >/dev/null 2>&1 || echo "warning: failed to add item to project #${project_number}" >&2
+    return 0
+  fi
+}
+
 
 # --- 1. collect --------------------------------------------------------------
 since="$(date -u -d "${lookback_days} days ago" +%Y-%m-%dT%H:%M:%SZ)"
@@ -150,6 +179,7 @@ if [[ -n "${tracking}" ]]; then
   echo "appended this week's report to tracking issue #${tracking}" >&2
 else
   url="$(gh issue create --repo "${repo}" --title "${TRACKING_TITLE}" --body-file "${comment}")"
+  add_to_project "${url}"
   echo "created the tracking issue: ${url}" >&2
 fi
 
@@ -186,6 +216,7 @@ else
   url="$(gh issue create --repo "${repo}" --title "${FINDINGS_PREFIX}: ${stamp}" --body-file "${body}")"
   num="${url##*/}"
   [[ "${num}" =~ ^[0-9]+$ ]] || { echo "could not read the new issue number from ${url}" >&2; exit 1; }
+  add_to_project "${url}"
   echo "created findings issue #${num}" >&2
 fi
 
