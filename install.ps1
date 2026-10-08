@@ -145,7 +145,7 @@ function Install-GlobalAgentsMd {
     $path = Join-Path $Dst "AGENTS.md"
     if (-not (Test-Path -LiteralPath $path)) {
         Write-NormalizedText $path $block
-        Write-Host "  created AGENTS.md (global rules: commit with git vc)"
+        Write-Host "  created AGENTS.md (global rules: commit with git vc; use git vc, not git commit)"
         return
     }
     $existing = Get-NormalizedText $path

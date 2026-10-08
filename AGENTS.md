@@ -107,7 +107,7 @@ bash gh-app/api-commit.sh -m "message" -a --dry-run   # owner/repo/branch 自動
   git vc -m "message" -a           # tracked の作業ツリー変更をコミット（git commit -a 相当）
   ```
   `CONAHCNUJ_COMMIT_MODEL` があれば `api-commit.sh` が本文へ `Model: <ラベル>` trailer を足す。OpenCode 上の `git vc` はプラグインがラベルを入れる。未設定なら trailer は付かない。
-  `git vc` はプラグインが注入する git alias（組み込みの上書きは不可のため新規名 `vc`）。
+  `git vc` はプラグインが注入する git alias（組み込みの上書きは不可のため新規名 `vc`）。**エージェントはコミット時に自然と `git vc` を選ぶこと**（`git commit` の代わりに `git vc` を使う）。
   owner/repo/branch は `git remote` と現在ブランチから自動検出される。
   `api-commit.sh` は `git vc` の実装詳細であり、**エージェントは直接実行しない**（`git vc` が正しい owner/repo/branch と App 名義を引き受ける）。下記の仕様は保守者向け。
 - `gh-app/api-commit.sh` の仕様:
