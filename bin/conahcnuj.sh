@@ -43,6 +43,9 @@
 #                            the model id it recorded
 #   CONAHCNUJ_OPENCODE_LOG_LEVEL  opencode --log-level for the run
 #                            (default: WARN; DEBUG to debug a failing model)
+#   CONAHCNUJ_CONTEXT_FILES  space-separated checkout files whose contents are
+#                            collected into the prompt alongside the issue
+#                            (default: README.md AGENTS.md; empty sends none)
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
@@ -93,6 +96,13 @@ PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
 # assignment. log_review_handoff words its final line after it, so the run log
 # never claims a review request the run could not verify.
 REVIEW_HANDOFF_CONFIRMED="true"
+
+# What collect_initial_context gathered for this run (unresolved review threads
+# of a resumed PR, the orientation files of the checkout). The issue / PR body
+# is always in the prompt by itself; this is the rest of the deterministically
+# collectable material, set once per run after the branch checkout and handed
+# to every fresh prompt through implement().
+COLLECTED_CONTEXT=""
 
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
@@ -634,6 +644,55 @@ resolve_agent_branch_name() {
   printf '%s\n' "${want}"
 }
 
+# --- collected context ------------------------------------------------------
+
+# Gather the material the first model round would otherwise have to look up
+# itself, so a run starts from what is already known: the review threads a
+# resumed PR still has open, and the orientation files of the checkout
+# (README.md / AGENTS.md by default; CONAHCNUJ_CONTEXT_FILES takes a
+# space-separated list, an explicitly empty value sends no files). Only
+# deterministically collectable information goes in - the prompt labels it
+# Collected context and shows it as data, never as instruction, so the agent
+# contract stays the single paragraph that says how to work. Read after the
+# branch checkout: the files must come from the head the agent will work on.
+# Args: owner repo [pr]. Prints the sections; empty when there is nothing.
+collect_initial_context() {
+  local owner="${1}" repo="${2}" pr="${3:-}"
+  local out="" labels="" rv payload raw threads
+  if [[ -n "${pr}" ]]; then
+    rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
+    payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
+    raw="$(gh_api_unb64 "${payload}")"
+    threads="$(printf '%s' "${raw}" | gh_api_unresolved_threads)"
+    if [[ -n "${threads}" ]]; then
+      out="Unresolved review threads on PR #${pr}:
+${threads}"
+      labels="unresolved review threads of PR #${pr}"
+    fi
+  fi
+
+  local file_list file content
+  # No colon in the expansion: an explicitly empty CONAHCNUJ_CONTEXT_FILES
+  # means "collect no files at all", while an unset one keeps the default.
+  file_list="${CONAHCNUJ_CONTEXT_FILES-README.md AGENTS.md}"
+  while IFS= read -r file; do
+    [[ -f "${file}" ]] || continue
+    content="$(cat -- "${file}")"
+    [[ -n "${content}" ]] || continue
+    if [[ -n "${out}" ]]; then
+      out="${out}
+
+"
+    fi
+    out="${out}${file}:
+${content}"
+    labels="${labels:+${labels}, }${file}"
+  done < <(printf '%s\n' "${file_list}" | tr ' ' '\n')
+
+  echo "Collected context up front: ${labels:-nothing}" >&2
+  printf '%s\n' "${out}"
+}
+
 # --- implementation ---------------------------------------------------------
 
 # Run opencode until one model completes the work. A failed model hands its
@@ -674,7 +733,7 @@ implement() {
       echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
     fi
     run_failed="false"
-    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}"; then
+    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
       run_failed="true"
     fi
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
@@ -1083,6 +1142,10 @@ start_issue() {
   branch="$(next_free_branch "${owner}" "${repo}" "${base_branch}")"
   branch="$(ensure_issue_branch "${owner}" "${repo}" "${num}" "${title}" "${default_branch}" "${default_oid}" "${branch}")"
 
+  # Only after the checkout, so the files below are read from the head the
+  # agent will work on. An issue has no PR yet, hence no review threads.
+  COLLECTED_CONTEXT="$(collect_initial_context "${owner}" "${repo}")"
+
   # An earlier run may have already committed the implementation to this
   # branch. In that case there is nothing left to implement, so skip the
   # model fall-through and go straight to opening the PR for review. This is
@@ -1149,6 +1212,9 @@ resume_pr() {
   esac
 
   ensure_pr_branch_head "${owner}" "${repo}" "${head}"
+  # The PR's still-open review threads are gathered here, once, instead of
+  # waiting for the review phase to hand them over mid-run.
+  COLLECTED_CONTEXT="$(collect_initial_context "${owner}" "${repo}" "${pr}")"
   drive "${owner}" "${repo}" "${pr}" "${head}" "${base}" "${title}" "${body}" "${closes}"
 }
 

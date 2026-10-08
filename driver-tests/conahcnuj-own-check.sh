@@ -19,7 +19,8 @@
 # Drives bin/conahcnuj.sh <PR> against a mocked GitHub API tape whose
 # statusCheckRollup enumerates the check contexts:
 #
-#   PR #15 state read -> head branch checked out -> constraints pass
+#   PR #15 state read -> head branch checked out -> collected context
+#   (no open threads, no README/AGENTS in the fixture) -> constraints pass
 #   (own run IN_PROGRESS and the pending auto-merge check are both
 #   excluded) -> CHANGES_REQUESTED detected -> addressed and committed ->
 #   constraints re-verified (a pending real CI check still waits, then the
@@ -51,11 +52,11 @@ git -C "${WORK}" commit -qm init
 # statusCheckRollup.contexts list so the driver's own workflow run can be
 # told apart from real CI.
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue
-#   (stub body -> real issue body), update_pr (body sync), continuation
-#   comment, conditions (own run IN_PROGRESS + auto-merge IN_PROGRESS),
-#   fetch_reviews (CHANGES_REQUESTED), conditions (real CI running),
-#   conditions (own run CANCELLED + auto-merge FAILED), request_review,
-#   post_comment.
+#   (stub body -> real issue body), fetch_reviews (collection: nothing open),
+#   update_pr (body sync), continuation comment, conditions (own run
+#   IN_PROGRESS + auto-merge IN_PROGRESS), fetch_reviews (CHANGES_REQUESTED),
+#   conditions (real CI running), conditions (own run CANCELLED + auto-merge
+#   FAILED), request_review, post_comment.
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit
 # path runs `git add -A`).
 TAPE="${ROOT}/tape.txt"
@@ -63,6 +64,7 @@ cat > "${TAPE}" <<'EOF'
 {"title":"Fix something","body":"stub","labels":[],"pull_request":{}}
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"Closes #10","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"CHANGES_REQUESTED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}
 {"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {}
 {"id":889}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
