@@ -38,7 +38,11 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置。加えて `conahcnuj` バイナリ（既定 `~/.local/bin`）と bin 側 `gh-app/`・`lib/` を配置 | gh-app は**2 箇所**へ配備（opencode 設定用とドライバ用）。実 `app.env` があればそれを、無ければ example から作成 |
 | `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
 | `docker-run.sh` | 上記イメージでドライバを実行するラッパー（対象リポジトリを `/work` へマウント、コンテナ用 `app.env` を生成し秘密鍵を読み取り専用マウント） | テストではなく**実走行**用（実キー・ネットワーク・opencode 設定が必要） |
-| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
+| `docs/` | AI 向けリファレンス（設定・CLI・ドライバ・プラグイン・環境変数・ワークフロー・導入）。GitHub Pages で配信される | `.md` がソース。`docs/build.py` がリンク・index 目次・`llms.txt` 収収録を検証して `_site/` へ HTML を生成（`--check` は検証のみ・依存なし）。インストール状態やリポジトリのホスト存在を前提にしない記述にする |
+| `Pipfile`・`Pipfile.lock` | `docs/build.py` が HTML 生成に使う `markdown` パッケージの依存定義（Pipenv） | `Pipfile.lock` が再現可能なインストール源。`Pipfile` を変えたら必ず `pipenv lock` で lock を更新する。`.gitignore` に `.venv/` あり |
+| `.github/dependabot.yml` | pip 依存（`Pipfile` / `Pipfile.lock`）の更新 PR を自動生成 | 週次。更新は regular な PR として入る |
+| `.github/workflows/ci.yml` | 読み取り専用 CI（`permissions: contents: read`） | `actions/checkout` は full-length SHA でピン留め（リポジトリの Actions ポリシー準拠）。`lint-bash` / `mock-test` / `plugin-smoke` は Ubuntu + Windows、`lint-ts` / `e2e-opencode` / `docs` は Ubuntu、`lint-ps` / `install-test` は Windows のみ |
+| `.github/workflows/pages.yml` | `docs/` をビルドして GitHub Pages へデプロイ（push to main / 手動） | `upload-pages-artifact` / `deploy-pages` も full-length SHA でピン留め。必須チェックではない。初回のみ Settings → Pages → Source = GitHub Actions が必要 |
 | `.github/actions/install-opencode/action.yml` | opencode を最新リリースで導入する composite action（authenticated リリース検索＋PATH 設定） | `ci.yml` と `issue-driver.yml` の両方が `uses: ./.github/actions/install-opencode` で共有。未認証の `api.github.com` は共有ランナーでレート制限に当たりやすいためトークン付きで解決する |
 | `.github/workflows/issue-driver.yml` | issue が open / reopen されたらドライバで自動対応を試みる（issue→PR まで。失敗時はバグ報告 issue） | タイムアウトは Actions 側で制御（`timeout-minutes: 60`）。`CONAHCNUJ_MAX_SECONDS=3540` でドライバが先に自己終了しバグ報告を残す。repo secrets `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY`（PEM）が必要。bot 名義の issue（`<slug>[bot]` 含む）は再帰防止のため `user.type` でスキップ（job レベルの `if` は `secrets` を参照できないため）。`GITHUB_TOKEN` は `contents: read` のみ（書き込みは全て App トークン） |
 | `.github/workflows/auto-merge.yml` | owner の PR 承認時に auto-merge を有効化 | 承認した head SHA と一致する場合だけ merge commit を要求。green 済みなら即時マージ。書き込みには `GITHUB_TOKEN` を使用 |
@@ -57,6 +61,11 @@ shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh driver-tests/*.sh 
 # offline モックテスト（秘密鍵・ネットワーク不要）
 bash gh-app/tests/run.sh
 bash driver-tests/run.sh   # ドライバの offline テスト（bin/・lib/）
+
+# ドキュメントの検証（docs/ のリンク・index 目次・llms.txt 収録 + HTML 生成）
+# HTML 生成の依存（markdown）は Pipfile.lock から導入する:
+pipenv sync && pipenv run python3 docs/build.py    # 検証 + 生成
+python3 docs/build.py --check                      # 検証のみ（サードパーティ依存なし）
 
 # e2e は CI の `e2e-opencode` ジョブで実行（手順は ci.yml に直接記載）。
 # ローカルで流す場合は opencode 本体・node・pwsh を用意し、ジョブの手順をなぞる
