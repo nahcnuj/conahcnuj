@@ -116,6 +116,78 @@ gh_app() {
   fi
 }
 
+# GitHub rejects an issue/comment body longer than 65536 characters
+# ("GraphQL: Body is too long ... (createIssue)"). A weekly report over enough
+# runs (or long log excerpts) reaches that, and the old single-body post then
+# failed with nothing published. Split instead of dropping: the report is the
+# findings issue's material, so the tail is posted as continuation comments.
+# The cap is in bytes - UTF-8 text is at least one byte per character, so a
+# byte cap is a conservative character cap - and parts are cut at line
+# boundaries, so no multibyte character is torn in half.
+BODY_MAX_BYTES=60000
+
+# Split file $1 into parts of at most $3 bytes under directory $2, printing the
+# part paths in order. A single line longer than one part is sliced so the
+# split always makes progress.
+split_body_file() {
+  local src="${1}" out_dir="${2}" limit="${3}"
+  mkdir -p "${out_dir}"
+  rm -f "${out_dir}"/part-*.md
+  if [[ ! -s "${src}" ]]; then
+    : > "${out_dir}/part-00001.md"
+    printf '%s\n' "${out_dir}/part-00001.md"
+    return 0
+  fi
+  LC_ALL=C awk -v limit="${limit}" -v dir="${out_dir}" '
+    BEGIN {
+      part = 1; size = 0; file = sprintf("%s/part-%05d.md", dir, part)
+      # Byte values 0x80..0xBF are UTF-8 continuation bytes: when a line has to
+      # be sliced, back the cut off them so no multibyte character is torn.
+      for (i = 128; i < 192; i++) cont[sprintf("%c", i)] = 1
+    }
+    {
+      line = $0
+      linelen = length(line) + 1
+      if (size > 0 && size + linelen > limit) {
+        close(file)
+        part++
+        file = sprintf("%s/part-%05d.md", dir, part)
+        size = 0
+      }
+      while (linelen > limit) {
+        cut = limit - 1
+        while (cut > 0 && (substr(line, cut + 1, 1) in cont)) cut--
+        if (cut < 1) cut = 1
+        print substr(line, 1, cut) >> file
+        line = substr(line, cut + 1)
+        linelen = length(line) + 1
+        close(file)
+        part++
+        file = sprintf("%s/part-%05d.md", dir, part)
+        size = 0
+      }
+      print line >> file
+      size += linelen
+    }
+    END {
+      close(file)
+      for (i = 1; i <= part; i++) printf "%s/part-%05d.md\n", dir, i
+    }
+  ' "${src}"
+}
+
+# Comment the continuation parts of a split body on an issue, so a body too
+# long for a single GitHub issue/comment still arrives in full.
+# Args: number part...
+comment_file_continuation() {
+  local number="${1}"
+  shift
+  local part
+  for part in "$@"; do
+    gh issue comment "${number}" --repo "${repo}" --body-file "${part}"
+  done
+}
+
 # --- 1. collect --------------------------------------------------------------
 since="$(date -u -d "${lookback_days} days ago" +%Y-%m-%dT%H:%M:%SZ)"
 echo "Collecting completed Issue auto-drive runs created >= ${since}" >&2
@@ -168,11 +240,16 @@ tracking="$(gh issue list --repo "${repo}" --state open --limit 200 \
   --json number,title \
   --jq '.[] | select(.title == "auto-drive weekly self-improvement log") | .number' \
   | head -n 1)"
+tracking_parts=()
+while IFS= read -r part; do tracking_parts+=("${part}"); done \
+  < <(split_body_file "${comment}" "${tmp_dir}/tracking-parts" "${BODY_MAX_BYTES}")
 if [[ -n "${tracking}" ]]; then
-  gh issue comment "${tracking}" --repo "${repo}" --body-file "${comment}"
+  gh issue comment "${tracking}" --repo "${repo}" --body-file "${tracking_parts[0]}"
+  comment_file_continuation "${tracking}" "${tracking_parts[@]:1}"
   echo "appended this week's report to tracking issue #${tracking}" >&2
 else
-  url="$(gh issue create --repo "${repo}" --title "${TRACKING_TITLE}" --body-file "${comment}")"
+  url="$(gh issue create --repo "${repo}" --title "${TRACKING_TITLE}" --body-file "${tracking_parts[0]}")"
+  comment_file_continuation "${url##*/}" "${tracking_parts[@]:1}"
   echo "created the tracking issue: ${url}" >&2
 fi
 
@@ -199,12 +276,17 @@ cat "${report_file}" >> "${body}"
 gh_app label create "${SELF_IMPROVEMENT_LABEL}" --repo "${repo}" \
   --color "${LABEL_COLOR}" --description "${LABEL_DESCRIPTION}" --force >/dev/null
 
+body_parts=()
+while IFS= read -r part; do body_parts+=("${part}"); done \
+  < <(split_body_file "${body}" "${tmp_dir}/findings-parts" "${BODY_MAX_BYTES}")
+
 num="$(gh issue list --repo "${repo}" --state open --limit 200 \
   --json number,title \
   --jq '.[] | select(.title | startswith("auto-drive findings")) | .number' \
   | head -n 1)"
 if [[ -n "${num}" ]]; then
-  gh issue comment "${num}" --repo "${repo}" --body-file "${body}"
+  gh issue comment "${num}" --repo "${repo}" --body-file "${body_parts[0]}"
+  comment_file_continuation "${num}" "${body_parts[@]:1}"
   echo "added this week's findings to issue #${num}" >&2
   # An existing issue raises no `issues: opened`, so dispatch the driver once
   # for this week's findings; a freshly created issue starts it by itself.
@@ -216,9 +298,10 @@ if [[ -n "${num}" ]]; then
   echo "dispatched Issue auto-drive (workflow_dispatch number=${num})" >&2
 else
   url="$(gh_app issue create --repo "${repo}" --title "${FINDINGS_PREFIX}: ${stamp}" \
-    --label "${SELF_IMPROVEMENT_LABEL}" --body-file "${body}")"
+    --label "${SELF_IMPROVEMENT_LABEL}" --body-file "${body_parts[0]}")"
   num="${url##*/}"
   [[ "${num}" =~ ^[0-9]+$ ]] || { echo "could not read the new issue number from ${url}" >&2; exit 1; }
+  comment_file_continuation "${num}" "${body_parts[@]:1}"
   # Created as the App with the self-improvement label: issue-driver.yml accepts
   # the bot-authored issue and starts on `issues: opened`; the Project auto-adds
   # it. No dispatch here, so the driver never runs twice for one opening.

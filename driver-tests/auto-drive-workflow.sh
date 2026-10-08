@@ -29,6 +29,15 @@ shift
 state="${MOCK_STATE:?}"
 logs="${MOCK_RUN_LOGS_DIR:?}"
 
+# Flag a posted body that is not valid UTF-8, i.e. a character torn in half by
+# the splitter. iconv is not on every platform, so the check is skipped where
+# it is missing (same pattern as the jq-optional driver test).
+record_utf8() {
+  command -v iconv >/dev/null 2>&1 || return 0
+  iconv -f UTF-8 -t UTF-8 "$1" >/dev/null 2>&1 \
+    || printf 'invalid-utf8|%s\n' "$(basename "$1")" >> "${state}/bodies"
+}
+
 case "${cmd}" in
   api)
     # gh api [--paginate] URL --jq FILTER  (only the run listing is used)
@@ -80,11 +89,12 @@ case "${cmd}" in
         # gh issue create --repo R --title T [--label L] --body-file F  (prints the URL)
         title=""
         label=""
+        body_file=""
         while [[ $# -gt 0 ]]; do
           case "$1" in
             --title) shift; title="$1" ;;
             --label) shift; label="$1" ;;
-            --body-file) shift ;;
+            --body-file) shift; body_file="${1:-}" ;;
           esac
           shift
         done
@@ -92,19 +102,29 @@ case "${cmd}" in
         echo $((n + 1)) > "${state}/next"
         printf '%s|%s|%s\n' "${n}" "${title}" "${label}" >> "${state}/issues"
         printf 'issue create %s label=%s\n' "${title}" "${label}" >> "${state}/events"
+        if [[ -n "${body_file}" && -f "${body_file}" ]]; then
+          printf 'create|%s|%s|%s\n' "${title}" "$(basename "${body_file}")" "$(wc -c < "${body_file}" | tr -d ' ')" >> "${state}/bodies"
+          record_utf8 "${body_file}"
+        fi
         echo "https://github.com/owner/repo/issues/${n}"
         ;;
       comment)
         # gh issue comment <num> --repo R --body-file F
         num=""
+        body_file=""
         while [[ $# -gt 0 ]]; do
           case "$1" in
-            --repo|--body-file) shift ;;
+            --repo) shift ;;
+            --body-file) shift; body_file="${1:-}" ;;
             *) num="$1" ;;
           esac
           shift
         done
         printf 'issue comment %s\n' "${num}" >> "${state}/events"
+        if [[ -n "${body_file}" && -f "${body_file}" ]]; then
+          printf 'comment|%s|%s|%s\n' "${num}" "$(basename "${body_file}")" "$(wc -c < "${body_file}" | tr -d ' ')" >> "${state}/bodies"
+          record_utf8 "${body_file}"
+        fi
         ;;
     esac
     ;;
@@ -138,7 +158,7 @@ MOCK
 chmod +x "${ROOT}/bin/gh"
 export PATH="${ROOT}/bin:${PATH}"
 
-touch "${ROOT}/state/events" "${ROOT}/state/issues"
+touch "${ROOT}/state/events" "${ROOT}/state/issues" "${ROOT}/state/bodies"
 echo 1000 > "${ROOT}/state/next"
 
 run_workflow() {
@@ -216,6 +236,37 @@ grep -q '^dispatch number=5$' "${ROOT}/state/events" \
   || { echo "FAIL: the existing findings issue must be retried"; exit 1; }
 grep -q '^issue create auto-drive findings' "${ROOT}/state/events" \
   && { echo "FAIL: a second findings issue must not appear"; exit 1; }
+
+# --- oversized report: split across bodies, never rejected -------------------
+# A single very long ERROR line pushes the report past GitHub's 65536-character
+# issue/comment body limit. Posting it in one call failed with "GraphQL: Body
+# is too long ... (createIssue)" and lost the report. The workflow must split
+# the report across an issue body and continuation comments, each under the
+# limit, so the full report still reaches the findings issue. The line is
+# multibyte on purpose: slicing it must cut between characters, never through
+# one (the mock's record_utf8 flags a torn body where iconv exists).
+true > "${ROOT}/state/events"
+true > "${ROOT}/state/bodies"
+true > "${ROOT}/state/issues"
+echo 1300 > "${ROOT}/state/next"
+printf '301\n' > "${ROOT}/state/run-ids"
+awk 'BEGIN { printf "ERROR: "; for (i = 0; i < 25000; i++) printf "日本語"; printf "\n" }' \
+  > "${ROOT}/mock-logs/run-301.log"
+[[ "$(wc -c < "${ROOT}/mock-logs/run-301.log")" -gt 65536 ]] \
+  || { echo "FAIL: the oversized fixture must exceed the body limit"; exit 1; }
+run_workflow
+grep -q '<!-- auto-drive-report runs=1 findings=1 actionable=1 -->' "${ROOT}/report.md" \
+  || { echo "FAIL: the oversized run must still be analyzed"; exit 1; }
+awk -F'|' '$1 == "comment" { found = 1 } END { exit !found }' "${ROOT}/state/bodies" \
+  || { echo "FAIL: an oversized report must be continued in comments"; cat "${ROOT}/state/bodies"; exit 1; }
+awk -F'|' '($4 + 0) > 65536 { print "FAIL: body over the limit: " $0; exit 1 }' "${ROOT}/state/bodies" \
+  || exit 1
+grep -q '^invalid-utf8|' "${ROOT}/state/bodies" \
+  && { echo "FAIL: the splitter tore a multibyte character"; cat "${ROOT}/state/bodies"; exit 1; }
+# Both the tracking report and the findings issue are split, not truncated.
+[[ "$(awk -F'|' '$1 == "create"' "${ROOT}/state/bodies" | wc -l | tr -d ' ')" == "2" ]] \
+  || { echo "FAIL: tracking and findings issues must both be created"; exit 1; }
+echo "auto-drive-workflow oversized-body test passed"
 
 # --- usage: repo is required -------------------------------------------------
 rc=0

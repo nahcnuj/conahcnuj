@@ -69,7 +69,10 @@ flowchart TD
 2. **解析**: `auto-drive-report.sh` でレポートを作成（stdout）。先頭のメタ行
    `<!-- auto-drive-report runs=N findings=N actionable=N -->` が機械可読な要約
 3. **公開**: レポートをトラッキング issue「auto-drive weekly self-improvement log」へ
-   （初回のみ作成、以降はコメント追記）
+   （初回のみ作成、以降はコメント追記）。GitHub の issue／コメント本文には
+   65536 文字の上限があり、ログ抜粋が多い週は超える。その場合は本文を捨てずに
+   複数のコメントへ分割して投稿する（バイト数で安全側に切り、行境界で割るので
+   マルチバイト文字は壊れない）
 4. **引き渡し**: `actionable > 0` のとき、findings を「auto-drive findings」issue に
    まとめ、`self-improvement` ラベルを付ける。新規作成なら `issues: opened` で、
    既存 issue への追記なら `workflow_dispatch` の再試行で、ドライバを起動する
