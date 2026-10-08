@@ -31,6 +31,7 @@ on:
   schedule:
     - cron: '20 7 * * 5'
       timezone: 'Asia/Tokyo'
+  workflow_dispatch: # FIXME: for the first time
 
 permissions:
   contents: read
