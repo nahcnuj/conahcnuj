@@ -26,12 +26,14 @@ trap 'rm -rf "${ROOT}"' EXIT
 mkdir -p "${WORK}"
 
 # A tiny repository on the default branch. Git identity is required because
-# the driver's test-mode commit path uses plain `git commit`.
+# the driver's test-mode commit path uses plain `git commit`. The README is
+# there so the first prompt can be asserted to carry the collected context.
 git -C "${WORK}" init -q
 git -C "${WORK}" config user.email "test@example.com"
 git -C "${WORK}" config user.name "test"
 git -C "${WORK}" config commit.gpgsign false
 printf 'base\n' > "${WORK}/file.txt"
+printf '# Guide\nFlow fixture README\n' > "${WORK}/README.md"
 git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
@@ -91,6 +93,11 @@ grep -q "Model opencode/first failed before completing the work; handing off to 
 grep -q "Handing off session ses_mock from opencode/first to opencode/second" "${LOG}" || { echo "FAIL: session was not handed to the second model"; exit 1; }
 grep -q -- "--session ses_mock" "${LOG}" || { echo "FAIL: continuation command omitted --session"; exit 1; }
 grep -q "Model opencode/second completed the work" "${LOG}" || { echo "FAIL: second model was not adopted"; exit 1; }
+# The first prompt already carries the checkout's README (an issue has no
+# PR yet, so the collected context is the files alone).
+grep -q "Collected context:" "${LOG}" || { echo "FAIL: the prompt has no collected context block"; exit 1; }
+grep -q "Flow fixture README" "${LOG}" || { echo "FAIL: README.md was not collected into the prompt"; exit 1; }
+grep -q "Collected context up front: README.md" "${LOG}" || { echo "FAIL: the run log does not say what was collected"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "conahcnuj/10-issue" ]] || { echo "FAIL: wrong current branch"; exit 1; }
 # Capture first, then grep via here-string: `git log | grep -q` under

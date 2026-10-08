@@ -7,8 +7,9 @@
 # PR is never MERGEABLE again, so the driver has to recognise it and stop
 # instead of polling until its time budget runs out and it files a bug report.
 #
-#   PR #15 state read -> head branch checked out -> PR body sync ->
-#   continuation comment -> conditions (PR already merged) -> stop, exit 0
+#   PR #15 state read -> head branch checked out -> collected context
+#   (nothing open) -> PR body sync -> continuation comment -> conditions
+#   (PR already merged) -> stop, exit 0
 #
 # No secrets, no network.
 set -euo pipefail
@@ -31,12 +32,14 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
-#   fetch_issue (auto-detect: PR input), fetch_pr_state, update_pr (body sync),
-#   continuation comment, conditions (PR merged).
+#   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_reviews
+#   (collection: nothing open), update_pr (body sync), continuation comment,
+#   conditions (PR merged).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"title":"Fix something","body":"","labels":[],"pull_request":{}}
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"# 背景\nPR が merge されたあとにもドライバがループしないこと。","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"APPROVED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {}
 {"id":889}
 {"data":{"repository":{"pullRequest":{"mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","state":"MERGED","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}

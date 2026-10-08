@@ -51,6 +51,18 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 > the repository's own validation. The driver names the branch and creates the
 > commit, the push, the pull request and the review request once you are done.
 
+契約に足さない代わりに、決定論的に収集できる情報は **データとして** 別枠で
+同梱されます（`Collected context:` ブロック。指示ではなく材料を渡すので、
+1 段落の契約には入れません）:
+
+- issue / PR の本文（`Issue:` ブロック。もともとプロンプトに入っている）
+- PR を再開するときの未解決レビュースレッド（解決済みは対象外）
+- 作業ツリーの orientation ファイル（既定 `README.md` と `AGENTS.md`。
+  `CONAHCNUJ_CONTEXT_FILES` で変更、空文字で送らない）
+
+収集はブランチの checkout の直後に 1 度だけ行い、実行ログにも
+`Collected context up front: ...` として何が同梱されたかを残します。
+
 エージェントが決めるもの:
 
 | ファイル | 内容 |
@@ -85,6 +97,7 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 | `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer（`Co-Authored-By: <値>`。プラグインが `provider (model/effort)` を設定する） |
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level`（デバッグは `DEBUG`） |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止） |
+| `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | プロンプトへ同梱する作業ツリーファイル（スペース区切り。空で無効） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード（モック API テープ + モック opencode） |
 
 全量は [environment.md](environment.md) を参照。

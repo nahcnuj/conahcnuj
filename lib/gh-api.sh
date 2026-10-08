@@ -518,6 +518,24 @@ gh_api_review_summary() {
   done < <(printf '%s' "${threads_part}" | grep -oE '\{"isResolved":false,"comments":\{"nodes":\[[^]]*\]' || true)
 }
 
+# Unresolved inline review threads from a raw reviews payload (stdin).
+# Output: one "- <body>" line per unresolved thread, nothing when every thread
+# is resolved (or there are none). The parse is the same one
+# gh_api_review_summary uses for its thread section, split out so the initial
+# context of a run can quote the feedback that is still open without dragging
+# the rest of the review state along; collect_initial_context in
+# bin/conahcnuj.sh is the caller.
+gh_api_unresolved_threads() {
+  local json threads_part tn tbd
+  json="$(gh_api_read_line)"
+  threads_part="$(printf '%s' "${json}" | sed -n 's/.*"reviewThreads":{"nodes":\(.*\)/\1/p')"
+  while IFS= read -r tn; do
+    [[ -z "${tn}" ]] && continue
+    tbd="$(printf '%s' "${tn}" | grep -oE '"body":"[^"]*"' | sed 's/"body":"//; s/"$//' | tr '\n' ' ')"
+    printf -- '- %s\n' "${tbd}"
+  done < <(printf '%s' "${threads_part}" | grep -oE '\{"isResolved":false,"comments":\{"nodes":\[[^]]*\]' || true)
+}
+
 # Fingerprint of the actionable review feedback in a raw reviews payload.
 # Returns empty when there is no reviewer feedback to act on, so a poll of the
 # initial "waiting for review" state (reviewDecision=REVIEW_REQUIRED or empty,
