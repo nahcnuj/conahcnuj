@@ -3,7 +3,11 @@
 # Provides model enumeration and hands the same opencode session to the next
 # model when the current model cannot complete the work. A failed round sets
 # OPENCODE_ROUND_ENVIRONMENT, so the driver can tell "this provider is down"
-# apart from "this model is not good enough".
+# apart from "this model is not good enough". A round cut short by a provider
+# rate limit sets OPENCODE_ROUND_RATE_LIMITED: opencode sits out its own
+# retry backoff ("Rate limit exceeded. Please try again later.") with nothing
+# on stdout, so the driver stops the process and moves on without waiting
+# (#155).
 #
 # opencode's own output is a stream of JSON events; lib/opencode-render.sh
 # turns it into the driver's run log, one context header per block. The stream
@@ -25,6 +29,14 @@ OPENCODE_RENDER_SH="${OPENCODE_LIB_DIR}/opencode-render.sh"
 # is down" apart from "this model is not good enough" -- only the former says
 # anything about the provider's other models (#149).
 OPENCODE_ROUND_ENVIRONMENT="false"
+
+# Whether the round that just finished was cut short by a provider rate limit.
+# opencode retries "Rate limit exceeded. Please try again later." with its own
+# exponential backoff, emitting nothing usable on stdout for minutes, so the
+# driver kills the process and tries the next model at once. Not an environment
+# error: the provider works, its quota is simply exhausted for now, so its
+# other models stay in the pool.
+OPENCODE_ROUND_RATE_LIMITED="false"
 
 # List available models, one per line. Test mode: $MOCK_OPENCODE_MODELS.
 opencode_get_models() {
@@ -99,6 +111,28 @@ opencode_round_is_environment() {
     grep -Eiq 'token refresh failed|invalid_grant|cannot connect to api|unable to connect|was there a typo in the url|transport error|fetch failed|endpoint is unavailable|upstream request failed|upstream error|service temporarily overloaded|socket connection|providerautherror|authenticationerror|unauthorized|enotfound|econnrefused|econnreset|etimedout|getaddrinfo'
 }
 
+# True when the round carries a provider rate limit: the exact message opencode
+# retries for minutes ("Rate limit exceeded. Please try again later."), its
+# providers' HTTP 429 wording, or the error-event lines on stdout. opencode
+# swallows the rate limit into its own retry loop while --format json prints
+# nothing, but the retry/error diagnostics go to opencode's own stderr, and
+# --print-logs (always passed) streams that stderr into this process. Checking
+# both keeps the early-abort working even when the error event only appears on
+# stdout as the round finally gives up. Like opencode_round_is_environment,
+# text events are ignored on purpose: a model that merely writes the words is
+# not rate limited (#155).
+opencode_round_is_rate_limited() {
+  local output_file="${1}" err_file="${2:-}"
+  local pattern='rate limit|rate_limit|too many requests|please try again later|retry-after|retry after|quota exceeded|usage limit|resource_exhausted|\b429\b'
+  if [[ -f "${output_file}" ]] && grep -F '"type":"error"' "${output_file}" 2>/dev/null | grep -Eiq "${pattern}"; then
+    return 0
+  fi
+  if [[ -n "${err_file}" && -f "${err_file}" ]] && grep -Eiq "${pattern}" "${err_file}" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 # Run opencode with a specific model and publish its session ID in
 # OPENCODE_SESSION_ID so a later model can continue the same conversation.
 # Args: title body workdir model [extra_context] [session_id] [previous_model]
@@ -106,6 +140,7 @@ opencode_run() {
   local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}"
   local prompt
   OPENCODE_ROUND_ENVIRONMENT="false"
+  OPENCODE_ROUND_RATE_LIMITED="false"
   if [[ -n "${session_id}" ]]; then
     prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
   else
@@ -130,11 +165,22 @@ opencode_run() {
     if [[ " ${MOCK_OPENCODE_ENV_ERROR:-} " == *" ${model} "* ]]; then
       OPENCODE_ROUND_ENVIRONMENT="true"
     fi
-    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+    # MOCK_OPENCODE_RATE_LIMIT lists the models whose round is cut short by a
+    # provider rate limit, as the watchdog does in real mode.
+    if [[ " ${MOCK_OPENCODE_RATE_LIMIT:-} " == *" ${model} "* ]]; then
+      OPENCODE_ROUND_RATE_LIMITED="true"
+    fi
+    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" || "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]; then
       if [[ -d "${workdir}" && -w "${workdir}" ]]; then
         printf 'partial change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
       fi
-      echo "opencode: mock error for ${model} (leaves an incomplete change)" >&2
+      if [[ "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]; then
+        echo "opencode: mock rate limit for ${model} (round stops immediately)" >&2
+      elif [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+        echo "opencode: mock environment error for ${model} (leaves an incomplete change)" >&2
+      else
+        echo "opencode: mock error for ${model} (leaves an incomplete change)" >&2
+      fi
       return 1
     fi
     if [[ -z "${MOCK_OPENCODE_NOOP:-}" || "${MOCK_OPENCODE_NOOP}" != "${model}" ]]; then
@@ -206,11 +252,56 @@ opencode_run() {
     echo "WARNING: ${OPENCODE_RENDER_SH} is missing; printing the raw opencode output." >&2
     render=(cat)
   fi
-  "${executable[@]}" "${args[@]}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
+
+  # opencode sits out a rate limit for minutes (its own retry backoff, nothing
+  # useful on stdout) before the --format json error event finally appears.
+  # To cut a round short the moment the limit shows up, opencode runs against
+  # two FIFOs: a consumer tees stdout for the renderer and the session id, a
+  # second keeps opencode's own log (--print-logs -> stderr, where the retry
+  # diagnostics actually land) in a file, and a tiny watchdog kills the process
+  # as soon as either shows the rate-limit tell (#155). The consumers read a
+  # FIFO, so they exit on EOF the moment opencode closes it -- no orphans, no
+  # extra pids to chase. When FIFOs are unavailable the plain tee pipeline is
+  # kept and the rate limit is only detected at the end of the round.
+  local out_fifo err_fifo err_file consumer_pid err_pid rate_aborted
+  out_fifo="${output_file}.out"
+  err_fifo="${output_file}.errfifo"
+  err_file="${output_file}.err"
+  rate_aborted="false"
+  if mkfifo "${out_fifo}" "${err_fifo}" 2>/dev/null; then
+    "${executable[@]}" "${args[@]}" >"${out_fifo}" 2>"${err_fifo}" &
+    local opencode_pid=$!
+    ( tee "${output_file}" <"${out_fifo}" | "${render[@]}" >&2 ) &
+    consumer_pid=$!
+    ( cat <"${err_fifo}" | tee "${err_file}" >&2 ) &
+    err_pid=$!
+    while kill -0 "${opencode_pid}" 2>/dev/null; do
+      if opencode_round_is_rate_limited "${output_file}" "${err_file}"; then
+        rate_aborted="true"
+        echo "opencode: ${model} hit a rate limit; stopping its retry loop." >&2
+        kill -TERM "${opencode_pid}" 2>/dev/null || true
+        break
+      fi
+      sleep "${CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS:-1}"
+    done
+    wait "${opencode_pid}" 2>/dev/null || status=$?
+    # The FIFO consumers exit once opencode's write ends close; reap them so
+    # the session-id extraction below sees the whole stream.
+    wait "${consumer_pid}" "${err_pid}" 2>/dev/null || true
+    rm -f "${out_fifo}" "${err_fifo}"
+  else
+    "${executable[@]}" "${args[@]}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
+  fi
+
   # Only a failed round is classified: a round that ended fine may still carry
   # a retried-and-recovered error event, which says nothing about the provider.
-  if [[ "${status}" != "0" ]] && opencode_round_is_environment "${output_file}"; then
-    OPENCODE_ROUND_ENVIRONMENT="true"
+  if [[ "${status}" != "0" ]]; then
+    if opencode_round_is_environment "${output_file}"; then
+      OPENCODE_ROUND_ENVIRONMENT="true"
+    fi
+    if [[ "${rate_aborted}" == "true" ]] || opencode_round_is_rate_limited "${output_file}"; then
+      OPENCODE_ROUND_RATE_LIMITED="true"
+    fi
   fi
   local detected_session
   detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"

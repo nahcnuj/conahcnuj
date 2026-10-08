@@ -41,6 +41,9 @@
 #                            the OpenCode display name (plugin) or the model id
 #   CONAHCNUJ_OPENCODE_LOG_LEVEL  opencode --log-level for the run
 #                            (default: WARN; DEBUG to debug a failing model)
+#   CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS  poll interval of the rate-limit
+#                            watchdog that stops a round when the provider
+#                            reports a rate limit (default: 1 s)
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
@@ -630,7 +633,10 @@ resolve_agent_branch_name() {
 # can reach it either, so the provider is given up on and its remaining models
 # are skipped. When every failure was environmental, the run ends with that
 # diagnosis and the bug report says so, instead of blaming the driver for an
-# environment that was down all along (#149).
+# environment that was down all along (#149). A round cut short by a provider
+# rate limit (#155) is the opposite case: the provider works, its quota is just
+# spent, so its other models stay in the pool and the next model is picked up
+# immediately instead of waiting out opencode's retry backoff.
 implement() {
   local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider
   local dead_providers="" failed_rounds=0 env_failed_rounds=0 ran_without_failure=0
@@ -679,6 +685,8 @@ implement() {
         env_failed_rounds=$((env_failed_rounds + 1))
         dead_providers="${dead_providers} ${provider}"
         echo "Model ${model} failed before completing the work: environment error (provider unreachable or credentials rejected); giving up on provider ${provider} for the rest of this run." >&2
+      elif [[ "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]; then
+        echo "Model ${model} hit a rate limit; trying the next model without waiting for the retry." >&2
       else
         echo "Model ${model} failed before completing the work; handing off to the next model." >&2
       fi

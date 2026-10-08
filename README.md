@@ -87,6 +87,10 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    `conahcnuj/<番号>-<スラッグ>` で採番する）。最初のモデルが作業中に
    rate limit などのエラーで進められなくなった場合、opencode の同じ
    `sessionID` と現在の作業ツリーを次のモデルへ引き継ぎ、完了まで継続する。
+   レートリミット（`Rate limit exceeded. Please try again later.`）は opencode
+   自身の指数バックオフが何分も待つため、応答の兆候を監視してその場で
+   opencode を止め、待たずに次モデルへ進む（#155）。レートリミットは環境
+   エラーではないので provider は落とさない。
    セッションIDを取得できなかった場合だけ新しいセッションで作業ツリーから再開する。
 1. PR を作成し、レビュアー以外の制約（status checks・mergeable）が通るまで
    待ってから、**リポジトリ owner を reviewer にアサイン**してレビューを依頼する。

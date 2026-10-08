@@ -234,6 +234,63 @@ EOF
   echo "opencode_run timeout passed"
 }
 
+test_opencode_round_is_rate_limited() {
+  local dir out err
+  dir="$(mktemp -d)"
+  out="${dir}/out.jsonl"
+  err="${dir}/err.log"
+  # The error event opencode finally emits after its retries give up.
+  printf '%s\n' '{"type":"error","error":{"name":"APIError","data":{"message":"Rate limit exceeded. Please try again later."}}}' > "${out}"
+  : > "${err}"
+  opencode_round_is_rate_limited "${out}" "${err}" || { echo "FAIL: stdout error event not classified"; exit 1; }
+  # opencode's own stderr carries the retry diagnostics (--print-logs) while
+  # the JSON stream still prints nothing -- this is the tell the watchdog needs.
+  : > "${out}"
+  printf 'retrying in 2s (attempt #1) message="Rate limit exceeded. Please try again later."\n' > "${err}"
+  opencode_round_is_rate_limited "${out}" "${err}" || { echo "FAIL: stderr retry not classified"; exit 1; }
+  # A provider's 429 wording counts too.
+  printf '%s\n' '{"type":"error","error":{"data":{"message":"Too Many Requests"}}}' > "${out}"
+  : > "${err}"
+  opencode_round_is_rate_limited "${out}" "${err}" || { echo "FAIL: 429 wording not classified"; exit 1; }
+  # A model that writes the words in its answer is not a rate limit.
+  printf '%s\n' '{"type":"text","part":{"type":"text","text":"I am rate limited, please wait"}}' > "${out}"
+  printf 'booted provider x\n' > "${err}"
+  opencode_round_is_rate_limited "${out}" "${err}" && { echo "FAIL: model text classified as rate limit"; exit 1; }
+  # An unrelated error event is not a rate limit either.
+  printf '%s\n' '{"type":"error","error":{"message":"model not found"}}' > "${out}"
+  opencode_round_is_rate_limited "${out}" "${err}" && { echo "FAIL: unrelated error classified as rate limit"; exit 1; }
+  : > "${out}"
+  : > "${err}"
+  opencode_round_is_rate_limited "${out}" "${err}" && { echo "FAIL: empty stream classified as rate limit"; exit 1; }
+  rm -rf "${dir}"
+  echo "opencode_round_is_rate_limited passed"
+}
+
+test_opencode_run_rate_limit() {
+  export OPENCODE_TEST_MODE=1
+  export MOCK_OPENCODE_RATE_LIMIT="opencode/limited opencode/also-limited"
+  local tmp log rc
+  tmp="$(mktemp -d)"
+  log="$(mktemp)"
+  rc=0
+  opencode_run "Issue" "Body" "${tmp}" "opencode/limited" >/dev/null 2>"${log}" || rc=$?
+  [[ "${rc}" -eq 1 ]]
+  [[ "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]
+  [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "false" ]]
+  [[ -s "${tmp}/conahcnuj.mock" ]]
+  [[ ! -e "${tmp}/.commit-msg" ]]
+  grep -q "opencode: mock rate limit for opencode/limited" "${log}" || { echo "FAIL: no mock rate-limit trace"; cat "${log}" >&2; exit 1; }
+  # The next model resets the flag and can finish the work.
+  opencode_run "Issue" "Body" "${tmp}" "opencode/ok" >/dev/null 2>&1
+  [[ "${OPENCODE_ROUND_RATE_LIMITED}" == "false" ]]
+  [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "false" ]]
+  [[ -e "${tmp}/.commit-msg" ]]
+  rm -f "${log}"
+  rm -rf "${tmp}"
+  unset OPENCODE_TEST_MODE MOCK_OPENCODE_RATE_LIMIT OPENCODE_SESSION_ID
+  echo "opencode_run (rate limit) passed"
+}
+
 test_opencode_get_models
 test_opencode_build_prompt
 test_opencode_build_prompt_fresh
@@ -244,5 +301,7 @@ test_opencode_run_noop_models
 test_opencode_run_session_handoff
 test_opencode_run_renders_log
 test_opencode_run_timeout
+test_opencode_round_is_rate_limited
+test_opencode_run_rate_limit
 
 echo "All opencode tests passed"
