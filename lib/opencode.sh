@@ -48,16 +48,27 @@ EOF
 }
 
 # Build the implementation prompt for a single model run.
-# Args: issue_title issue_body [extra_context]
+# Args: issue_title issue_body [extra_context] [collected_context]
 # A fresh implementation round (no extra_context) also lets the agent choose
 # the feature branch via .branch-name; follow-up rounds (fix constraints,
 # review feedback) keep the existing branch, so the instruction is omitted.
+# collected_context is what the driver gathered deterministically before this
+# run (unresolved review threads of a resumed PR, README.md / AGENTS.md, ...)
+# and is appended as plain data: the contract below stays the only place that
+# says anything about how to work, so adding material must not read as another
+# instruction.
 opencode_build_prompt() {
-  local issue_title="${1}" issue_body="${2}" extra_context="${3:-}"
+  local issue_title="${1}" issue_body="${2}" extra_context="${3:-}" collected_context="${4:-}"
   local prompt
   prompt="Issue: ${issue_title}
 
 ${issue_body}"
+  if [[ -n "${collected_context}" ]]; then
+    prompt="${prompt}
+
+Collected context:
+${collected_context}"
+  fi
   if [[ -n "${extra_context}" ]]; then
     prompt="${prompt}
 
@@ -101,15 +112,17 @@ opencode_round_is_environment() {
 
 # Run opencode with a specific model and publish its session ID in
 # OPENCODE_SESSION_ID so a later model can continue the same conversation.
-# Args: title body workdir model [extra_context] [session_id] [previous_model]
+# Args: title body workdir model [extra_context] [session_id] [previous_model] [collected_context]
+# A session handoff reuses the conversation the first prompt already carried
+# the collected context in, so only the fresh-prompt branch below gets it.
 opencode_run() {
-  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}"
+  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}" collected_context="${8:-}"
   local prompt
   OPENCODE_ROUND_ENVIRONMENT="false"
   if [[ -n "${session_id}" ]]; then
     prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
   else
-    prompt="$(opencode_build_prompt "${issue_title}" "${issue_body}" "${extra_context}")"
+    prompt="$(opencode_build_prompt "${issue_title}" "${issue_body}" "${extra_context}" "${collected_context}")"
     if [[ -n "${previous_model}" ]]; then
       prompt="${prompt}"$'\n\n'"Model ${previous_model} did not finish this work through its session. Continue from the current working tree without discarding existing changes."
     fi

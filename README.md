@@ -28,13 +28,32 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
+├── docs/                      # AI 向けリファレンス（GitHub Pages で配信。build.py が検証・HTML 化）
 ├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
 ├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
 ├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
 ├── .github/workflows/owner-approved-auto-merge.yml # 再利用用 auto-merge workflow
+├── .github/workflows/pages.yml        # docs/ を GitHub Pages へデプロイ
 ├── .gitignore
 └── AGENTS.md
 ```
+
+## ドキュメント（GitHub Pages）
+
+アプリとその API（設定・CLI・ドライバ・プラグイン・環境変数・ワークフロー）の
+リファレンスを `docs/` に置き、GitHub Pages で配信しています。常に最新版のみで、
+バージョン切り替えはありません。
+
+- サイト: <https://nahcnuj.github.io/conahcnuj/>
+- 機械可読な索引: <https://nahcnuj.github.io/conahcnuj/llms.txt>
+- 各ページは Markdown 原文（同じパスの `.md`）と HTML の両方で開けます
+
+`docs/*.md` がソースで、`.github/workflows/pages.yml` が push to main のたびに
+`docs/build.py`（リンク検証 + HTML 生成 → `_site/`）を実行してデプロイします。
+**初回のみ** Settings → Pages → Source = **GitHub Actions** を設定してください。
+CI の `Build docs site` ジョブが同じビルドを PR でも検証します。ローカルでは
+`pipenv sync && pipenv run python3 docs/build.py`（検証のみは
+`python3 docs/build.py --check`）で確認できます。
 
 ## 仕組み
 
@@ -82,6 +101,10 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    共通で伝える。指示を積み増さないのは、コーディングエージェントの仕事を
    邪魔しないため（禁止コマンドの一覧や「これは成果物ではない」という注意を
    書くと、エージェントはそれが任務だと誤解してコードを書かなくなる）。
+   一方、決定論的に収集できる情報（issue / PR の本文、再開時 PR の未解決
+   レビュースレッド、`README.md` / `AGENTS.md` など `CONAHCNUJ_CONTEXT_FILES`
+   のファイル）は指示ではなく**材料**として `Collected context:` という別枠で
+   最初のプロンプトに同梱し、エージェントが初動で拾う手間を省く。
    コミットメッセージは必ずコーディングエージェントが決める（`.commit-msg`。
    ドライバが使う 1 行。未指定ならドライバはコミットしない。メッセージだけ
    書いて作業ツリーが無変更なら no work として次のモデルへ引き継ぐ）。

@@ -1,0 +1,10 @@
+# Keeps the Python dependency (docs/build.py's `markdown` package) fresh.
+# The Pipfile.lock is the reproducible install source used by CI and Pages.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "build(deps):"

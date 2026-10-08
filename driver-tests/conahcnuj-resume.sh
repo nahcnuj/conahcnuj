@@ -5,13 +5,16 @@
 # mocked GitHub API tape and a mocked opencode inside a throwaway git
 # repository. Exercises the resume path:
 #
-#   PR #15 state read -> head branch checked out -> constraints pass ->
-#   CHANGES_REQUESTED feedback detected -> addressed and committed ->
+#   PR #15 state read -> head branch checked out -> collected context
+#   (open review threads + README/AGENTS of the checkout) -> constraints pass
+#   -> CHANGES_REQUESTED feedback detected -> addressed and committed ->
 #   constraints re-verified -> owner assigned as reviewer again -> replied ->
 #   "review requested" -> exit 0
 #
 # A resumed run handles one feedback round and hands the PR back to the
-# reviewer; the approval itself is the human's part.
+# reviewer; the approval itself is the human's part. The collected context
+# is what the first prompt carries so the model does not have to look the
+# open threads (or the repository's own docs) up itself.
 #
 # No secrets, no network.
 set -euo pipefail
@@ -30,12 +33,16 @@ git -C "${WORK}" config user.email "test@example.com"
 git -C "${WORK}" config user.name "test"
 git -C "${WORK}" config commit.gpgsign false
 printf 'base\n' > "${WORK}/file.txt"
+# Orientation files: collected into the prompt of every fresh round.
+printf '# Guide\nResume fixture README\n' > "${WORK}/README.md"
+printf 'Resume fixture rule\n' > "${WORK}/AGENTS.md"
 git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
-#   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (stub body
-#   -> real issue body), update_pr (body sync on the reuse path), conditions,
+#   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (stub
+#   body -> real issue body), fetch_reviews (collection: one open thread, one
+#   resolved), update_pr (body sync on the reuse path), conditions,
 #   fetch_reviews (CHANGES_REQUESTED), conditions, request_review, post_comment.
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit
 # path runs `git add -A`).
@@ -44,6 +51,7 @@ cat > "${TAPE}" <<'EOF'
 {"title":"Fix something","body":"stub","labels":[],"pull_request":{}}
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"Closes #10","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"CHANGES_REQUESTED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}
 {"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Please document the collected context"}]}},{"isResolved":true,"comments":{"nodes":[{"body":"Already settled thread"}]}}]}}}}}
 {}
 {"id":889}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
@@ -84,6 +92,15 @@ grep -q "Assigned nahcnuj as reviewer on PR #15" "${LOG}" || { echo "FAIL: revie
 grep -q "Ready to merge" "${LOG}" && { echo "FAIL: the driver waited for an approval that never came"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
 grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
+
+# The prompt carries the collected context: the PR's open thread and the
+# checkout's orientation files, but never the resolved thread.
+grep -q "Collected context:" "${LOG}" || { echo "FAIL: the prompt has no collected context block"; exit 1; }
+grep -q "Please document the collected context" "${LOG}" || { echo "FAIL: the open review thread was not collected"; exit 1; }
+grep -q "Already settled thread" "${LOG}" && { echo "FAIL: a resolved review thread was collected"; exit 1; }
+grep -q "Resume fixture README" "${LOG}" || { echo "FAIL: README.md was not collected"; exit 1; }
+grep -q "Resume fixture rule" "${LOG}" || { echo "FAIL: AGENTS.md was not collected"; exit 1; }
+grep -q "Collected context up front: unresolved review threads of PR #15, README.md, AGENTS.md" "${LOG}" || { echo "FAIL: the run log does not say what was collected"; exit 1; }
 
 [[ "$(git -C "${WORK}" branch --show-current)" == "feature/fix-10" ]] || { echo "FAIL: wrong current branch"; exit 1; }
 # Capture first, then grep via here-string: `git log | grep -q` under
