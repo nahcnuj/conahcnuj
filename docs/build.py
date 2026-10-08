@@ -16,6 +16,10 @@ Render (default):
 Usage:
   python3 docs/build.py           check + render (needs the `markdown` package)
   python3 docs/build.py --check   check only (no third-party dependency)
+
+Install the render dependency from the committed Pipfile.lock:
+  pipenv sync            (or `pipenv install --deploy` to verify the lock)
+  pipenv run python3 docs/build.py
 """
 
 import html
@@ -155,7 +159,7 @@ def render(md_files):
         import markdown
     except ImportError:
         print("ERROR: the 'markdown' package is required to render.", file=sys.stderr)
-        print("       python3 -m pip install markdown==3.11", file=sys.stderr)
+        print("       pipenv sync && pipenv run python3 docs/build.py", file=sys.stderr)
         print("       (or run with --check for validation only)", file=sys.stderr)
         return False
 
