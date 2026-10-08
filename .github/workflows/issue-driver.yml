@@ -41,17 +41,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: conahcnuj
-    # Do not chase the driver's own outputs: its bug-report issues are
-    # authored by bots, and running the driver on them would loop forever.
-    # A job-level `if` cannot read the `secrets` context (and APP_SLUG is
-    # not needed here), so any bot-authored issue is skipped by type. Missing
-    # secrets are not pre-checked either: the run fails loudly and the driver
-    # files its own bug report (no silent skip).
+    # Do not chase the driver's own outputs: its tracking issue and bug-report
+    # issues are bot-authored and carry no `self-improvement` label, so they
+    # stay skipped and the loop cannot recurse. The weekly findings issue is
+    # bot-authored too but labelled, and that label is the one exception that
+    # lets the self-improvement loop start the driver by itself. A job-level
+    # `if` cannot read the `secrets` context (and APP_SLUG is not needed here),
+    # so the check keys off the label, not a secret. Missing secrets are not
+    # pre-checked either: the run fails loudly and the driver files its own bug
+    # report (no silent skip).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
         github.event_name == 'issues' &&
-        github.event.issue.user.type != 'Bot'
+        (
+          github.event.issue.user.type != 'Bot' ||
+          contains(github.event.issue.labels.*.name, 'self-improvement')
+        )
       ) ||
       (
         github.event_name == 'pull_request_review' &&

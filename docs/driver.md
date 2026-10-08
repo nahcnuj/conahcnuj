@@ -117,6 +117,11 @@ opencode の JSON イベントは実行中に整形して stderr へ出て、そ
 全文）。表示量は `CONAHCNUJ_OPENCODE_LOG_LEVEL` で調整します。バグ報告 issue には
 このログの末尾が添付されます。
 
+この実行ログは週次で `weekly-self-improvement.yml` が解析し、次の週の改善 issue
+（バグ報告・全モデル失敗・時間予算枯渇などの actionable な finding）として
+ドライバへ引き渡します。解析対象のログ内容は
+[self-improvement.md](self-improvement.md) を参照してください。
+
 ## 関連ページ
 
 - [cli.md](cli.md) - ドライバが使う `api-commit.sh` / `setup-git.sh` の仕様
