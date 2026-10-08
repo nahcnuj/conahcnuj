@@ -537,16 +537,28 @@ gh_api_review_fingerprint() {
   printf '%s%s' "${matches}" "${decision}" | sort -u | cksum | cut -d' ' -f1
 }
 
-# Find the open PR whose head is <branch>. Output: PR number (empty if none).
+# Find the open PR whose head is <branch>. Output: "<number>|<isDraft>" when
+# the payload carries the draft flag, the plain number when it does not (older
+# or minimal payloads), and empty when there is no such PR.
 gh_api_find_pr_by_head() {
   local owner="${1}" repo="${2}" branch="${3}" json
-  local query="query(\$owner: String!, \$repo: String!, \$branch: String!) { repository(owner: \$owner, name: \$repo) { pullRequests(headRefName: \$branch, states: [OPEN], first: 1) { nodes { number } } } }"
+  local query="query(\$owner: String!, \$repo: String!, \$branch: String!) { repository(owner: \$owner, name: \$repo) { pullRequests(headRefName: \$branch, states: [OPEN], first: 1) { nodes { number, isDraft } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
     json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}" -F branch="${branch}")"
   fi
-  gh_api_json_num "${json}" "number"
+  local num draft
+  num="$(gh_api_json_num "${json}" "number")"
+  if [[ -z "${num}" ]]; then
+    return 0
+  fi
+  draft="$(printf '%s' "${json}" | sed -n 's/.*"isDraft"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -1)"
+  if [[ "${draft}" == "true" || "${draft}" == "false" ]]; then
+    printf '%s|%s\n' "${num}" "${draft}"
+  else
+    printf '%s\n' "${num}"
+  fi
 }
 
 # Find any PR (open/closed/merged) whose head is <branch>.
@@ -575,12 +587,15 @@ gh_api_create_branch() {
   gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/git/refs" "${body}"
 }
 
-# Create a PR. Output: PR number. Args: owner repo title body head base
-# The createPullRequest mutation requires the repository node id (it rejects
+# Create a PR. Output: PR number. Args: owner repo title body head base [draft]
+# draft is "true" or "false" (default "false"); a PR created while the branch
+# still carries TODO.md must be created as a Draft. The createPullRequest
+# mutation requires the repository node id (it rejects
 # repositoryNameWithOwner), so this first resolves the id with one extra
 # GraphQL query. In test mode that consumes one extra mock line.
 gh_api_create_pr() {
-  local owner="${1}" repo="${2}" title="${3}" body="${4}" head="${5}" base="${6}"
+  local owner="${1}" repo="${2}" title="${3}" body="${4}" head="${5}" base="${6}" draft="${7:-false}"
+  [[ "${draft}" == "true" ]] || draft="false"
 
   local id_query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { id } }"
   local id_json
@@ -597,7 +612,7 @@ gh_api_create_pr() {
   fi
 
   local query
-  query="mutation { createPullRequest(input: { repositoryId: \"${repo_id}\", headRefName: \"$(gh_api_escape "${head}")\", baseRefName: \"$(gh_api_escape "${base}")\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\" }) { pullRequest { number } } }"
+  query="mutation { createPullRequest(input: { repositoryId: \"${repo_id}\", headRefName: \"$(gh_api_escape "${head}")\", baseRefName: \"$(gh_api_escape "${base}")\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\", draft: ${draft} }) { pullRequest { number } } }"
 
   local json
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
@@ -606,6 +621,39 @@ gh_api_create_pr() {
     json="$(gh_api_graphql "${query}")"
   fi
   gh_api_json_num "${json}" "number"
+}
+
+# Set a PR's draft flag. Args: owner repo pr true|false. Output: nothing
+# (the mutation response is discarded so it cannot leak into the caller's
+# stdout). Both mutations take the PR node id, which is resolved first: in
+# test mode that consumes one extra mock line, then the mutation reads one
+# more.
+gh_api_set_pr_draft() {
+  local owner="${1}" repo="${2}" number="${3}" draft="${4}"
+  local mutation id_query id_json pr_id
+  if [[ "${draft}" == "true" ]]; then
+    mutation="convertToDraft"
+  else
+    mutation="markPullRequestReadyForReview"
+  fi
+  id_query="query(\$owner: String!, \$repo: String!, \$number: Int!) { repository(owner: \$owner, name: \$repo) { pullRequest(number: \$number) { id } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    id_json="$(gh_api_read_line)"
+  else
+    id_json="$(gh_api_graphql "${id_query}" -F owner="${owner}" -F repo="${repo}" -F number="${number}")"
+  fi
+  pr_id="$(gh_api_json_str "${id_json}" "id")"
+  if [[ -z "${pr_id}" ]]; then
+    echo "ERROR: could not resolve the pull request id for ${owner}/${repo}#${number}." >&2
+    return 1
+  fi
+  local query
+  query="mutation { ${mutation}(input: { pullRequestId: \"${pr_id}\" }) { pullRequest { number } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    gh_api_read_line >/dev/null
+    return 0
+  fi
+  gh_api_graphql "${query}" >/dev/null
 }
 
 # Update a PR's body so it stays in sync with the linked issue. Args: owner repo pr body

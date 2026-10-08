@@ -81,6 +81,8 @@ MOCK_PR_BY_HEAD_EMPTY='{"data":{"repository":{"pullRequests":{"nodes":[]}}}}'
 
 MOCK_PR_BY_HEAD_FOUND='{"data":{"repository":{"pullRequests":{"nodes":[{"number":42}]}}}}'
 
+MOCK_PR_BY_HEAD_FOUND_DRAFT='{"data":{"repository":{"pullRequests":{"nodes":[{"number":42,"isDraft":true}]}}}}'
+
 MOCK_REPO_ID='{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}'
 
 MOCK_CREATE_PR='{"data":{"createPullRequest":{"pullRequest":{"number":123}}}}'
@@ -293,6 +295,11 @@ test_find_pr_by_head() {
   [[ -z "${out}" ]]
   out="$(printf '%s\n' "${MOCK_PR_BY_HEAD_FOUND}" | gh_api_find_pr_by_head "nahcnuj" "conahcnuj" "feature/fix-10")"
   [[ "${out}" == "42" ]]
+  # A payload carrying isDraft reports it next to the number.
+  out="$(printf '%s\n' "${MOCK_PR_BY_HEAD_FOUND_DRAFT}" | gh_api_find_pr_by_head "nahcnuj" "conahcnuj" "feature/fix-10")"
+  [[ "${out}" == "42|true" ]]
+  out="$(printf '%s\n' '{"data":{"repository":{"pullRequests":{"nodes":[{"number":42,"isDraft":false}]}}}}' | gh_api_find_pr_by_head "nahcnuj" "conahcnuj" "feature/fix-10")"
+  [[ "${out}" == "42|false" ]]
   echo "gh_api_find_pr_by_head passed"
 }
 
@@ -301,6 +308,61 @@ test_create_pr() {
   out="$(printf '%s\n' "${MOCK_REPO_ID}" "${MOCK_CREATE_PR}" | gh_api_create_pr "nahcnuj" "conahcnuj" "New PR" "Body" "branch" "main")"
   [[ "${out}" == "123" ]]
   echo "gh_api_create_pr passed"
+}
+
+# The draft flag is baked into the createPullRequest mutation input, so the
+# gh_api_call seam is stubbed to record the request payloads it would POST.
+test_create_pr_draft() {
+  local payload_file out saved_mode
+  payload_file="$(mktemp)"
+  saved_mode="${GH_API_TEST_MODE:-0}"
+  GH_API_TEST_MODE=0
+  out="$(
+    # shellcheck disable=SC2329
+    gh_api_call() {
+      printf '%s\n' "${3}" >> "${payload_file}"
+      case "${3}" in
+        *createPullRequest*) printf '{"data":{"createPullRequest":{"pullRequest":{"number":123}}}}' ;;
+        *) printf '{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}' ;;
+      esac
+    }
+    gh_api_create_pr "nahcnuj" "conahcnuj" "New PR" "Body" "branch" "main" >/dev/null
+    gh_api_create_pr "nahcnuj" "conahcnuj" "New PR" "Body" "branch" "main" "true" >/dev/null
+  )"
+  GH_API_TEST_MODE="${saved_mode}"
+  [[ -z "${out}" ]] || { echo "FAIL: gh_api_create_pr draft test must print nothing"; exit 1; }
+  grep -q 'draft: false' "${payload_file}" || { echo "FAIL: createPullRequest must default to draft: false"; exit 1; }
+  grep -q 'draft: true' "${payload_file}" || { echo "FAIL: createPullRequest must accept draft: true"; exit 1; }
+  rm -f "${payload_file}"
+  echo "gh_api_create_pr (draft flag) passed"
+}
+
+# Both draft-state transitions go through one id lookup plus one mutation,
+# and print nothing to stdout.
+test_set_pr_draft() {
+  local payload_file out saved_mode
+  payload_file="$(mktemp)"
+  saved_mode="${GH_API_TEST_MODE:-0}"
+  GH_API_TEST_MODE=0
+  out="$(
+    gh_api_call() {
+      printf '%s\n' "${3}" >> "${payload_file}"
+      case "${3}" in
+        *convertToDraft*|*markPullRequestReadyForReview*) printf '{"data":{}}' ;;
+        *) printf '{"data":{"repository":{"pullRequest":{"id":"PR_x"}}}}' ;;
+      esac
+    }
+    gh_api_set_pr_draft "nahcnuj" "conahcnuj" 15 true
+    gh_api_set_pr_draft "nahcnuj" "conahcnuj" 15 false
+  )"
+  GH_API_TEST_MODE="${saved_mode}"
+  [[ -z "${out}" ]] || { echo "FAIL: gh_api_set_pr_draft must not print any output"; exit 1; }
+  grep -q 'convertToDraft' "${payload_file}" || { echo "FAIL: true must call convertToDraft"; exit 1; }
+  grep -q 'markPullRequestReadyForReview' "${payload_file}" || { echo "FAIL: false must call markPullRequestReadyForReview"; exit 1; }
+  out="$(printf '%s\n' '{"data":{"repository":{"pullRequest":{"id":"PR_x"}}}}' '{}' | GH_API_TEST_MODE=1 gh_api_set_pr_draft "nahcnuj" "conahcnuj" 15 true)"
+  [[ -z "${out}" ]] || { echo "FAIL: gh_api_set_pr_draft test mode must stay quiet"; exit 1; }
+  rm -f "${payload_file}"
+  echo "gh_api_set_pr_draft passed"
 }
 
 test_update_pr() {
@@ -518,6 +580,8 @@ test_fetch_reviews
 test_review_summary
 test_find_pr_by_head
 test_create_pr
+test_create_pr_draft
+test_set_pr_draft
 test_update_pr
 test_request_review
 test_http_status

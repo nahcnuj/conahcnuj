@@ -111,6 +111,12 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
    実行ログ末尾を含む）。
 
+進捗はリポジトリルートの `TODO.md` で管理する（issue の着手で作成、作業中に
+随時更新、対応完了＝ready to merge 前に削除）。ブランチに `TODO.md` がある
+あいだはドライバが PR を Draft で作成し、消えるまで Draft を解除しない
+（owner 承認後の auto-merge は `draft == false` の PR だけが対象なので、
+TODO.md を残したままでは merge にたどり着かない）。
+
 ポーリング・リトライは GitHub のレートリミット（Retry-After /
 X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
 環境変数の上書き（時間予算・ポーリング幅）や

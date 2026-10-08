@@ -89,10 +89,32 @@ fi
 PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
 PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
 
+# The PR's draft flag as this process last knew it ("true"/"false", empty
+# = unknown). A file, not a shell variable, because ensure_pr runs in a
+# command-substitution subshell whose assignments would not survive back to
+# the caller. Lives outside the work tree so `git add -A` never picks it up.
+# resume_pr seeds it from the resumed PR; ensure_pr keeps it in line with
+# the branch's TODO.md.
+PR_DRAFT_STATE_FILE="${PR_DRAFT_STATE_FILE:-$(mktemp)}"
+pr_draft_state_read() {
+  cat "${PR_DRAFT_STATE_FILE}" 2>/dev/null || true
+}
+pr_draft_state_write() {
+  printf '%s' "${1}" > "${PR_DRAFT_STATE_FILE}"
+}
+
 # Whether the last request_review_from_owner call could confirm the reviewer
 # assignment. log_review_handoff words its final line after it, so the run log
 # never claims a review request the run could not verify.
 REVIEW_HANDOFF_CONFIRMED="true"
+
+# True when the branch the PR will show carries the per-issue progress file
+# TODO.md at the branch tip. Branch state, not work-tree state: the draft
+# flag must follow what the PR's diff actually contains, so a dirty tree with
+# an uncommitted TODO.md (or an uncommitted deletion) never flips it.
+todo_md_on_branch() {
+  git cat-file -e "HEAD:TODO.md" 2>/dev/null
+}
 
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
@@ -207,10 +229,12 @@ check_timeout() {
 # True when the working tree holds real changes. The coding agent's
 # .commit-msg and .branch-name are metadata, not code changes, so they are
 # ignored: a model that writes nothing but a commit message or a branch name
-# must not count as having produced work.
+# must not count as having produced work. A freshly created root TODO.md is
+# the same category: writing the progress file is not the issue's change.
+# Updating or deleting an already tracked TODO.md still counts.
 workdir_changed() {
   local dir="${1}" changes
-  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' || true)"
+  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' | grep -v '^[?][?] TODO[.]md$' || true)"
   [[ -n "${changes}" ]]
 }
 
@@ -737,6 +761,43 @@ strip_closing_references() {
   printf '%s\n' "${1}" | sed -E '/^[[:space:]]*([Cc]lose[sd]?|[Ff]ix(e[sd])?|[Rr]esolve[sd]?)[[:space:]]+#[0-9]+([[:space:]]*,[[:space:]]*#[0-9]+)*[[:space:]]*$/d' | awk '/^$/{blank++; if(blank>1) next; print; next} {blank=0; print}'
 }
 
+# Bring the PR's draft flag in line with the branch: while the branch
+# carries TODO.md the PR stays (or becomes) a Draft -- a Draft PR can never
+# be marked ready to merge by the driver, and the owner-approved auto-merge
+# workflows require draft == false, so the PR cannot merge while the
+# per-issue progress file is still in it. Once TODO.md is gone the PR can
+# leave Draft. Only a known current state is ever flipped: a PR whose draft
+# flag the driver does not know (no seed in PR_DRAFT_STATE_FILE) is never
+# converted blind. Failing to re-draft (target true) fails the run: a
+# non-Draft PR for unfinished work is exactly what the lifecycle forbids.
+# Failing to undraft (target false) only warns: a PR stuck in Draft is
+# safe -- the owner can still press Ready. Args: owner repo pr
+ensure_pr_draft_align() {
+  local owner="${1}" repo="${2}" pr="${3}" actual target="false"
+  actual="$(pr_draft_state_read)"
+  if todo_md_on_branch; then
+    target="true"
+  fi
+  if [[ -z "${actual}" || "${actual}" == "${target}" ]]; then
+    return 0
+  fi
+  if gh_api_set_pr_draft "${owner}" "${repo}" "${pr}" "${target}"; then
+    if [[ "${target}" == "true" ]]; then
+      echo "PR #${pr} converted back to Draft: TODO.md is still on the branch." >&2
+    else
+      echo "PR #${pr} marked ready for review: TODO.md is gone from the branch." >&2
+    fi
+    pr_draft_state_write "${target}"
+    return 0
+  fi
+  if [[ "${target}" == "true" ]]; then
+    echo "ERROR: TODO.md is still on the branch of PR #${pr} but the PR could not be converted back to Draft." >&2
+    return 1
+  fi
+  echo "WARNING: could not mark PR #${pr} ready for review (TODO.md is gone); it stays Draft." >&2
+  return 0
+}
+
 # Reuse the open PR for this head branch, else create one. Both reuse paths keep
 # the PR body derived from the linked issue ("Closes #<n>\n\n<issue body>"), so a
 # PR that was created without a written body (or with a stale one) gets it set.
@@ -744,6 +805,12 @@ strip_closing_references() {
 # a PATCH on every poll iteration. Outputs PR number.
 ensure_pr() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
+  local draft_target="false" existing_num existing_draft=""
+  # A PR is created as a Draft while the branch still carries TODO.md (work
+  # not complete); only a branch without TODO.md yields a ready PR.
+  if todo_md_on_branch; then
+    draft_target="true"
+  fi
   local pr_body
   # A resumed PR that is not linked to any issue must keep its body verbatim;
   # prefixing it with a bare "Closes #" would produce a malformed description.
@@ -765,28 +832,38 @@ ${body}"
       gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}"
       pr_body_mark_synced
     fi
+    ensure_pr_draft_align "${owner}" "${repo}" "${pr}" || return 1
     printf '%s\n' "${pr}"
     return 0
   fi
   local existing
   existing="$(gh_api_find_pr_by_head "${owner}" "${repo}" "${branch}")"
   if [[ -n "${existing}" ]]; then
-    echo "Reusing open PR #${existing} for ${branch}." >&2
+    existing_num="${existing%%|*}"
+    if [[ "${existing}" == *"|"* ]]; then
+      existing_draft="${existing#*|}"
+    fi
+    echo "Reusing open PR #${existing_num} for ${branch}." >&2
     if [[ -n "${closes}" ]] && ! pr_body_synced; then
-      echo "Syncing body of PR #${existing} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}"
+      echo "Syncing body of PR #${existing_num} with issue #${closes}." >&2
+      gh_api_update_pr "${owner}" "${repo}" "${existing_num}" "${pr_body}"
       pr_body_mark_synced
     fi
-    printf '%s\n' "${existing}"
+    if [[ "${existing_draft}" == "true" || "${existing_draft}" == "false" ]]; then
+      pr_draft_state_write "${existing_draft}"
+      ensure_pr_draft_align "${owner}" "${repo}" "${existing_num}" || return 1
+    fi
+    printf '%s\n' "${existing_num}"
     return 0
   fi
   local num
-  num="$(gh_api_create_pr "${owner}" "${repo}" "${title}" "${pr_body}" "${branch}" "${base}")"
+  num="$(gh_api_create_pr "${owner}" "${repo}" "${title}" "${pr_body}" "${branch}" "${base}" "${draft_target}")"
   if [[ -z "${num}" ]]; then
     echo "ERROR: PR creation failed for ${branch} -> ${base}." >&2
     return 1
   fi
   echo "Created PR #${num} (${branch} -> ${base})." >&2
+  pr_draft_state_write "${draft_target}"
   printf '%s\n' "${num}"
 }
 
@@ -1110,6 +1187,7 @@ resume_pr() {
   local ps state title_b64 body_b64 head base closes title body
   ps="$(gh_api_fetch_pr_state "${owner}" "${repo}" "${pr}")"
   state="$(printf '%s' "${ps}" | cut -d'|' -f2)"
+  pr_draft_state_write "$(printf '%s' "${ps}" | cut -d'|' -f5)"
   title_b64="$(printf '%s' "${ps}" | cut -d'|' -f3)"
   body_b64="$(printf '%s' "${ps}" | cut -d'|' -f4)"
   head="$(printf '%s' "${ps}" | cut -d'|' -f9)"

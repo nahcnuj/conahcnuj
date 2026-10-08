@@ -143,6 +143,15 @@ opencode_run() {
           printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
           # Simulate the agent honouring the .commit-msg contract.
           printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+          # Simulate the agent's TODO.md lifecycle (rooted TODO.md is the
+          # per-issue progress file; it is created at issue start and
+          # deleted when the work completes).
+          if [[ -n "${MOCK_OPENCODE_TODO:-}" ]]; then
+            printf '# TODO\n\n- [ ] mock progress\n' > "${workdir}/TODO.md"
+          fi
+          if [[ -n "${MOCK_OPENCODE_TODO_DELETE:-}" ]]; then
+            rm -f "${workdir}/TODO.md"
+          fi
         fi
       else
         # A model that answered with a message instead of doing the work.
