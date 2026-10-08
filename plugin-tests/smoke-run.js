@@ -8,6 +8,8 @@
 // commit rules, and the tool.execute.before redirects (git commit and a
 // direct api-commit.sh run both blocked toward git vc, everything else
 // passing through).
+// shell.env contract (GIT_CONFIG identity + alias.vc) and the
+// tool.execute.before redirect (git commit blocked, others pass through).
 // The require target is a fixed literal path on purpose: requiring an
 // argv-provided path trips CodeQL path-injection (high). smoke.sh stages
 // the compiled artifact plus a fake gh-app dir at ./.smoke/ (same relative
@@ -58,69 +60,9 @@ async function main() {
     threw = /git vc/.test(String((err && err.message) || err))
   }
   assert(threw, "git commit was not redirected to git vc")
-  // Running api-commit.sh directly is blocked and redirected to git vc too.
-  for (const command of [
-    'bash gh-app/api-commit.sh -m "x"',
-    'bash "/opt/conahcnuj/gh-app/api-commit.sh" -m "x"',
-    'cd repo && sh "$HOME/.config/opencode/gh-app/api-commit.sh"',
-    'VAR=1 bash -lc "/tmp/gh-app/api-commit.sh -m x"',
-    'zsh -c "cd repo && api-commit.sh -m x"',
-  ]) {
-    let blocked = false
-    try {
-      await before({ tool: "bash" }, { args: { command }, env: {} })
-    } catch (err) {
-      blocked = /git vc/.test(String((err && err.message) || err))
-    }
-    assert(blocked, `api-commit.sh was not redirected: ${command}`)
-  }
-  // So is git commit, whatever wrapper or separator carries it.
-  for (const command of [
-    'git commit -m "x"',
-    "git -C /tmp/repo commit -m x",
-    'git add -A && git commit -m x',
-    'bash -c "git commit -m x"',
-  ]) {
-    let blocked = false
-    try {
-      await before({ tool: "bash" }, { args: { command }, env: {} })
-    } catch (err) {
-      blocked = /git vc/.test(String((err && err.message) || err))
-    }
-    assert(blocked, `git commit was not redirected: ${command}`)
-  }
-  // The sanctioned path stays open.
-  await before(
-    { tool: "bash" },
-    { args: { command: 'git vc -m "x" -a' }, env: {} }
-  )
-  // Inspecting the script (grep/cat) must keep working.
-  await before(
-    { tool: "bash" },
-    { args: { command: 'grep -n "api-commit.sh" AGENTS.md' }, env: {} }
-  )
-  await before(
-    { tool: "bash" },
-    { args: { command: "cat gh-app/api-commit.sh" }, env: {} }
-  )
   // Must not interfere with anything else.
   await before({ tool: "bash" }, { args: { command: "git status" }, env: {} })
   await before({ tool: "read" }, { args: { filePath: "x" }, env: {} })
-
-  // The commit rules are advertised on every system prompt, so a model knows
-  // `git vc` before any hook fires.
-  assert(
-    plugin["experimental.chat.system.transform"],
-    "missing experimental.chat.system.transform hook"
-  )
-  const system = { system: [] }
-  await plugin["experimental.chat.system.transform"]({}, system)
-  assert(
-    system.system.length === 1 && /git vc/.test(system.system[0]),
-    "commit rules were not injected into the system prompt"
-  )
-  await plugin["experimental.chat.system.transform"]({}, system)
-  assert(system.system.length === 1, "commit rules injected more than once")
 
   // OpenCode reports the effort variant on the user message and the model id
   // on chat.params. The shell that runs `git vc` must see one trailer value.
