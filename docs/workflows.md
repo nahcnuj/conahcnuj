@@ -1,12 +1,13 @@
 # GitHub Actions
 
-`.github/workflows/` の 5 本です。このリポジトリのポリシーとして、利用する
+`.github/workflows/` の 6 本です。このリポジトリのポリシーとして、利用する
 `actions/*` は **full-length SHA でピン留め**します。
 
 | ファイル | 名前 | 触発 | 役割 |
 | --- | --- | --- | --- |
 | `ci.yml` | CI | push to main / PR | lint・offline テスト・型チェック・smoke・e2e・docs ビルド |
 | `issue-driver.yml` | Issue auto-drive | issue open/reopen、非 approve の review、手動 | ドライバを Actions 上で実行 |
+| `weekly-self-improvement.yml` | Weekly auto-drive self-improvement | schedule（月曜）/ 手動 | 直近の auto-drive 実行ログを解析し、週次の findings をドライバへ引き渡す |
 | `auto-merge.yml` | Owner-approved auto-merge | owner が approve | 再利用 workflow を呼び出してマージ |
 | `owner-approved-auto-merge.yml` | Owner-approved auto-merge | `workflow_call` | マージ処理本体（他リポジトリからも利用可） |
 | `pages.yml` | Docs to GitHub Pages | push to main / 手動 | `docs/` を GitHub Pages へ配信 |
@@ -55,6 +56,21 @@ CI では行いません。
   インストールトークンで行う
 - environment `conahcnuj` を使用
 - 同一 issue/PR に対する実行は concurrency で直列化される
+
+## Weekly auto-drive self-improvement（`weekly-self-improvement.yml`）
+
+毎週、直近 1 週間の `issue-driver.yml` 実行ログを解析し、次の週の改善 issue に
+取り込む自己研鑽ループです。詳細は [self-improvement.md](self-improvement.md)。
+
+- 触発: schedule（既定 月曜 01:17 UTC）/ 手動（`workflow_dispatch`）
+- 手動入力: `lookback-days`（既定 `7`）と `drive`（既定 `true`。`false` で
+  レポート公開のみ・ドライバ未起動）
+- 権限は `GITHUB_TOKEN` の `actions: write` / `issues: write` のみ。
+  **シークレットは不要**（トークン発行・ネットワークテストは CI では行わない）
+- ロジックの本体は `bin/auto-drive-workflow.sh`（`gh` API でのログ収集 →
+  レポート作成 → トラッキング issue へ公開 → actionable 時のみ findings を
+  `workflow_dispatch`）。ドライバを再帰起動しない衛生ルールは
+  [self-improvement.md](self-improvement.md#ループの衛生再帰しない理由) を参照
 
 ## Owner-approved auto-merge（`auto-merge.yml` + `owner-approved-auto-merge.yml`）
 

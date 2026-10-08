@@ -1,0 +1,75 @@
+name: Weekly auto-drive self-improvement
+
+# Weekly self-study loop (週次の自己研鑽)。The driver's run logs only survive as
+# Actions job logs, so this workflow reads the last week of "Issue auto-drive"
+# runs through the Actions API, turns them into a markdown report, and posts
+# that report on a standing tracking issue.
+#
+# Self-improvement is owner-gated, never self-triggering:
+# - Only when the report carries actionable findings (bug reports filed, model
+#   failures, time-budget stops, unrecognizable endings) does the driver get
+#   handed ONE findings issue via workflow_dispatch. Informational findings
+#   (provider outages, review-hand-off read-backs) never dispatch.
+# - The findings issue is authored by github-actions[bot], so the issues-opened
+#   trigger of issue-driver.yml skips it; only the explicit dispatch starts the
+#   driver on it, and that driver run still ends at the owner's review.
+# - GITHUB_TOKEN events do not spawn new workflow runs (workflow_dispatch and
+#   repository_dispatch are the documented exceptions), so the loop cannot
+#   recurse on its own. There is at most one open findings issue and at most one
+#   dispatch per week.
+#
+# No secrets are required: everything runs on the least-privilege GITHUB_TOKEN
+# (actions: write for listing/downloading run logs and dispatching the driver,
+# issues: write for the tracking issue and comments). The whole loop is
+# `bin/auto-drive-workflow.sh`; this file only sets its arguments.
+
+on:
+  schedule:
+    - cron: '17 1 * * 1'
+  workflow_dispatch:
+    inputs:
+      lookback-days:
+        description: Days of run history to analyze
+        required: false
+        default: '7'
+      drive:
+        description: Hand actionable findings to the driver (true/false)
+        required: false
+        default: 'true'
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: weekly-self-improvement
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    name: Analyze auto-drive run logs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      LOOKBACK_DAYS: ${{ inputs.lookback-days || '7' }}
+      DRIVE: ${{ inputs.drive || 'true' }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Run the weekly auto-drive self-improvement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash bin/auto-drive-workflow.sh \
+            --repo "${GITHUB_REPOSITORY}" \
+            --runs-url-prefix "https://github.com/${GITHUB_REPOSITORY}/actions/runs" \
+            --lookback-days "${LOOKBACK_DAYS}" \
+            --drive "${DRIVE}" \
+            --ref "${GITHUB_REF_NAME}" \
+            > "${RUNNER_TEMP}/report.md"
+          cat "${RUNNER_TEMP}/report.md" >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# auto-drive-workflow.sh (bin) offline test using a mock `gh` on PATH.
+#
+# Pins the weekly self-improvement loop's contract without network: run-log
+# collection, report publication on the tracking issue, and the findings ->
+# workflow_dispatch gate that keeps the driver loop non-recursive.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "${HERE}/.." && pwd)"
+WF="${REPO}/bin/auto-drive-workflow.sh"
+
+ROOT="$(mktemp -d)"
+trap 'rm -rf "${ROOT}"' EXIT
+mkdir -p "${ROOT}/bin" "${ROOT}/mock-logs" "${ROOT}/state"
+export MOCK_STATE="${ROOT}/state"
+export MOCK_RUN_LOGS_DIR="${ROOT}/mock-logs"
+
+cat > "${ROOT}/bin/gh" <<'MOCK'
+#!/usr/bin/env bash
+# Offline mock of the gh commands auto-drive-workflow.sh uses. State lives in
+# $MOCK_STATE (issues = "number|title" per line, next = issue counter, events =
+# one action per line), run-logs live in $MOCK_RUN_LOGS_DIR as run-<id>.log.
+set -euo pipefail
+
+cmd="$1"
+shift
+state="${MOCK_STATE:?}"
+logs="${MOCK_RUN_LOGS_DIR:?}"
+
+trim() { printf '%s\n' "${1% }"; }
+
+case "${cmd}" in
+  api)
+    # gh api [--paginate] URL --jq FILTER  (only the run listing is used)
+    if [[ -f "${state}/run-ids" ]]; then
+      cat "${state}/run-ids"
+    fi
+    ;;
+  run)
+    # gh run view <id> --repo R --log
+    id=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --repo|--log) ;;
+        view) ;;
+        *) [[ "$1" =~ ^[0-9]+$ ]] && id="$1" ;;
+      esac
+      shift
+    done
+    if [[ -f "${logs}/run-${id}.log" ]]; then
+      cat "${logs}/run-${id}.log"
+      exit 0
+    fi
+    echo "mock: no log for run ${id}" >&2
+    exit 1
+    ;;
+  issue)
+    action="$1"
+    shift
+    case "${action}" in
+      list)
+        # gh issue list --repo R --state open --limit N --json number,title --jq FILTER
+        filter=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --jq) shift; filter="$1" ;;
+          esac
+          shift
+        done
+        if [[ "${filter}" == *'select(.title == "auto-drive weekly self-improvement log")'* ]]; then
+          awk -F'|' '$2 == "auto-drive weekly self-improvement log" {print $1}' "${state}/issues" 2>/dev/null | head -n 1 || true
+        elif [[ "${filter}" == *'startswith("auto-drive findings")'* ]]; then
+          awk -F'|' '$2 ~ /^auto-drive findings/ {print $1}' "${state}/issues" 2>/dev/null | head -n 1 || true
+        else
+          echo "mock: unhandled issue list filter: ${filter}" >&2
+          exit 1
+        fi
+        ;;
+      create)
+        # gh issue create --repo R --title T --body-file F  (prints the URL)
+        title=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --title) shift; title="$1" ;;
+            --body-file) shift ;;
+          esac
+          shift
+        done
+        n="$(cat "${state}/next" 2>/dev/null || echo 1000)"
+        echo $((n + 1)) > "${state}/next"
+        printf '%s|%s\n' "${n}" "${title}" >> "${state}/issues"
+        printf 'issue create %s\n' "${title}" >> "${state}/events"
+        echo "https://github.com/owner/repo/issues/${n}"
+        ;;
+      comment)
+        # gh issue comment <num> --repo R --body-file F
+        num=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --repo|--body-file) shift ;;
+            *) num="$1" ;;
+          esac
+          shift
+        done
+        printf 'issue comment %s\n' "${num}" >> "${state}/events"
+        ;;
+    esac
+    ;;
+  workflow)
+    # gh workflow run issue-driver.yml --repo R --ref B -f number=N
+    n=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --repo|--ref) shift ;;
+        number=*) n="${1#number=}" ;;
+      esac
+      shift
+    done
+    printf 'dispatch number=%s\n' "${n}" >> "${state}/events"
+    echo "created workflow run"
+    ;;
+  *)
+    echo "mock: unhandled gh command: ${cmd} $*" >&2
+    exit 1
+    ;;
+esac
+MOCK
+chmod +x "${ROOT}/bin/gh"
+export PATH="${ROOT}/bin:${PATH}"
+
+touch "${ROOT}/state/events" "${ROOT}/state/issues"
+echo 1000 > "${ROOT}/state/next"
+
+run_workflow() {
+  bash "${WF}" --repo nahcnuj/conahcnuj \
+    --runs-url-prefix https://example.com/runs \
+    --lookback-days 7 --drive true --ref main \
+    > "${ROOT}/report.md" 2> "${ROOT}/progress.txt"
+}
+
+cat > "${ROOT}/mock-logs/run-101.log" <<'EOF'
+opencode: trying model opencode/alpha
+Model opencode/alpha completed the work.
+Created PR #126 (feature/x -> main).
+Review requested on PR #126 (reviewer: nahcnuj): https://github.com/nahcnuj/conahcnuj/pull/126
+EOF
+
+# --- clean week: added to a fresh tracking issue, driver untouched ----------
+printf '101\n' > "${ROOT}/state/run-ids"
+run_workflow
+grep -q '<!-- auto-drive-report runs=1 findings=0 actionable=0 -->' "${ROOT}/report.md" \
+  || { echo "FAIL: clean report meta"; exit 1; }
+grep -q '^issue create auto-drive weekly self-improvement log$' "${ROOT}/state/events" \
+  || { echo "FAIL: missing tracking issue creation"; exit 1; }
+grep -q '^issue comment' "${ROOT}/state/events" && { echo "FAIL: clean week must not comment"; exit 1; }
+grep -q '^dispatch' "${ROOT}/state/events" && { echo "FAIL: clean week must not dispatch"; exit 1; }
+
+# --- existing tracking issue: report goes in as a comment --------------------
+true > "${ROOT}/state/events"
+printf '2|auto-drive weekly self-improvement log\n' > "${ROOT}/state/issues"
+run_workflow
+grep -q '^issue comment 2$' "${ROOT}/state/events" \
+  || { echo "FAIL: report must be commented on the existing tracking issue"; exit 1; }
+grep -q '^issue create' "${ROOT}/state/events" && { echo "FAIL: tracking issue must not be re-created"; exit 1; }
+
+# --- mixed week: findings issue created and dispatched ------------------------
+true > "${ROOT}/state/events"
+true > "${ROOT}/state/issues"
+echo 1100 > "${ROOT}/state/next"
+cat > "${ROOT}/state/run-ids" <<'EOF'
+202
+203
+EOF
+cat > "${ROOT}/mock-logs/run-202.log" <<'EOF'
+opencode: trying model opencode/alpha
+Model opencode/alpha failed before completing the work: environment error (x)
+ERROR: every model round died on an environment error (provider unreachable or credentials rejected)
+Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnuj.
+Bug report issue #130 created: https://github.com/nahcnuj/conahcnuj/issues/130
+EOF
+cat > "${ROOT}/mock-logs/run-203.log" <<'EOF'
+opencode: trying model opencode/alpha
+Model opencode/alpha produced no complete work; handing off to the next model.
+ERROR: no available model completed the work (tried: opencode/alpha; handoffs: none).
+Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnuj.
+Bug report issue #131 created: https://github.com/nahcnuj/conahcnuj/issues/131
+EOF
+run_workflow
+grep -q '<!-- auto-drive-report runs=2 findings=3 actionable=1 -->' "${ROOT}/report.md" \
+  || { echo "FAIL: mixed report meta"; sed -n "1,4p" "${ROOT}/report.md"; exit 1; }
+grep -q '^issue create auto-drive findings' "${ROOT}/state/events" \
+  || { echo "FAIL: findings issue must be created"; exit 1; }
+grep -q '^dispatch number=1101$' "${ROOT}/state/events" \
+  || { echo "FAIL: findings issue must be dispatched"; cat "${ROOT}/state/events"; exit 1; }
+
+# --- a findings issue already exists: update it, do not create another -------
+true > "${ROOT}/state/events"
+printf '5|auto-drive findings: old\n' > "${ROOT}/state/issues"
+run_workflow
+grep -q '^issue comment 5$' "${ROOT}/state/events" \
+  || { echo "FAIL: existing findings issue must get a comment"; exit 1; }
+grep -q '^dispatch number=5$' "${ROOT}/state/events" \
+  || { echo "FAIL: the existing findings issue must be dispatched"; exit 1; }
+grep -q '^issue create auto-drive findings' "${ROOT}/state/events" \
+  && { echo "FAIL: a second findings issue must not appear"; exit 1; }
+
+# --- discovery of the next issue number from `gh issue create` ---------------
+printf '1200\n' > "${ROOT}/state/next"
+true > "${ROOT}/state/issues"
+run_workflow
+grep -q '^dispatch number=1201$' "${ROOT}/state/events" \
+  || { echo "FAIL: the created issue number must be read from the URL"; exit 1; }
+
+# --- drive=false: report still published, driver never dispatched ------------
+true > "${ROOT}/state/events"
+true > "${ROOT}/state/issues"
+echo 1300 > "${ROOT}/state/next"
+bash "${WF}" --repo nahcnuj/conahcnuj --runs-url-prefix https://example.com/runs \
+  --lookback-days 7 --drive false --ref main > "${ROOT}/report.md" 2>/dev/null
+grep -q 'actionable=1' "${ROOT}/report.md" \
+  || { echo "FAIL: drive=false must still analyze"; exit 1; }
+grep -q '^issue create auto-drive weekly self-improvement log' "${ROOT}/state/events" \
+  || { echo "FAIL: drive=false must still publish the report"; exit 1; }
+grep -q '^dispatch' "${ROOT}/state/events" && { echo "FAIL: drive=false must not dispatch"; exit 1; }
+
+# --- usage: repo is required -------------------------------------------------
+rc=0
+env -u GITHUB_REPOSITORY bash "${WF}" --lookback-days 7 >/dev/null 2>&1 || rc=$?
+[[ ${rc} -eq 1 ]] || { echo "FAIL: missing repo must exit 1"; exit 1; }
+
+echo "auto-drive-workflow test passed"

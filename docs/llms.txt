@@ -17,5 +17,6 @@ https://nahcnuj.github.io/conahcnuj/
 - [driver.md](driver.md): ドライバ `conahcnuj` の使い方、フロー、エージェント契約（`.commit-msg` / `.branch-name`）、終了コード
 - [plugin.md](plugin.md): opencode プラグインのフック、注入する `GH_TOKEN` / `GIT_CONFIG_*`、`git vc`、`Co-Authored-By` trailer（`CONAHCNUJ_COMMIT_MODEL`）
 - [environment.md](environment.md): 環境変数の全量（ドライバ・Docker・Actions・テスト専用・内部変数）
-- [workflows.md](workflows.md): GitHub Actions 5 本、必須ステータスチェック、reusable auto-merge workflow の入力、Pages 配信
+- [workflows.md](workflows.md): GitHub Actions 6 本、必須ステータスチェック、reusable auto-merge workflow の入力、Pages 配信
 - [installation.md](installation.md): `install.ps1` と Docker による配置・実行、導入後の確認
+- [self-improvement.md](self-improvement.md): 週次の auto-drive ログ解析（`auto-drive-report.sh` / `auto-drive-workflow.sh` / `weekly-self-improvement.yml`）
