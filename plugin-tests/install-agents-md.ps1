@@ -1,4 +1,4 @@
-# test/install-agents-md.ps1 - AGENTS.md merge test for install.ps1
+# plugin-tests/install-agents-md.ps1 - AGENTS.md merge test for install.ps1
 #
 # The global opencode rules (opencode/AGENTS.md) reach every repository through
 # <config dir>/AGENTS.md, so install.ps1 (Install-GlobalAgentsMd) splices them
@@ -14,7 +14,7 @@
 #   - personal rules after the end marker survive a managed-block update
 #
 # Usage:
-#   pwsh -NoProfile -File test/install-agents-md.ps1
+#   pwsh -NoProfile -File plugin-tests/install-agents-md.ps1
 # CI: .github/workflows/ci.yml (install-test)
 
 [CmdletBinding()]

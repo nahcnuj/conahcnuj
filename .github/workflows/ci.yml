@@ -38,10 +38,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Syntax check
-        run: bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
+        run: bash -n gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh driver-tests/*.sh
 
       - name: ShellCheck
-        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh tests/*.sh test.sh
+        run: shellcheck -x gh-app/*.sh gh-app/tests/*.sh bin/*.sh lib/*.sh driver-tests/*.sh
 
   lint-ps:
     name: Check install.ps1 syntax
@@ -77,7 +77,7 @@ jobs:
       - name: Test the global AGENTS.md merge
         shell: pwsh
         run: |
-          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./test/install-agents-md.ps1
+          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./plugin-tests/install-agents-md.ps1
 
       - name: Install into temp dir for deployment verification
         shell: pwsh
@@ -116,7 +116,7 @@ jobs:
             Write-Error "app.env was not created from example"
             exit 1
           }
-          # The AGENTS.md merge assertions live in test/install-agents-md.ps1
+          # The AGENTS.md merge assertions live in plugin-tests/install-agents-md.ps1
           # (runs above); this step only verifies the deployed file tree.
           # Only gh-app-token.ts may live at the top level of the deployed
           # plugins dir (opencode loads every top-level file there as a
@@ -181,14 +181,14 @@ jobs:
 
       # Full offline suite: token cache, credential helper, api-commit.sh
       # arg validation and --dry-run worktree collection (gh-app/tests/).
-      - name: Run tests/run.sh suite
+      - name: Run gh-app/tests/run.sh suite
         run: bash gh-app/tests/run.sh
 
       # Driver suite: conahcnuj end-to-end flow tests driven by a mocked
-      # API tape + mocked opencode (bin/, lib/, tests/, no secrets,
+      # API tape + mocked opencode (bin/, lib/, driver-tests/, no secrets,
       # no network).
       - name: Run driver test suite
-        run: bash test.sh
+        run: bash driver-tests/run.sh
 
   lint-ts:
     name: Typecheck opencode plugin
@@ -237,12 +237,12 @@ jobs:
           restore-keys: |
             npm-${{ runner.os }}-
 
-      # Compiles the plugin with its internals re-exported and runs the unit
+      # Compiles the real plugin with its internals intact and runs the unit
       # suite (command inspection behind the git vc redirects, app.env and
       # cache parsing, hook wiring). Needs node/npm only: no pwsh, no secrets,
       # no GitHub network.
       - name: Run plugin unit tests
-        run: bash test/unit.sh
+        run: bash plugin-tests/unit.sh
 
   plugin-smoke:
     name: Plugin runtime smoke test
@@ -274,7 +274,32 @@ jobs:
       # identity + alias.vc) and the git-commit redirect.
       # Needs node/npm from the runner; no secrets, no GitHub network.
       - name: Run plugin smoke test
-        run: bash test/smoke.sh
+        run: bash plugin-tests/smoke.sh
+
+  docs:
+    name: Build docs site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # Same build as pages.yml: link/coverage checks + HTML render of docs/.
+      # The only dependency is the `markdown` package; Pipfile.lock is the
+      # reproducible install source (dependabot keeps it fresh). pipenv runs
+      # from a throwaway venv so the system Python stays untouched (Ubuntu
+      # 24.04 refuses a bare `pip install` outside a venv).
+      # Not a required status check, so a docs-only regression never blocks
+      # a code PR.
+      - name: Build and validate docs
+        run: |
+          python3 -m venv /tmp/docs-venv
+          /tmp/docs-venv/bin/pip install --disable-pip-version-check -q pipenv
+          PIPENV_IGNORE_VIRTUALENVS=1 PIPENV_VENV_IN_PROJECT=1 \
+            /tmp/docs-venv/bin/pipenv install --deploy
+          PIPENV_IGNORE_VIRTUALENVS=1 PIPENV_VENV_IN_PROJECT=1 \
+            /tmp/docs-venv/bin/pipenv run python3 docs/build.py
 
   e2e-opencode:
     name: E2E opencode run (opencode free model)
@@ -346,4 +371,4 @@ jobs:
       # no remote); anything else fails the run.
       - name: Run opencode and assert git vc surfaces
         run: |
-          bash test/e2e-opencode.sh
+          bash plugin-tests/e2e-opencode.sh

@@ -1,6 +1,6 @@
 // Unit tests for the opencode plugin, driven entirely through the hooks
 // opencode calls (tool.execute.before, shell.env, the system-prompt
-// transform, chat.message / chat.params). test/unit.sh compiles the real
+// transform, chat.message / chat.params). plugin-tests/unit.sh compiles the real
 // plugins/gh-app-token.ts unchanged into ./.unit/out/, so the code under
 // test here IS the production source: this suite keeps no copy and no
 // re-export of it, and there is nothing that could drift out of sync with
@@ -11,7 +11,7 @@
 // (app.env, bot-id.cache, token.cache). global fetch is stubbed before any
 // test runs: nothing here reaches the network and no secret is needed.
 //
-// Usage: bash test/unit.sh (which builds ./.unit/out first)
+// Usage: bash plugin-tests/unit.sh (which builds ./.unit/out first)
 //   or: node unit-run.js
 //
 // The require target is a fixed literal path on purpose: requiring an
@@ -148,7 +148,7 @@ async function assertAllowed(commands) {
 }
 
 // RSA key for the token exchange: written once into the stage (which
-// test/unit.sh removes), the public half stays in memory for verification.
+// plugin-tests/unit.sh removes), the public half stays in memory for verification.
 let keyPair = null
 function signingKeys() {
   if (!keyPair) {
@@ -675,19 +675,20 @@ test("chat hooks: the session model and variant become one commit trailer label"
     )
     let output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "opencode/fledge (high)")
-    assert.strictEqual(fs.readFileSync(labelFile, "utf8"), "opencode/fledge (high)\n")
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "opencode (fledge/high)")
+    assert.strictEqual(fs.readFileSync(labelFile, "utf8"), "opencode (fledge/high)\n")
 
-    // The display name from chat.params wins over the id stand-in.
+    // chat.params carries the model id (the display name is never used) and
+    // leaves the effort already recorded for this session in place.
     await plugin["chat.params"](
       { sessionID: "s1", agent: "build", model: { name: "Grok 4.7", providerID: "xai", id: "grok-4.7" } },
       {}
     )
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "Grok 4.7 (high)")
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (grok-4.7/high)")
 
-    // A name that already carries the variant is not suffixed twice.
+    // The variant on a later message replaces the effort of the same model.
     await plugin["chat.params"](
       { sessionID: "s2", agent: "build", model: { name: "Grok 4.7 (high)", providerID: "xai", id: "grok-4.7" } },
       {}
@@ -698,22 +699,22 @@ test("chat hooks: the session model and variant become one commit trailer label"
     )
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s2" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "Grok 4.7 (high)")
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (grok-4.7/high)")
 
-    // Newlines and tabs in a display name collapse into one line.
+    // Newlines and tabs in a recorded id or effort collapse into one line.
     await plugin["chat.params"](
       { sessionID: "s3", agent: "build", model: { name: "Grok\n4.7\t", providerID: "xai", id: "g" } },
       {}
     )
     await plugin["chat.message"](
-      { sessionID: "s3", model: { providerID: "xai", modelID: "g" }, variant: "medium" },
+      { sessionID: "s3", model: { providerID: "xai", modelID: "g" }, variant: "med\nium" },
       { message: {}, parts: [] }
     )
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s3" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "Grok 4.7 (medium)")
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (g/med ium)")
 
-    // A variant without any name produces no label at all.
+    // A message without any model produces no label at all.
     await plugin["chat.message"]({ sessionID: "s4", variant: "medium" }, { message: {}, parts: [] })
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s4" }, output)
@@ -759,7 +760,7 @@ test("chat hooks: CONAHCNUJ_SESSION_MODEL keeps side models out of the label", a
     )
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "a" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "opencode/fledge (high)")
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "opencode (fledge/high)")
 
     // A bare model id matches that id, whatever the provider around it...
     process.env.CONAHCNUJ_SESSION_MODEL = "fledge"
@@ -769,7 +770,7 @@ test("chat hooks: CONAHCNUJ_SESSION_MODEL keeps side models out of the label", a
     )
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "b" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai/fledge (low)")
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (fledge/low)")
 
     // ...but never a different model id.
     await plugin["chat.message"](
@@ -806,7 +807,7 @@ test("chat hooks: the label file path cannot escape the temp directory", async (
     const output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, output)
     // The label itself still reaches the shell; only the file write is denied.
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai/grok (medium)")
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (grok/medium)")
   } finally {
     if (saved === undefined) {
       delete process.env.CONAHCNUJ_MODEL_LABEL_FILE
@@ -821,7 +822,7 @@ test("chat hooks: the label file path cannot escape the temp directory", async (
 
 async function main() {
   if (!fs.existsSync(path.join(STAGE_DIR, "out", "gh-app-token.js"))) {
-    console.error("UNIT FAIL: test/.unit/out is missing; run: bash test/unit.sh")
+    console.error("UNIT FAIL: plugin-tests/.unit/out is missing; run: bash plugin-tests/unit.sh")
     process.exit(1)
   }
   stage()

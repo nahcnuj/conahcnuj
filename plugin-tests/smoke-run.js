@@ -1,5 +1,5 @@
 // Plugin runtime smoke test runner (plain Node, no deps).
-// Usage: bash plugins/smoke.sh (which stages ./.smoke/ first)
+// Usage: bash plugin-tests/smoke.sh (which stages ./.smoke/ first)
 //   or: node smoke-run.js <expected app slug>
 //
 // Loads the compiled plugin with a fake gh-app dir (fake app.env; the bot
@@ -122,8 +122,8 @@ async function main() {
   await plugin["experimental.chat.system.transform"]({}, system)
   assert(system.system.length === 1, "commit rules injected more than once")
 
-  // OpenCode reports the variant on the user message and the display name
-  // on chat.params. The shell that runs `git vc` must see one trailer label.
+  // OpenCode reports the effort variant on the user message and the model id
+  // on chat.params. The shell that runs `git vc` must see one trailer value.
   const fs = require("node:fs")
   const os = require("node:os")
   const path = require("node:path")
@@ -158,8 +158,8 @@ async function main() {
   )
   const labeled = { env: {} }
   await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, labeled)
-  assert.strictEqual(labeled.env.CONAHCNUJ_COMMIT_MODEL, "Grok 4.7 (medium)")
-  assert.strictEqual(fs.readFileSync(labelFile, "utf8").trim(), "Grok 4.7 (medium)")
+  assert.strictEqual(labeled.env.CONAHCNUJ_COMMIT_MODEL, "xai (grok-4.7/medium)")
+  assert.strictEqual(fs.readFileSync(labelFile, "utf8").trim(), "xai (grok-4.7/medium)")
   process.env.CONAHCNUJ_MODEL_LABEL_FILE = outside
   await plugin["chat.params"](
     {

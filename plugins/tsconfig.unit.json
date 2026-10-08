@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": false,
     "rootDir": ".",
-    "outDir": "../test/.unit/out"
+    "outDir": "../plugin-tests/.unit/out"
   },
   "include": ["gh-app-token.ts", "lib/gh-app-commit.ts", "lib/gh-app-commit.test.ts"]
 }

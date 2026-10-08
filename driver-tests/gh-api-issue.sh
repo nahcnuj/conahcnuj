@@ -438,6 +438,72 @@ test_create_issue() {
   echo "gh_api_create_issue passed"
 }
 
+# A JSON string may not carry a raw control byte, so gh_api_escape turns every
+# one of them (tab, CR, ESC, BEL, DEL, ...) into a \u00XX escape on top of the
+# backslash / quote / line-break handling. GitHub enforces the rule by
+# rejecting the whole request with 400 "Problems parsing JSON" (issue #156:
+# the bug report for #155 is built from the run log, whose decoded tab and
+# carriage-return bytes reached the payload and made the report itself lost).
+test_escape_control_chars() {
+  local out
+  out="$(gh_api_escape "$(printf 'col1\tcol2\rname\033[31mred\033[0m\007\177')")"
+  [[ "${out}" == 'col1\u0009col2\u000dname\u001b[31mred\u001b[0m\u0007\u007f' ]] || {
+    echo "FAIL: gh_api_escape control characters: '${out}'" >&2
+    exit 1
+  }
+  printf '%s' "${out}" | grep -q '[[:cntrl:]]' && {
+    echo "FAIL: a raw control byte survived gh_api_escape" >&2
+    exit 1
+  }
+  # The escapes that were already there must not change: line breaks join into
+  # \n, quotes and backslashes stay escaped, and text passes through byte for
+  # byte (multibyte included).
+  out="$(gh_api_escape 'say "hi" \ 日本語')"
+  [[ "${out}" == 'say \"hi\" \\ 日本語' ]] || {
+    echo "FAIL: gh_api_escape quote/backslash/multibyte: '${out}'" >&2
+    exit 1
+  }
+  out="$(gh_api_escape "first
+second")"
+  [[ "${out}" == 'first\nsecond' ]] || {
+    echo "FAIL: gh_api_escape line break: '${out}'" >&2
+    exit 1
+  }
+  [[ -z "$(gh_api_escape "")" ]] || {
+    echo "FAIL: gh_api_escape of an empty string is not empty" >&2
+    exit 1
+  }
+  echo "gh_api_escape passed"
+}
+
+# The same rule end to end through the real gh_api_create_issue: gh_api_call is
+# stubbed to report the payload it would POST, so a body carrying the run log's
+# control bytes has to leave this function as a payload GitHub can parse.
+test_create_issue_control_chars() {
+  # gh_api_create_issue swallows gh_api_call's stdout (it parses it for the
+  # issue number), so the stub writes the payload it would POST to a file.
+  local payload_file payload
+  payload_file="$(mktemp)"
+  (
+    gh_api_call() {
+      printf '%s' "${3}" > "${payload_file}"
+      printf '{"number":25}'
+    }
+    gh_api_create_issue "nahcnuj" "conahcnuj" "Bug report" "$(printf 'line1\tline2\rline3\033[31m')"
+  ) >/dev/null
+  payload="$(cat "${payload_file}")"
+  rm -f "${payload_file}"
+  [[ "${payload}" == '{"title":"Bug report","body":"line1\u0009line2\u000dline3\u001b[31m"}' ]] || {
+    echo "FAIL: create-issue payload: '${payload}'" >&2
+    exit 1
+  }
+  printf '%s' "${payload}" | grep -q '[[:cntrl:]]' && {
+    echo "FAIL: a raw control byte reached the create-issue payload" >&2
+    exit 1
+  }
+  echo "gh_api_create_issue (control-character body) passed"
+}
+
 test_merge_pr() {
   gh_api_merge_pr "nahcnuj" "conahcnuj" 15 < <(printf '%s\n' '{}' '{}')
   echo "gh_api_merge_pr passed"
@@ -459,6 +525,8 @@ test_requested_reviewers
 test_requested_reviewers_pretty
 test_post_comment
 test_create_issue
+test_escape_control_chars
+test_create_issue_control_chars
 test_merge_pr
 
 echo "All gh-api tests passed"

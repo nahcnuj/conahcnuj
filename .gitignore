@@ -2,8 +2,11 @@ gh-app/token.cache
 gh-app/bot-id.cache
 gh-app/app.env
 node_modules/
+.venv/
 .smoke/
 .unit/
+_site/
+__pycache__/
 *.tmp
 *.log
 var/

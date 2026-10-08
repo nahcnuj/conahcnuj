@@ -101,6 +101,33 @@ grep -q "ERROR: could not implement issue #14 with any available model." "${ROOT
 grep -q "Exit code: 1" "${ROOT}/captured-body.txt" || { echo "FAIL: exit code is missing from the report"; exit 1; }
 grep -q "Repository:" "${ROOT}/captured-body.txt" && { echo "FAIL: self-evident repository line is still in the report"; exit 1; }
 
+# --- unit: control bytes in the run log cannot break the report payload ------
+# The report body is the tail of the run log, and that log holds the decoded
+# tab / carriage-return bytes opencode's escapes stand for (issue #156: GitHub
+# answered 400 "Problems parsing JSON" to the bug report for #155, so the
+# report itself was lost). Here the real gh_api_create_issue runs with only
+# gh_api_call stubbed, so the payload it would POST can be inspected byte for
+# byte: the raw bytes go in with the log and come out as \u00XX escapes.
+(
+  unset CONAHCNUJ_REPO
+  # shellcheck source=bin/conahcnuj.sh
+  source "${DRIVER}"
+  gh_api_call() {
+    printf '%s' "${3}" > "${ROOT}/payload.json"
+    printf '{"number":25}'
+  }
+  RUN_LOG_FILE="$(mktemp)"
+  printf 'tool output: col1\tcol2\rprogress\r\033[31mred\033[0m\n' > "${RUN_LOG_FILE}"
+  BUG_REPORT_INPUT="14"
+  BUG_REPORTED="0"
+  report_bug_on_exit "1"
+)
+
+grep -q '\\u0009' "${ROOT}/payload.json" || { echo "FAIL: tab was not escaped in the bug-report payload"; exit 1; }
+grep -q '\\u000d' "${ROOT}/payload.json" || { echo "FAIL: carriage return was not escaped in the bug-report payload"; exit 1; }
+grep -q '\\u001b' "${ROOT}/payload.json" || { echo "FAIL: escape byte was not escaped in the bug-report payload"; exit 1; }
+grep -q '[[:cntrl:]]' "${ROOT}/payload.json" && { echo "FAIL: a raw control byte reached the bug-report payload"; exit 1; }
+
 # --- unit: the rendered model log reaches the run log -----------------------
 # The run log only captures stderr, so the renderer writes there. Assert that a
 # tool block from a real opencode_run call lands in RUN_LOG_FILE: without this

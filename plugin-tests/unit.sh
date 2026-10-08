@@ -2,12 +2,12 @@
 # Unit tests for the opencode plugin: compile the REAL plugins/gh-app-token.ts
 # (no copy of it, nothing appended to it - unit-run.js drives the hooks opencode
 # calls, so nothing has to be re-exported for the tests) with
-# plugins/tsconfig.unit.json into test/.unit/out, then run unit-run.js.
-# GH_APP_DIR resolves as test/.unit/gh-app, which unit-run.js stages as its
+# plugins/tsconfig.unit.json into plugin-tests/.unit/out, then run unit-run.js.
+# GH_APP_DIR resolves as plugin-tests/.unit/gh-app, which unit-run.js stages as its
 # fixture (app.env, bot-id.cache, token.cache); global fetch is stubbed there,
 # so no network is touched.
 # No secrets, no pwsh: the installed-file runtime path is covered separately
-# by test/smoke.sh.
+# by plugin-tests/smoke.sh.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
