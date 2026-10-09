@@ -38,8 +38,8 @@ OID="$(git -C "${WORK}" rev-parse HEAD)"
 # Mocked response tape, in call order:
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
 #   repo id, create_pr (UNPROCESSABLE) -> then, after the recovery round:
-#   find_pr_by_head (empty), repo id, create_pr (125), conditions (SUCCESS),
-#   fetch_reviews (APPROVED).
+#   find_pr_by_head (empty), repo id, create_pr (125), fetch_reviews (APPROVED).
+#   The APPROVED read exits as ready to merge before any constraints poll (#219).
 TAPE="${ROOT}/tape.txt"
 sed "s/OID_PLACEHOLDER/${OID}/" > "${TAPE}" <<'EOF'
 {"number": 18, "title": "fix racing driver", "body": "PR creation must be retried, not fatal", "labels": [], "state": "open"}
@@ -52,8 +52,8 @@ sed "s/OID_PLACEHOLDER/${OID}/" > "${TAPE}" <<'EOF'
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":125}}}}
 {"id":776}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
+{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1

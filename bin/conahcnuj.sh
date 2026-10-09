@@ -19,11 +19,13 @@
 #      read back before a hand-off is called lost; only a PR that GitHub says
 #      has nobody asked fails the run, while a hand-off that cannot be verified
 #      at all ends the run with a warning (issues #134 / #139).
-#   3. when the run was resumed with fresh review feedback (comments /
-#      requested changes / security-review threads), addresses it, pushes a
-#      Verified commit, re-requests review (the agent answers the reviewer in
-#      the thread itself, so the driver posts no reply of its own), re-verifies
-#      the non-reviewer constraints and exits
+#   3. when the run was resumed with review feedback (comments / requested
+#      changes / unresolved review threads), addresses it first, before waiting
+#      on the non-reviewer constraints: a PR with open threads cannot reach
+#      those constraints until the threads are answered, so polling first only
+#      stalls (#219). It pushes a Verified commit, re-requests review (the agent
+#      answers the reviewer in the thread itself, so the driver posts no reply
+#      of its own), re-verifies the non-reviewer constraints and exits
 #   4. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the repository so a
 #      run the driver could not resolve is never silently lost. The report
@@ -1039,30 +1041,15 @@ drive() {
       fi
     fi
 
-    if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
-      # CI failed or the branch conflicts: implement again with that context.
-      # When no model produces a change there is nothing new to push, so back
-      # off before re-checking instead of hammering every model in a tight loop
-      # (poll_conditions returns immediately on FAILURE).
-      echo "PR #${pr}: constraints failing; fixing with a new implementation round." >&2
-      local produced_change="false"
-      if implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
-        produced_change="true"
-      fi
-      if workdir_changed "$(pwd)"; then
-        commit_changes
-        produced_change="true"
-      fi
-      if [[ "${produced_change}" != "true" ]]; then
-        echo "No model completed work for the failing constraints; backing off before re-checking." >&2
-        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
-      fi
-      continue
-    fi
-
-    echo "PR #${pr}: non-reviewer constraints satisfied." >&2
-
-    # --- review phase ---
+    # --- review feedback phase ---
+    # Address the review feedback (open threads / requested changes) BEFORE
+    # waiting on the non-reviewer constraints. A PR that still has unresolved
+    # review threads, or that waits on required conversation resolution, cannot
+    # reach the constraints the poll below waits for until those threads are
+    # answered, so polling first only burns the time budget while the known
+    # feedback sits untouched (#219). The round runs even while checks are still
+    # PENDING: any commit it makes restarts CI, which is re-verified below.
+    #
     # Asking for review is what a run hands over to a human, so the review
     # request (not an approval) is the last thing the driver produces. The
     # approval, and the merge owner-approved-auto-merge chains off it, are the
@@ -1116,6 +1103,29 @@ ${summary}"; then
       exit 0
     fi
 
+    # --- constraints phase ---
+    if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
+      # CI failed or the branch conflicts: implement again with that context.
+      # When no model produces a change there is nothing new to push, so back
+      # off before re-checking instead of hammering every model in a tight loop
+      # (poll_conditions returns immediately on FAILURE).
+      echo "PR #${pr}: constraints failing; fixing with a new implementation round." >&2
+      local produced_change="false"
+      if implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
+        produced_change="true"
+      fi
+      if workdir_changed "$(pwd)"; then
+        commit_changes
+        produced_change="true"
+      fi
+      if [[ "${produced_change}" != "true" ]]; then
+        echo "No model completed work for the failing constraints; backing off before re-checking." >&2
+        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
+      fi
+      continue
+    fi
+
+    echo "PR #${pr}: non-reviewer constraints satisfied." >&2
     request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
     log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
     exit 0

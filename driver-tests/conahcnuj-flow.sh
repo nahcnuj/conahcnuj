@@ -39,8 +39,10 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape. One JSON document per GitHub API call, in call order:
 #   fetch_issue, get_repo, find_pr_by_head (empty), repo id lookup, create_pr
-#   (123), continuation comment, conditions (SUCCESS|MERGEABLE), fetch_reviews
-#   (REVIEW_REQUIRED, nothing to act on), request_review.
+#   (123), continuation comment, fetch_reviews (REVIEW_REQUIRED, nothing to act
+#   on), conditions (SUCCESS|MERGEABLE), request_review. The reviews are read
+#   before the constraints poll: known review feedback must be handled before
+#   waiting on CI (#219).
 # Keep the tape and the run log OUTSIDE the repo: the driver's test-mode
 # commit path does `git add -A`, and a file living in the worktree would be
 # re-staged as it grows.
@@ -53,8 +55,8 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":123}}}}
 {"id":776}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
+{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}
 EOF
 

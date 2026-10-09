@@ -40,10 +40,67 @@ record_utf8() {
 
 case "${cmd}" in
   api)
-    # gh api [--paginate] URL --jq FILTER  (only the run listing is used)
-    if [[ -f "${state}/run-ids" ]]; then
-      cat "${state}/run-ids"
-    fi
+    # gh api [--method M] [--paginate] URL [-f/-F k=v ...] [--jq FILTER]
+    # Handles the run listing and the classic repository Projects API calls the
+    # workflow makes (list/create a board, pick its column, add issue cards).
+    method="GET"; url=""; filter=""; name=""; content_id=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --method|-X) shift; method="$1" ;;
+        --jq) shift; filter="$1" ;;
+        --paginate) ;;
+        -f|-F)
+          shift
+          case "$1" in
+            name=*) name="${1#name=}" ;;
+            content_id=*) content_id="${1#content_id=}" ;;
+          esac
+          ;;
+        *) url="$1" ;;
+      esac
+      shift
+    done
+    case "${url}" in
+      *"/actions/workflows/issue-driver.yml/runs"*)
+        cat "${state}/run-ids" 2>/dev/null || true
+        ;;
+      repos/*/projects|repos/*/projects\?*)
+        if [[ "${method}" == "POST" ]]; then
+          n="$(cat "${state}/next-project" 2>/dev/null || echo 7)"
+          echo $((n + 1)) > "${state}/next-project"
+          printf '%s|%s|%s\n' "${n}" "${n}" "${name}" >> "${state}/projects"
+          printf 'project create %s\n' "${name}" >> "${state}/events"
+          echo "${n}"
+        elif [[ "${filter}" == *'.number =='* ]]; then
+          num="$(printf '%s' "${filter}" | sed -n 's/.*\.number == \([0-9]*\).*/\1/p')"
+          awk -F'|' -v n="${num}" '$2 == n { print $1; exit }' "${state}/projects" 2>/dev/null || true
+        else
+          want="$(printf '%s' "${filter}" | sed -n 's/.*select(\.name == "\(.*\)") | .id.*/\1/p')"
+          awk -F'|' -v n="${want}" '$3 == n { print $1; exit }' "${state}/projects" 2>/dev/null || true
+        fi
+        ;;
+      projects/*/columns|projects/*/columns\?*)
+        if [[ "${method}" == "POST" ]]; then
+          c="$(cat "${state}/next-column" 2>/dev/null || echo 70)"
+          echo $((c + 1)) > "${state}/next-column"
+          printf 'column create %s\n' "${name}" >> "${state}/events"
+          echo "${c}"
+        else
+          echo 70
+        fi
+        ;;
+      repos/*/issues/*)
+        n="${url##*/}"
+        echo "$((100000 + n))"
+        ;;
+      projects/columns/*/cards)
+        printf 'project card %s %s\n' "${url}" "${content_id}" >> "${state}/events"
+        ;;
+      *)
+        echo "mock: unhandled api url: ${url}" >&2
+        exit 1
+        ;;
+    esac
     ;;
   run)
     # gh run view <id> --repo R --log
@@ -236,6 +293,63 @@ grep -q '^dispatch number=5$' "${ROOT}/state/events" \
   || { echo "FAIL: the existing findings issue must be retried"; exit 1; }
 grep -q '^issue create auto-drive findings' "${ROOT}/state/events" \
   && { echo "FAIL: a second findings issue must not appear"; exit 1; }
+
+# --- a Project is reachable: issues land on it, the board is created ---------
+# The classic repository Projects API is outside GITHUB_TOKEN, so the loop
+# reaches it with the App installation token (GH_APP_TOKEN). It finds the board
+# by title, creating it when missing, and adds the issues as cards. Both the
+# tracking issue and a fresh findings issue must become cards.
+true > "${ROOT}/state/events"
+true > "${ROOT}/state/issues"
+rm -f "${ROOT}/state/projects"
+echo 1500 > "${ROOT}/state/next"
+printf '401\n' > "${ROOT}/state/run-ids"
+cat > "${ROOT}/mock-logs/run-401.log" <<'EOF'
+opencode: trying model opencode/alpha
+Model opencode/alpha failed before completing the work: environment error (x)
+ERROR: no available model completed the work (tried: opencode/alpha; handoffs: none).
+Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnuj.
+Bug report issue #140 created: https://github.com/nahcnuj/conahcnuj/issues/140
+EOF
+export GH_APP_TOKEN=test-app-token
+run_workflow
+grep -q '^project create auto-drive self-improvement$' "${ROOT}/state/events" \
+  || { echo "FAIL: the classic Project must be created when missing"; cat "${ROOT}/state/events"; exit 1; }
+[[ "$(grep -c '^project card ' "${ROOT}/state/events" || true)" == "2" ]] \
+  || { echo "FAIL: the tracking and findings issues must both become cards"; cat "${ROOT}/state/events"; exit 1; }
+
+# Re-running with the issues already present must still add them as cards and
+# must reuse, not re-create, the board, so a Project configured after the issues
+# appeared still gets them.
+true > "${ROOT}/state/events"
+run_workflow
+grep -q '^project create ' "${ROOT}/state/events" \
+  && { echo "FAIL: an existing Project must not be re-created"; cat "${ROOT}/state/events"; exit 1; }
+grep -q '^issue comment' "${ROOT}/state/events" \
+  || { echo "FAIL: the second run must comment on the existing issues"; cat "${ROOT}/state/events"; exit 1; }
+[[ "$(grep -c '^project card ' "${ROOT}/state/events" || true)" == "2" ]] \
+  || { echo "FAIL: the existing tracking and findings issues must also become cards"; cat "${ROOT}/state/events"; exit 1; }
+unset GH_APP_TOKEN
+
+# --- no Project reachable: the Projects API stays untouched ------------------
+# Without the App token (offline) or an explicit PROJECT_NUMBER / PROJECT_TITLE
+# the loop must not call the Projects API at all (the mock would exit 1 on an
+# unhandled `gh api` URL), leaving the Project's built-in auto-add as the only
+# path.
+true > "${ROOT}/state/events"
+true > "${ROOT}/state/issues"
+rm -f "${ROOT}/state/projects"
+printf '402\n' > "${ROOT}/state/run-ids"
+cat > "${ROOT}/mock-logs/run-402.log" <<'EOF'
+opencode: trying model opencode/alpha
+Model opencode/alpha failed before completing the work: environment error (x)
+ERROR: no available model completed the work (tried: opencode/alpha; handoffs: none).
+Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnuj.
+Bug report issue #141 created: https://github.com/nahcnuj/conahcnuj/issues/141
+EOF
+run_workflow
+grep -qE '^(project|column) ' "${ROOT}/state/events" \
+  && { echo "FAIL: an unreachable Project must not be touched"; cat "${ROOT}/state/events"; exit 1; }
 
 # --- oversized report: split across bodies, never rejected -------------------
 # A single very long ERROR line pushes the report past GitHub's 65536-character
