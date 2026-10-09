@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# driver_bash_exe / driver_needs_relaunch test (offline).
+# driver_bash_exe / driver_needs_relaunch / driver_relaunch test (offline).
 #
 # On Windows, `bash conahcnuj <n>` from PowerShell can resolve to WSL bash,
 # where the MSYS-style private key path (/c/Users/...) does not exist. The
 # driver must re-launch itself under the configured Git Bash (BASH_EXE) so its
 # helpers see the path space they were written for (issue #31). These tests
-# cover the decision logic without ever exec'ing (wslpath is mocked).
+# cover the decision logic with wslpath mocked, and driver_relaunch itself:
+# Git Bash runs as a child and an interrupt is forwarded to it, so Ctrl-C from
+# PowerShell stops the run instead of looking ineffective (issue #203).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,5 +99,59 @@ if WSL_DISTRO_NAME=Ubuntu-24.04 driver_needs_relaunch; then
   echo "FAIL: must not relaunch when BASH_EXE is unreachable" >&2; exit 1
 fi
 echo "driver_needs_relaunch (WSL, unreachable bash) -> no passed"
+
+# --- driver_relaunch --------------------------------------------------------
+# wslpath -u resolves the configured bash to this real bash; wslpath -m resolves
+# the script to a dummy child so no Windows Git Bash is needed.
+fake_env "C:/x/git-bash.exe"
+WSLPATH_U_OUT="${BASH}"
+
+# A child that records its arguments and exits 7: driver_relaunch must exit
+# with the child's status and must not continue in the WSL shell (exec used to
+# replace the process; now the shell waits for the child and exits with it).
+CHILD="${ROOT}/child.sh"
+cat > "${CHILD}" <<'EOF'
+#!/usr/bin/env bash
+printf 'args:%s\n' "$*" > "${DRIVER_RELAUNCH_MARKER}"
+exit 7
+EOF
+chmod +x "${CHILD}"
+WSLPATH_M_OUT="${CHILD}"
+export DRIVER_RELAUNCH_MARKER="${ROOT}/normal.txt"
+RC=0
+( driver_relaunch alpha beta ) || RC=$?
+[[ ${RC} -eq 7 ]] || { echo "FAIL: driver_relaunch exit ${RC} (expected the child's 7)" >&2; exit 1; }
+grep -q 'args:alpha beta' "${DRIVER_RELAUNCH_MARKER}" || { echo "FAIL: child arguments were not passed through" >&2; exit 1; }
+echo "driver_relaunch (child exit status + args) passed"
+
+# A child that waits until it is signalled: an interrupt delivered to the WSL
+# shell must be forwarded to it as TERM (an async child ignores SIGINT), so
+# Ctrl-C reaches Git Bash and the run stops (issue #203).
+CHILD="${ROOT}/waiting-child.sh"
+cat > "${CHILD}" <<'EOF'
+#!/usr/bin/env bash
+trap 'printf "term\n" >> "${DRIVER_RELAUNCH_MARKER}"; exit 143' TERM
+printf 'ready\n' > "${DRIVER_RELAUNCH_READY}"
+sleep 30
+EOF
+chmod +x "${CHILD}"
+WSLPATH_M_OUT="${CHILD}"
+export DRIVER_RELAUNCH_READY="${ROOT}/ready.txt"
+export DRIVER_RELAUNCH_MARKER="${ROOT}/signal.txt"
+: > "${DRIVER_RELAUNCH_MARKER}"
+rm -f "${DRIVER_RELAUNCH_READY}"
+set -m
+( driver_relaunch ) &
+DRV=$!
+set +m
+i=0
+while [[ ! -s "${DRIVER_RELAUNCH_READY}" && ${i} -lt 50 ]]; do sleep 0.1; i=$((i + 1)); done
+[[ -s "${DRIVER_RELAUNCH_READY}" ]] || { echo "FAIL: relaunched child never started" >&2; exit 1; }
+kill -INT "${DRV}"
+RC=0
+wait "${DRV}" || RC=$?
+[[ ${RC} -eq 130 ]] || { echo "FAIL: driver_relaunch did not report the interrupt (exit ${RC})" >&2; exit 1; }
+grep -q '^term$' "${DRIVER_RELAUNCH_MARKER}" || { echo "FAIL: the interrupt was not forwarded to the child" >&2; exit 1; }
+echo "driver_relaunch (forwards SIGINT as TERM) passed"
 
 echo "driver_relaunch tests passed"
