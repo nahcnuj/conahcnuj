@@ -253,6 +253,89 @@ gh_api_json_num() {
   printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" | head -1
 }
 
+# Raw (still backslash-escaped) value of a JSON string field, honouring escapes
+# so a value may itself contain quotes. Args: json key
+# gh_api_json_str stops at the first quote, which truncates a field whose content
+# has escaped quotes (a bug report carrying the driver's log tail is full of
+# them). This scans past `\"` pairs instead and reports the LAST occurrence of
+# the key, matching gh_api_json_str's greediness, so put the multi-line field
+# last in the query. Decoded with gh_api_unescape. Prints nothing when the key is
+# absent or its value is not a string.
+gh_api_json_str_escaped() {
+  printf '%s' "${1}" | awk -v key="${2}" '
+    # 1-based offset, in s, of the character right after the last occurrence of
+    # needle (0 when there is none). o tracks where the current tail of s starts
+    # in the original string.
+    function last_match(s, needle,   p, o, q) {
+      o = 1
+      p = 0
+      while ((q = index(s, needle)) > 0) {
+        p = o + q + length(needle) - 1
+        o = p
+        s = substr(s, q + length(needle))
+      }
+      return p
+    }
+    {
+      after = last_match($0, "\"" key "\"")
+      if (after == 0) exit
+      rest = substr($0, after + 1)
+      sub(/^[[:space:]]*:[[:space:]]*/, "", rest)
+      if (substr(rest, 1, 1) != "\"") exit
+      rest = substr(rest, 2)
+      value = ""
+      n = length(rest)
+      i = 1
+      while (i <= n) {
+        c = substr(rest, i, 1)
+        # A backslash escapes whatever follows it, so the pair is consumed whole
+        # and an escaped quote never ends the value.
+        if (c == "\\") {
+          value = value substr(rest, i, 2)
+          i += 2
+          continue
+        }
+        if (c == "\"") break
+        value = value c
+        i++
+      }
+      printf "%s", value
+      exit
+    }
+  '
+}
+
+# Fetch one discussion thread. Args: owner repo number
+# Output: title_b64|body_b64|url|category|id|triaged_issue
+# `triaged_issue` is the issue number a previous triage run already filed for
+# this thread (0 when the thread was never triaged), read from the marker the
+# triage reply carries. That makes triage idempotent: re-running it (dispatch,
+# or a re-fired trigger) must not open a second issue for one report.
+# The query asks for `body` last so the multi-line field is the document's last
+# `"body":` occurrence, which gh_api_json_str_escaped resolves correctly.
+gh_api_fetch_discussion() {
+  local owner="${1}" repo="${2}" number="${3}"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { discussion(number: ${number}) { number id title url category { name } comments(first: 100) { nodes { body } } body } } }"
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+
+  # The marker lives in a comment body, so it is plain text in the response and
+  # needs no JSON parsing.
+  local triaged
+  triaged="$(printf '%s' "${json}" | grep -oE '<!-- conahcnuj:triage issue=[0-9]+' | sed -n 's/.*issue=//p' | head -1)"
+  printf '%s|%s|%s|%s|%s|%s\n' \
+    "$(gh_api_b64 "$(gh_api_json_str_escaped "${json}" "title")")" \
+    "$(gh_api_b64 "$(gh_api_unescape "$(gh_api_json_str_escaped "${json}" "body")")")" \
+    "$(gh_api_json_str "${json}" "url")" \
+    "$(gh_api_json_str "${json}" "name")" \
+    "$(gh_api_json_str "${json}" "id")" \
+    "${triaged:-0}"
+}
+
 # --- Issues / PRs -----------------------------------------------------------
 
 # Fetch an issue (PRs are issues too). Output: title_b64|body_b64|labels_b64|is_pr
@@ -273,6 +356,24 @@ gh_api_fetch_issue() {
   fi
 
   printf '%s|%s|%s|%s\n' "$(gh_api_b64 "${title}")" "$(gh_api_b64 "${body}")" "$(gh_api_b64 "${labels}")" "${is_pr}"
+}
+
+# Every issue number in the repository, oldest first, one per line. Pull
+# requests are included (the REST issues endpoint returns both); the caller
+# filters them out with the is_pr flag of gh_api_fetch_issue. Paginates until a
+# short page comes back, so it also works for repositories with more than 100
+# issues. Used to walk the historical bug-report issues for the migration to
+# Discussions (bin/migrate-bug-reports.sh).
+gh_api_list_issue_numbers() {
+  local owner="${1}" repo="${2}"
+  local per_page=100 page=1 json count
+  while :; do
+    json="$(gh_api_call GET "https://api.github.com/repos/${owner}/${repo}/issues?state=all&per_page=${per_page}&page=${page}")" || return 1
+    count="$(printf '%s' "${json}" | grep -oE '"number":[0-9]+' | wc -l | tr -d '[:space:]')"
+    printf '%s' "${json}" | grep -oE '"number":[0-9]+' | cut -d: -f2 || true
+    [[ "${count}" -ge "${per_page}" ]] || break
+    page=$((page + 1))
+  done
 }
 
 # Repo default branch info. Output: default_branch|default_oid
@@ -724,14 +825,154 @@ gh_api_post_comment() {
   gh_api_json_num "${json}" "id"
 }
 
-# Create an issue. Args: owner repo title body. Output: issue number.
+# Create an issue. Args: owner repo title body
+# Output: issue number (empty when the API call failed)
+# Used by the discussion triage run, which turns an investigated bug-report
+# discussion into planned work (bin/conahcnuj.sh).
 gh_api_create_issue() {
   local owner="${1}" repo="${2}" title="${3}" body="${4}"
-  local payload
-  payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\"}"
+  local escaped_title escaped_body payload
+  escaped_title="$(gh_api_escape "${title}")"
+  escaped_body="$(gh_api_escape "${body}")"
+  payload="{\"title\":\"${escaped_title}\",\"body\":\"${escaped_body}\"}"
   local json
-  json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")"
+  json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")" || return 1
   gh_api_json_num "${json}" "number"
+}
+
+# Close an issue (pull requests are issues too). Args: owner repo number
+# state_reason "not_planned" marks it as moved/duplicate instead of done.
+gh_api_close_issue() {
+  local owner="${1}" repo="${2}" number="${3}" reason="${4:-}"
+  local payload='{"state":"closed"}'
+  if [[ -n "${reason}" ]]; then
+    payload="{\"state\":\"closed\",\"state_reason\":\"$(gh_api_escape "${reason}")\"}"
+  fi
+  gh_api_call PATCH "https://api.github.com/repos/${owner}/${repo}/issues/${number}" "${payload}" >/dev/null
+}
+
+# --- Discussions ------------------------------------------------------------
+# Error reports live in a discussion category, not in issues: an issue would
+# re-trigger issue-driver.yml (the driver's own report is then resolved as if it
+# were planned work), and a discussion is the right home for an unplanned
+# failure report. Discussions are GraphQL-only.
+# The two directions are kept apart on purpose: reporting files a discussion
+# (gh_api_create_discussion / gh_api_reply_discussion), triage reads one back and
+# turns an investigated report into an issue (gh_api_fetch_discussion above).
+
+# Resolve the repository node id and one discussion category id.
+# Args: owner repo category (category name or slug, matched case-insensitively)
+# Output: repo_id|category_id (category_id empty when nothing matches)
+gh_api_discussion_category() {
+  local owner="${1}" repo="${2}" category="${3}"
+  local query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { id discussionCategories(first: 25) { nodes { id name slug } } } }"
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}" -F owner="${owner}" -F repo="${repo}")"
+  fi
+
+  local repo_id nodes node id name slug want
+  repo_id="$(printf '%s' "${json}" | sed -n 's/.*"repository":{"id":"\([^"]*\)".*/\1/p')"
+  want="$(printf '%s' "${category}" | tr '[:upper:]' '[:lower:]')"
+  # Field order comes from the query above, so a node is one flat object.
+  nodes="$(printf '%s' "${json}" | grep -oE '\{"id":"[^"]*","name":"[^"]*","slug":"[^"]*"\}' || true)"
+  while IFS= read -r node; do
+    [[ -n "${node}" ]] || continue
+    name="$(gh_api_json_str "${node}" "name" | tr '[:upper:]' '[:lower:]')"
+    slug="$(gh_api_json_str "${node}" "slug" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${name}" == "${want}" || "${slug}" == "${want}" ]]; then
+      id="$(gh_api_json_str "${node}" "id")"
+      printf '%s|%s\n' "${repo_id}" "${id}"
+      return 0
+    fi
+  done <<< "${nodes}"
+  printf '%s|\n' "${repo_id}"
+}
+
+# Start a discussion thread. Args: owner repo category title body
+# Output: number|url
+gh_api_create_discussion() {
+  local owner="${1}" repo="${2}" category="${3}" title="${4}" body="${5}"
+  local ids repo_id category_id
+  ids="$(gh_api_discussion_category "${owner}" "${repo}" "${category}")"
+  repo_id="${ids%%|*}"
+  category_id="${ids#*|}"
+  if [[ -z "${repo_id}" || -z "${category_id}" ]]; then
+    echo "ERROR: discussion category '${category}' does not exist in ${owner}/${repo}." >&2
+    return 1
+  fi
+
+  local query
+  query="mutation { createDiscussion(input: { repositoryId: \"${repo_id}\", categoryId: \"${category_id}\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\" }) { discussion { number url } } }"
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+  local number url
+  number="$(gh_api_json_num "${json}" "number")"
+  url="$(gh_api_json_str "${json}" "url")"
+  if [[ -z "${number}" ]]; then
+    echo "ERROR: the discussion was not created (category ${category})." >&2
+    return 1
+  fi
+  printf '%s|%s\n' "${number}" "${url}"
+}
+
+# Find the thread in a category whose title matches exactly, so repeated
+# failures of the same kind can be collected in one thread.
+# Args: owner repo category title
+# Output: number|discussion_id|url (empty when the category has no such thread)
+gh_api_find_discussion_by_title() {
+  local owner="${1}" repo="${2}" category="${3}" title="${4}"
+  local ids category_id
+  ids="$(gh_api_discussion_category "${owner}" "${repo}" "${category}")"
+  category_id="${ids#*|}"
+  if [[ -z "${category_id}" ]]; then
+    echo "ERROR: discussion category '${category}' does not exist in ${owner}/${repo}." >&2
+    return 1
+  fi
+
+  # Discussions are not searchable through the REST API and the GraphQL
+  # connection has no title filter, so walk the category's threads
+  # (newest first) and compare titles locally.
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { discussions(first: 100, categoryId: \"${category_id}\", orderBy: { field: CREATED_AT, direction: DESC }) { nodes { number id title url } } } }"
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+
+  local nodes node number
+  nodes="$(printf '%s' "${json}" | grep -oE '\{"number":[0-9]+,"id":"[^"]*","title":"[^"]*","url":"[^"]*"\}' || true)"
+  while IFS= read -r node; do
+    [[ -n "${node}" ]] || continue
+    [[ "$(gh_api_json_str "${node}" "title")" == "${title}" ]] || continue
+    number="$(gh_api_json_num "${node}" "number")"
+    printf '%s|%s|%s\n' "${number}" "$(gh_api_json_str "${node}" "id")" "$(gh_api_json_str "${node}" "url")"
+    return 0
+  done <<< "${nodes}"
+  return 0
+}
+
+# Reply to an existing thread. Args: owner repo discussion_id body
+# (owner/repo are accepted for symmetry with the other helpers.)
+# Output: comment id
+gh_api_reply_discussion() {
+  local owner="${1}" repo="${2}" discussion_id="${3}" body="${4}"
+  local query
+  query="mutation { addDiscussionComment(input: { discussionId: \"${discussion_id}\", body: \"$(gh_api_escape "${body}")\" }) { comment { id } } }"
+  local json
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    json="$(gh_api_read_line)"
+  else
+    json="$(gh_api_graphql "${query}")"
+  fi
+  gh_api_json_str "${json}" "id"
 }
 
 # Merge a PR (SQUASH). Args: owner repo pr  (output: true/false)

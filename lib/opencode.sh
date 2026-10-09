@@ -95,6 +95,46 @@ opencode_build_handoff_prompt() {
   printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. Inspect the current progress, finish every remaining requirement, and run the relevant validation. Do not restart from scratch, discard existing work, or create commits.\n\n%s\n\nWhen the work is complete, write a short descriptive commit message (one line, no more than 72 characters) to .commit-msg in the repository root.\n' "${previous_model}" "$(opencode_agent_contract)"
 }
 
+# Build the handoff prompt for a triage run. Same contract as
+# opencode_build_handoff_prompt, but the result of the work is a verdict file
+# rather than a commit message, so telling the model to write .commit-msg here
+# would send a triage run down the implementation path.
+opencode_build_triage_handoff_prompt() {
+  local previous_model="${1:-unknown}"
+  printf 'You are taking over unfinished work from model %s because it could not complete the task. Continue this same session and preserve all work already present in the working tree. This session investigates a bug-report discussion: keep reading the code, the tests and the history the report points at, and reproduce whatever can be reproduced. Do not restart from scratch, discard existing work, or create commits. When the investigation is complete, write either .triage-issue or .triage-verdict in the repository root, exactly as the original task described.\n' "${previous_model}"
+}
+
+# Build the prompt for a triage run: a bug-report discussion is investigated and
+# the verdict is handed back through a file, exactly like .commit-msg hands the
+# commit message back. Args: report_title report_body [extra_context]
+# The driver files the issue (or posts the verdict) itself, so the agent must not
+# touch the API and must not commit anything.
+opencode_build_triage_prompt() {
+  local report_title="${1}" report_body="${2}" extra_context="${3:-}"
+  local prompt
+  prompt="Bug report discussion: ${report_title}
+
+${report_body}"
+  if [[ -n "${extra_context}" ]]; then
+    prompt="${prompt}
+
+Additional context:
+${extra_context}"
+  fi
+  prompt="${prompt}
+
+Investigate this report in the repository you are working in: read the code, the tests and the history it points at, and reproduce whatever can be reproduced. Then decide whether it describes a real, actionable defect that is not tracked by an open issue or pull request already.
+
+Do NOT create any commits, do NOT modify tracked files, and do NOT call the GitHub API: this run only investigates. The driver files the issue (or posts your verdict on the discussion) for you.
+
+When you are done, write exactly one of these files in the repository root, and nothing else in place of it:
+* .triage-issue - the report is a real, actionable defect. First line: the issue title (one line). Everything after that first line: the issue body, covering what the investigation found, how to reproduce it, expected versus actual behaviour, and the files involved.
+* .triage-verdict - the report needs no new issue because it is not a defect, is already tracked, cannot be reproduced, or carries too little information to act on. First line: one of not-a-bug, already-tracked, cannot-reproduce or needs-information. Everything after that first line: the evidence behind the verdict.
+
+Write exactly one of the two files, never both and never neither: a run that decides nothing cannot be filed, and the driver will treat it as a failure."
+  printf '%s\n' "${prompt}"
+}
+
 # True when the round's JSON event stream carries an environment error
 # (provider unreachable, credentials rejected, transport broken).
 # Matched against the raw error-event lines, message and error name together,
@@ -112,15 +152,26 @@ opencode_round_is_environment() {
 
 # Run opencode with a specific model and publish its session ID in
 # OPENCODE_SESSION_ID so a later model can continue the same conversation.
-# Args: title body workdir model [extra_context] [session_id] [previous_model] [collected_context]
+# Args: title body workdir model [extra_context] [session_id] [previous_model] [collected_context] [prompt_kind]
 # A session handoff reuses the conversation the first prompt already carried
 # the collected context in, so only the fresh-prompt branch below gets it.
+# prompt_kind is "issue" (default: implement the issue) or "triage"
+# (investigate a bug-report discussion and report a verdict through a file).
 opencode_run() {
-  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}" collected_context="${8:-}"
+  local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}" collected_context="${8:-}" prompt_kind="${9:-issue}"
   local prompt
   OPENCODE_ROUND_ENVIRONMENT="false"
   if [[ -n "${session_id}" ]]; then
-    prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
+    if [[ "${prompt_kind}" == "triage" ]]; then
+      prompt="$(opencode_build_triage_handoff_prompt "${previous_model:-unknown}")"
+    else
+      prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
+    fi
+  elif [[ "${prompt_kind}" == "triage" ]]; then
+    prompt="$(opencode_build_triage_prompt "${issue_title}" "${issue_body}" "${extra_context}")"
+    if [[ -n "${previous_model}" ]]; then
+      prompt="${prompt}"$'\n\n'"Model ${previous_model} did not finish this work through its session. Continue from the current working tree without discarding anything it already found."
+    fi
   else
     prompt="$(opencode_build_prompt "${issue_title}" "${issue_body}" "${extra_context}" "${collected_context}")"
     if [[ -n "${previous_model}" ]]; then
@@ -151,21 +202,37 @@ opencode_run() {
       return 1
     fi
     if [[ -z "${MOCK_OPENCODE_NOOP:-}" || "${MOCK_OPENCODE_NOOP}" != "${model}" ]]; then
-      if [[ -z "${MOCK_OPENCODE_MESSAGE_ONLY:-}" || "${MOCK_OPENCODE_MESSAGE_ONLY}" != "${model}" ]]; then
-        if [[ -d "${workdir}" && -w "${workdir}" ]]; then
-          printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
-          # Simulate the agent honouring the .commit-msg contract.
-          printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+      if [[ -z "${MOCK_OPENCODE_TRIAGE_FILE:-}" ]]; then
+        if [[ -z "${MOCK_OPENCODE_MESSAGE_ONLY:-}" || "${MOCK_OPENCODE_MESSAGE_ONLY}" != "${model}" ]]; then
+          if [[ -d "${workdir}" && -w "${workdir}" ]]; then
+            printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
+            # Simulate the agent honouring the .commit-msg contract.
+            printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+          fi
+        else
+          # A model that answered with a message instead of doing the work.
+          if [[ -d "${workdir}" && -w "${workdir}" ]]; then
+            printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+          fi
+          echo "opencode: mock message-only round for ${model} (message, no code change)" >&2
         fi
-      else
-        # A model that answered with a message instead of doing the work.
-        if [[ -d "${workdir}" && -w "${workdir}" ]]; then
-          printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
-        fi
-        echo "opencode: mock message-only round for ${model} (message, no code change)" >&2
       fi
     else
       echo "opencode: mock no-op for ${model} (produces no changes)" >&2
+    fi
+    # Triage verdict file, when the caller asks for one. Triage runs are judged
+    # on the verdict file, not on code changes, so the mock honours
+    # MOCK_OPENCODE_TRIAGE_FILE (.triage-issue / .triage-verdict) instead of the
+    # commit-message contract.
+    if [[ -n "${MOCK_OPENCODE_TRIAGE_FILE:-}" && -d "${workdir}" && -w "${workdir}" ]]; then
+      case "${MOCK_OPENCODE_TRIAGE_FILE}" in
+        .triage-issue)
+          printf 'mock triage issue from %s\n\nmock triage body from %s\n' "${model}" "${model}" > "${workdir}/.triage-issue"
+          ;;
+        .triage-verdict)
+          printf 'not-a-bug\n\nmock triage reasoning from %s\n' "${model}" > "${workdir}/.triage-verdict"
+          ;;
+      esac
     fi
     return 0
   fi

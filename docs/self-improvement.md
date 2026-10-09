@@ -86,7 +86,7 @@ flowchart TD
 | `models-without-round` | どのモデルもラウンドを持たなかった | informational |
 | `no-model-completed` | どのモデルも完了できなかった | actionable |
 | `time-budget-exhausted` | `CONAHCNUJ_MAX_SECONDS` を使い切った | actionable |
-| `bug-reported` | バグ報告 issue が作られた（異常終了） | actionable |
+| `bug-reported` | バグ報告 discussion が投稿された（異常終了） | actionable |
 | `unknown` | 想定外の終わり方 | actionable |
 | `no-driver-output` | ログが空（収集・転送の不具合） | actionable |
 
@@ -97,8 +97,9 @@ flowchart TD
 
 ## ループの衛生（再帰しない理由）
 
-- トラッキング issue とドライバのバグ報告 issue は bot 名義でも
+- トラッキング issue とドライバのバグ報告（discussion）は bot 名義でも
   `self-improvement` を持たないため、`issue-driver.yml` の bot スキップで除外される
+  （バグ報告 discussion の調査は `discussion-driver.yml` が行う）
 - findings issue だけがラベル付きの bot 名義で、ループを起動できる唯一の入口
 - `GITHUB_TOKEN` 起因のイベントは workflow を起動しない
   （`workflow_dispatch` / `repository_dispatch` が唯一の例外）

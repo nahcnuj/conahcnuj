@@ -25,11 +25,20 @@
 #      the thread itself, so the driver posts no reply of its own), re-verifies
 #      the non-reviewer constraints and exits
 #   4. on an abnormal exit (timeout, no model completed the work, unexpected
-#      errors) automatically files a bug report issue in the repository so a
-#      run the driver could not resolve is never silently lost. The report
+#      errors) automatically files a bug report discussion in the repository so
+#      a run the driver could not resolve is never silently lost. The report
 #      carries the tail of the run's console output as a detailed error log
+#   5. `--discussion <number>` instead triages a bug-report discussion: the
+#      coding agent investigates the report and hands its verdict back through a
+#      file (.triage-issue / .triage-verdict, the counterpart of .commit-msg),
+#      then the driver either files the issue the normal flow above resolves or
+#      posts the verdict on the thread. Reporting and triage are separate runs on
+#      purpose: the investigation gets its own time budget, and nothing is filed
+#      that the investigation did not confirm. A thread that already carries a
+#      triage marker is left alone, so a re-run never opens a second issue.
 #
 # Usage: conahcnuj <issue-or-pr-number>
+#        conahcnuj --discussion <discussion-number>
 #
 # Environment overrides (all optional):
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
@@ -47,6 +56,8 @@
 #   CONAHCNUJ_CONTEXT_FILES  space-separated checkout files whose contents are
 #                            collected into the prompt alongside the issue
 #                            (default: README.md AGENTS.md; empty sends none)
+#   CONAHCNUJ_BUG_REPORT_CATEGORY  discussion category for bug reports
+#                            (default: Bug report)
 #
 # Polling honours GitHub rate limits: API retries wait on Retry-After /
 # X-RateLimit-Reset headers (lib/rate-limit.sh), and poll loops sleep with
@@ -216,12 +227,12 @@ check_timeout() {
 }
 
 # True when the working tree holds real changes. The coding agent's
-# .commit-msg and .branch-name are metadata, not code changes, so they are
-# ignored: a model that writes nothing but a commit message or a branch name
-# must not count as having produced work.
+# .commit-msg and .branch-name, and a triage run's .triage-issue /
+# .triage-verdict, are metadata, not code changes, so they are ignored: a model
+# that writes nothing but one of those must not count as having produced work.
 workdir_changed() {
   local dir="${1}" changes
-  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' || true)"
+  changes="$(git -C "${dir}" status --porcelain 2>/dev/null | grep -v '\.commit-msg' | grep -v '\.branch-name' | grep -v '\.triage-issue' | grep -v '\.triage-verdict' || true)"
   [[ -n "${changes}" ]]
 }
 
@@ -333,14 +344,26 @@ commit_changes() {
 
 # --- bug reporting ----------------------------------------------------------
 
-# When the driver terminates abnormally it files a bug report issue in the
-# repository it was working on, so a failed run is never silently lost and the
-# next driver invocation can pick the report up (the driver resolves issues).
-# Best-effort only: the report must never change the exit code, never trigger
-# an extra API call on a successful run, and must not recurse into another
-# report (a failed report files nothing further).
+# When the driver terminates abnormally it files a bug report in the
+# repository's discussion category, so a failed run is never silently lost.
+# Discussions rather than issues on purpose: an issue created by the driver
+# re-triggers issue-driver.yml, which then tries to "resolve" the driver's own
+# failure report as if it were planned work. A discussion is also the right home
+# for an unplanned failure report. Best-effort only: the report must never
+# change the exit code, never trigger an extra API call on a successful run, and
+# must not recurse into another report (a failed report files nothing further).
 BUG_REPORT_INPUT=""
 BUG_REPORTED="0"
+# What this run was working on. "issue" (default) drives an issue or PR;
+# "discussion" triages a bug-report discussion. It picks the bug report's thread
+# title, which is the driver's loop breaker: the triage title carries no number,
+# so a repeated triage failure appends to the previous one instead of opening a
+# thread whose creation would fire the discussion trigger again.
+BUG_REPORT_KIND="issue"
+BUG_REPORT_DISCUSSION=""
+# Discussion category the reports are filed in. Its name and slug are matched
+# case-insensitively, so both "Bug report" and "bug-report" work.
+BUG_REPORT_CATEGORY="${CONAHCNUJ_BUG_REPORT_CATEGORY:-Bug report}"
 # Set when implement() gave up because every model round died on an
 # environment error (providers unreachable / credentials rejected). The bug
 # report then words its opening and closing so the failure reads as the
@@ -409,33 +432,56 @@ run_log_cleanup() {
   fi
 }
 
+# Thread title of a bug report. Deliberately free of per-run details (exit
+# code, timestamp): the title is what groups reports, so the same kind of
+# failure always lands in the same thread and a repeat becomes a reply. Every
+# per-run detail lives in the body instead.
+# A triage run's title names no discussion either. That is what bounds the
+# report -> triage -> report chain: a triage run that dies posts into the
+# existing thread (a reply fires no discussion trigger), so the chain stops
+# after one extra run instead of spawning a new triage run per failure.
 report_bug_title() {
-  local code="${1}" input="${2:-}"
-  if [[ -n "${input}" ]]; then
-    printf 'conahcnuj: failed to resolve #%s (exit %s)\n' "${input}" "${code}"
+  local input="${1:-}"
+  if [[ "${BUG_REPORT_KIND}" == "discussion" ]]; then
+    printf 'conahcnuj: failed to triage a bug report discussion\n'
+  elif [[ -n "${input}" ]]; then
+    printf 'conahcnuj: failed to resolve #%s\n' "${input}"
   else
-    printf 'conahcnuj: driver terminated abnormally (exit %s)\n' "${code}"
+    printf 'conahcnuj: driver terminated abnormally\n'
   fi
 }
 
+# Body of a bug report, posted as the first entry of a thread or as a reply.
+# Args: code owner repo input branch oid occurrence ("first" | "again")
 report_bug_body() {
-  local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}"
-  local ended label log_tail log_block opener closing
+  local code="${1}" owner="${2}" repo="${3}" input="${4:-}" branch="${5:-}" oid="${6:-}" occurrence="${7:-first}"
+  local ended label log_tail log_block intro closing rerun
   ended="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)"
   label=""
-  if [[ -n "${input}" ]]; then
+  if [[ "${BUG_REPORT_KIND}" == "discussion" ]]; then
+    # The discussion under investigation is the only context a triage run has.
+    label="bug report discussion #${BUG_REPORT_DISCUSSION:-unknown}"
+    rerun="conahcnuj --discussion ${BUG_REPORT_DISCUSSION:-<number>}"
+  elif [[ -n "${input}" ]]; then
     # Fully-qualified so a report filed in one repository still points
     # unambiguously at the item being worked on in another one.
     label="${owner}/${repo}#${input} (invoked as \`conahcnuj ${input}\`)"
+    rerun="conahcnuj ${input}"
   else
     label="unknown (no issue/PR number was given; repository: ${owner}/${repo})"
+    rerun="conahcnuj <issue-or-pr-number>"
   fi
   if [[ "${ENVIRONMENT_DOWN}" == "1" ]]; then
-    opener="The conahcnuj driver stopped early on issue #${input}: every model round died on an environment error (provider unreachable or credentials rejected), so no model ever got to work. This issue was filed automatically to record the failed run (re-run: conahcnuj ${input})."
+    # #149: when every round died on an unreachable provider there is no driver
+    # defect to look for, so the report says the environment, not the driver.
+    intro="The conahcnuj driver stopped early: every model round died on an environment error (provider unreachable or credentials rejected), so no model ever got to work. This report was filed automatically to record the failed run (re-run: \`${rerun}\`)."
     closing="Nothing in the log below points at a driver defect: the run's providers were unreachable or their credentials were rejected for the whole run. Re-run the driver once its providers are reachable."
+  elif [[ "${occurrence}" == "again" ]]; then
+    intro="The conahcnuj driver terminated abnormally again on this failure, so this occurrence is appended to the existing thread instead of opening a new one (re-run: \`${rerun}\`)."
+    closing="This thread collects every occurrence of the same failure: a repeat is appended as a reply. The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick the report up."
   else
-    opener="The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This issue was filed automatically so the driver bug can be fixed (re-run: conahcnuj ${input})."
-    closing="The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick this report up."
+    intro="The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This report was filed automatically so the driver bug can be fixed (re-run: \`${rerun}\`)."
+    closing="This thread collects every occurrence of the same failure: a repeat is appended as a reply. The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick the report up."
   fi
   log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
   if [[ -n "${log_tail}" ]]; then
@@ -446,15 +492,18 @@ ${log_tail}
     log_block="_No driver output was captured before the exit._"
   fi
   cat <<EOF
-${opener}
+${intro}
+
+## Occurrence
+
+- Exit code: ${code} (how the conahcnuj driver process itself exited)
+- Ended at: ${ended:-unknown}
 
 ## Context
 
-- Issue/PR: ${label}
+- Target: ${label}
 - Branch: ${branch:-unknown}
 - HEAD: ${oid:-unknown}
-- Exit code: ${code} (how the conahcnuj driver process itself exited)
-- Ended at: ${ended:-unknown}
 
 ## Error log
 
@@ -471,7 +520,7 @@ EOF
 report_bug_on_exit() {
   local code="${1:-}"
   local owner="nahcnuj" repo="conahcnuj" input="${BUG_REPORT_INPUT:-}"
-  local branch oid title body num
+  local branch oid title body existing created number url discussion_id
   # Complete the run log (close the FIFO, reap the reader) so report_bug_body
   # sees the whole console output, then always clean up, successful run or not.
   run_log_finalize
@@ -487,18 +536,40 @@ report_bug_on_exit() {
   fi
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
-  title="$(report_bug_title "${code}" "${input}")"
-  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}")"
-  echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
-  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
-    if [[ -n "${num}" ]]; then
-      echo "Bug report issue #${num} created: https://github.com/${owner}/${repo}/issues/${num}" >&2
+  title="$(report_bug_title "${input}")"
+  echo "Driver exited abnormally (code ${code}); filing a bug report in ${owner}/${repo} discussions (category: ${BUG_REPORT_CATEGORY})." >&2
+
+  # Same kind of failure => same thread. An identical title means this failure
+  # was already reported, so append the occurrence instead of starting a second
+  # thread on the same bug.
+  existing="$(gh_api_find_discussion_by_title "${owner}" "${repo}" "${BUG_REPORT_CATEGORY}" "${title}" || true)"
+  if [[ -n "${existing}" ]]; then
+    number="${existing%%|*}"
+    discussion_id="$(printf '%s' "${existing}" | cut -d'|' -f2)"
+    url="$(printf '%s' "${existing}" | cut -d'|' -f3)"
+    body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}" "again")"
+    if gh_api_reply_discussion "${owner}" "${repo}" "${discussion_id}" "${body}" >/dev/null; then
+      echo "Bug report appended to discussion #${number}: ${url}" >&2
       BUG_REPORTED="1"
       run_log_cleanup
       return 0
     fi
+    echo "WARNING: could not append the bug report to discussion #${number} (exit code ${code})." >&2
+    BUG_REPORTED="1"
+    run_log_cleanup
+    return 0
   fi
-  echo "WARNING: could not file a bug report issue (exit code ${code})." >&2
+
+  body="$(report_bug_body "${code}" "${owner}" "${repo}" "${input}" "${branch}" "${oid}" "first")"
+  if created="$(gh_api_create_discussion "${owner}" "${repo}" "${BUG_REPORT_CATEGORY}" "${title}" "${body}")" && [[ -n "${created}" ]]; then
+    number="${created%%|*}"
+    url="${created#*|}"
+    echo "Bug report discussion #${number} created: ${url}" >&2
+    BUG_REPORTED="1"
+    run_log_cleanup
+    return 0
+  fi
+  echo "WARNING: could not file a bug report discussion (exit code ${code})." >&2
   BUG_REPORTED="1"
   run_log_cleanup
   return 0
@@ -773,6 +844,199 @@ implement() {
     echo "ERROR: every model round died on an environment error (provider unreachable or credentials rejected; providers given up on: ${dead_providers# }). Nothing the driver can do about that -- re-run it once its providers are reachable." >&2
   fi
   return 1
+}
+
+# --- bug report triage -------------------------------------------------------
+# The counterpart of the bug report: a report is filed as a discussion, and a
+# discussion triggers a triage run that investigates it and files the issue when
+# the report holds up. The issue then goes through the normal flow above, so the
+# triage run stops at the issue: implementation is a separate run with its own
+# time budget.
+
+# Title prefix of every issue a triage run files. issue-driver.yml lets
+# bot-authored issues through under this prefix only, so a triaged report becomes
+# planned work while all other bot issues stay skipped (recursion guard).
+TRIAGE_ISSUE_PREFIX="conahcnuj-triage: "
+
+# Run opencode until one model records a triage verdict: .triage-issue (the
+# report is a real defect, file an issue) or .triage-verdict (file none). The
+# verdict file is the triage counterpart of .commit-msg, so the driver never has
+# to interpret free-form model output. Same fall-through contract as implement(),
+# session handoff included, so a model that dies mid-investigation hands its
+# findings to the next one.
+investigate() {
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now
+  workdir="$(pwd)"
+  echo "Investigating the report with available models..." >&2
+  OPENCODE_USED_MODELS=""
+  OPENCODE_HANDOFFS=""
+  OPENCODE_SESSION_ID=""
+  for model in $(opencode_get_models); do
+    [[ -z "${model}" ]] && continue
+    check_timeout
+    now="$(date +%s)"
+    run_timeout=$((MAX_DURATION - (now - START_TIME) - 30))
+    (( run_timeout > 0 )) || run_timeout=1
+    if [[ -n "${OPENCODE_SESSION_ID}" ]]; then
+      echo "Handing off session ${OPENCODE_SESSION_ID} from ${previous_model} to ${model}." >&2
+      OPENCODE_HANDOFFS="${OPENCODE_HANDOFFS}${previous_model}->${model} "
+    elif [[ -n "${previous_model}" ]]; then
+      echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
+    fi
+    run_failed="false"
+    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "" "triage"; then
+      run_failed="true"
+    fi
+    OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
+    if [[ -s "${workdir}/.triage-issue" || -s "${workdir}/.triage-verdict" ]]; then
+      echo "Model ${model} completed the investigation." >&2
+      OPENCODE_LAST_MODEL="${model}"
+      return 0
+    fi
+    # No verdict is not a verdict: drop whatever partial file was left so the
+    # next model starts from a clean slate.
+    rm -f "${workdir}/.triage-issue" "${workdir}/.triage-verdict"
+    previous_model="${model}"
+    if [[ "${run_failed}" == "true" ]]; then
+      echo "Model ${model} failed before recording a verdict; handing off to the next model." >&2
+    else
+      echo "Model ${model} recorded no verdict; handing off to the next model." >&2
+    fi
+  done
+  echo "ERROR: no available model recorded a triage verdict (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
+  return 1
+}
+
+# Reply posted on the thread when the investigation filed an issue. The marker is
+# what makes triage idempotent: a later run reads it back from the thread's
+# comments (gh_api_fetch_discussion) and refuses to file a second issue.
+triage_issue_reply() {
+  local number="${1}" url="${2}" title="${3}"
+  cat <<EOF
+<!-- conahcnuj:triage issue=${number} -->
+The conahcnuj driver investigated this report and filed [issue #${number}](${url}): ${title}
+
+The issue carries the findings of the investigation and is worked on like any other issue here: the driver opens a pull request for it and asks a human reviewer for approval before anything is merged.
+
+Reply in this thread if the report needs correcting; the issue is where the fix is tracked.
+EOF
+}
+
+# Reply posted on the thread when the investigation filed nothing. No `issue=`
+# marker, so a re-run may look at the report again (useful after someone adds
+# the missing details a needs-information verdict asks for).
+triage_verdict_reply() {
+  local verdict="${1}" reasoning="${2}"
+  cat <<EOF
+<!-- conahcnuj:triage verdict=${verdict} -->
+The conahcnuj driver investigated this report and filed no issue for it.
+
+${reasoning}
+
+If this verdict is wrong, add what is missing in this thread: a later run investigates the report again.
+EOF
+}
+
+# Investigate one bug-report discussion and act on the verdict.
+# Args: owner repo discussion number
+triage_discussion() {
+  local owner="${1}" repo="${2}" num="${3}"
+  local discussion title_b64 body_b64 url category id triaged title body
+  discussion="$(gh_api_fetch_discussion "${owner}" "${repo}" "${num}")" || {
+    echo "ERROR: could not read discussion #${num} of ${owner}/${repo}." >&2
+    exit 1
+  }
+  title_b64="$(printf '%s' "${discussion}" | cut -d'|' -f1)"
+  body_b64="$(printf '%s' "${discussion}" | cut -d'|' -f2)"
+  url="$(printf '%s' "${discussion}" | cut -d'|' -f3)"
+  category="$(printf '%s' "${discussion}" | cut -d'|' -f4)"
+  id="$(printf '%s' "${discussion}" | cut -d'|' -f5)"
+  triaged="$(printf '%s' "${discussion}" | cut -d'|' -f6)"
+  title="$(gh_api_unb64 "${title_b64}")"
+  body="$(gh_api_unb64 "${body_b64}")"
+
+  if [[ -z "${id}" ]]; then
+    echo "ERROR: discussion #${num} does not exist in ${owner}/${repo}." >&2
+    exit 1
+  fi
+  # Only bug reports are triaged. The workflow filters on the category too; this
+  # keeps a manual run from turning an unrelated thread into an issue.
+  if [[ "${category,,}" != "${BUG_REPORT_CATEGORY,,}" ]]; then
+    echo "Discussion #${num} is in the '${category}' category, not '${BUG_REPORT_CATEGORY}'; nothing to triage." >&2
+    exit 0
+  fi
+  if [[ -n "${triaged}" && "${triaged}" != "0" ]]; then
+    echo "Discussion #${num} was already triaged into issue #${triaged}; nothing to do." >&2
+    exit 0
+  fi
+
+  echo "Discussion #${num}: ${title}" >&2
+  echo "Discussion: ${url}" >&2
+  if ! investigate "${title}" "${body}" "The report lives at ${url} (bug report discussion #${num} in ${owner}/${repo}). Quote it when you describe the defect.
+
+Look at the open issues and pull requests before concluding that the defect is new: when one of them already tracks the same defect (a report about a driver failure that is itself still open, for instance), answer already-tracked with that reference instead of filing a duplicate."; then
+    echo "ERROR: could not investigate discussion #${num} with any available model." >&2
+    exit 1
+  fi
+
+  local model="${OPENCODE_LAST_MODEL:-unknown}" reply
+  if [[ -s ".triage-issue" ]]; then
+    local issue_title issue_body number issue_url
+    issue_title="$(head -n 1 .triage-issue | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    # Everything after the title line is the issue body. Trailing whitespace and
+    # the blank line the agent left under the title are dropped; blank lines
+    # inside the body are kept (markdown needs them).
+    issue_body="$(tail -n +2 .triage-issue | sed -e 's/[[:space:]]*$//' -e '/./,$!d')"
+    rm -f .triage-issue .triage-verdict
+    if [[ -z "${issue_title}" ]]; then
+      echo "ERROR: the investigation produced an issue without a title; nothing can be filed." >&2
+      exit 1
+    fi
+    issue_body="${issue_body}
+
+---
+
+Reported in the Bug report discussion: ${url}
+
+_Filed automatically by the conahcnuj triage run (model: ${model}). The discussion thread keeps the original report; the investigation above is what this issue is based on._"
+    if ! number="$(gh_api_create_issue "${owner}" "${repo}" "${TRIAGE_ISSUE_PREFIX}${issue_title}" "${issue_body}")" || [[ -z "${number}" ]]; then
+      echo "ERROR: could not file an issue for discussion #${num}." >&2
+      exit 1
+    fi
+    issue_url="https://github.com/${owner}/${repo}/issues/${number}"
+    echo "Filed issue #${number} for discussion #${num}: ${issue_url}" >&2
+    # The reply carries the triage marker, so it is what makes the next run skip
+    # this thread; an empty comment id means it did not land.
+    reply="$(gh_api_reply_discussion "${owner}" "${repo}" "${id}" "$(triage_issue_reply "${number}" "${issue_url}" "${issue_title}")" || true)"
+    if [[ -n "${reply}" ]]; then
+      echo "Replied on discussion #${num} with the issue link." >&2
+    else
+      echo "WARNING: could not reply on discussion #${num}; the issue is #${number}, but the next triage run would not see it as handled." >&2
+    fi
+    exit 0
+  fi
+
+  if [[ -s ".triage-verdict" ]]; then
+    local verdict reasoning
+    verdict="$(head -n 1 .triage-verdict | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    reasoning="$(tail -n +2 .triage-verdict | sed -e 's/[[:space:]]*$//' -e '/./,$!d')"
+    rm -f .triage-issue .triage-verdict
+    if [[ -z "${verdict}" ]]; then
+      echo "ERROR: the investigation recorded a verdict without a label; posting it as-is is not useful." >&2
+      exit 1
+    fi
+    echo "Verdict for discussion #${num}: ${verdict} (no issue filed)." >&2
+    reply="$(gh_api_reply_discussion "${owner}" "${repo}" "${id}" "$(triage_verdict_reply "${verdict}" "${reasoning}")" || true)"
+    if [[ -n "${reply}" ]]; then
+      echo "Replied on discussion #${num} with the verdict." >&2
+    else
+      echo "WARNING: could not reply on discussion #${num} with the verdict." >&2
+    fi
+    exit 0
+  fi
+
+  echo "ERROR: the investigation left neither .triage-issue nor .triage-verdict." >&2
+  exit 1
 }
 
 # --- PR lifecycle -----------------------------------------------------------
@@ -1228,24 +1492,42 @@ main() {
   fi
 
   if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <issue-or-pr-number>" >&2
+    echo "Usage: $0 <issue-or-pr-number> | $0 --discussion <discussion-number>" >&2
     exit 1
   fi
-  local input="${1}" repo_info owner repo
-  if [[ "${input}" == -* ]]; then
+  # --discussion triages a bug-report discussion instead of resolving an issue.
+  # Parsed before repo_detect so a bad option never starts a run.
+  local mode="issue" input="${1}"
+  if [[ "${input}" == "--discussion" ]]; then
+    mode="discussion"
+    input="${2:-}"
+    if ! [[ "${input}" =~ ^[1-9][0-9]*$ ]]; then
+      echo "Usage: $0 --discussion <discussion-number> (got: '${2:-}')" >&2
+      exit 1
+    fi
+  elif [[ "${input}" == -* ]]; then
     echo "Unknown option: ${input}" >&2
+    exit 1
+  elif ! [[ "${input}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Not an issue, pull request or discussion number: ${input}" >&2
     exit 1
   fi
 
+  local repo_info owner repo
   repo_info="$(repo_detect)"
   owner="${repo_info%%/*}"
   repo="${repo_info#*/}"
   echo "Repository: ${owner}/${repo}" >&2
 
-  # File a bug report issue when the run terminates abnormally. Registered only
-  # once owner/repo and the input are known: a usage error or a failed repo
-  # detection has no target to report to and stays quiet.
+  # File a bug report discussion when the run terminates abnormally. Registered
+  # only once owner/repo and the input are known: a usage error or a failed
+  # repo detection has no target to report to and stays quiet.
   BUG_REPORT_INPUT="${input}"
+  BUG_REPORT_KIND="${mode}"
+  if [[ "${mode}" == "discussion" ]]; then
+    BUG_REPORT_INPUT=""
+    BUG_REPORT_DISCUSSION="${input}"
+  fi
   trap 'bug_exit_code=$?; report_bug_on_exit "${bug_exit_code}"' EXIT
 
   # Capture the run's stderr into a log so an abnormal exit can attach a
@@ -1256,14 +1538,18 @@ main() {
     bash "${HERE}/../gh-app/setup-git.sh"
   fi
 
-  local issue is_pr
-  issue="$(gh_api_fetch_issue "${owner}" "${repo}" "${input}")"
-  is_pr="$(printf '%s' "${issue}" | cut -d'|' -f4)"
-  if [[ "${is_pr}" == "true" ]]; then
-    echo "Input #${input} is a pull request; resuming it in place." >&2
-    resume_pr "${owner}" "${repo}" "${input}"
+  if [[ "${mode}" == "discussion" ]]; then
+    triage_discussion "${owner}" "${repo}" "${input}"
   else
-    start_issue "${owner}" "${repo}" "${input}" "${issue}"
+    local issue is_pr
+    issue="$(gh_api_fetch_issue "${owner}" "${repo}" "${input}")"
+    is_pr="$(printf '%s' "${issue}" | cut -d'|' -f4)"
+    if [[ "${is_pr}" == "true" ]]; then
+      echo "Input #${input} is a pull request; resuming it in place." >&2
+      resume_pr "${owner}" "${repo}" "${input}"
+    else
+      start_issue "${owner}" "${repo}" "${input}" "${issue}"
+    fi
   fi
 }
 

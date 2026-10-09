@@ -262,15 +262,68 @@ EOF
   echo "opencode_run timeout passed"
 }
 
+test_opencode_build_triage_prompt() {
+  local prompt
+  prompt="$(opencode_build_triage_prompt "Driver crashed" "It exited with 1" "The report lives at https://example.test/discussions/1")"
+  [[ "${prompt}" == *"Bug report discussion: Driver crashed"* ]]
+  [[ "${prompt}" == *"It exited with 1"* ]]
+  [[ "${prompt}" == *"https://example.test/discussions/1"* ]]
+  [[ "${prompt}" == *".triage-issue"* ]]
+  [[ "${prompt}" == *".triage-verdict"* ]]
+  # A triage run must never be pointed at the implementation contract.
+  [[ "${prompt}" != *".commit-msg"* ]] || { echo "FAIL: triage prompt mentions .commit-msg"; exit 1; }
+  [[ "${prompt}" != *".branch-name"* ]] || { echo "FAIL: triage prompt mentions .branch-name"; exit 1; }
+  echo "opencode_build_triage_prompt passed"
+}
+
+test_opencode_build_triage_handoff_prompt() {
+  local prompt
+  prompt="$(opencode_build_triage_handoff_prompt "opencode/dead-model")"
+  [[ "${prompt}" == *"taking over unfinished work from model opencode/dead-model"* ]]
+  [[ "${prompt}" == *"Continue this same session"* ]]
+  [[ "${prompt}" == *".triage-issue"* ]]
+  # The generic handoff prompt ends at a commit message, which would send a
+  # triage run into implementation.
+  [[ "${prompt}" != *".commit-msg"* ]] || { echo "FAIL: triage handoff prompt mentions .commit-msg"; exit 1; }
+  echo "opencode_build_triage_handoff_prompt passed"
+}
+
+test_opencode_run_triage() {
+  export OPENCODE_TEST_MODE=1
+  export MOCK_OPENCODE_TRIAGE_FILE=".triage-verdict"
+  local tmp out
+  tmp="$(mktemp -d)"
+  # prompt_kind is the 9th argument: the 8th slot is collected_context.
+  out="$(opencode_run "Report title" "Report body" "${tmp}" "opencode/mimo-v2.5-free" "" "" "" "" "triage")"
+  [[ "${out}" == *"Bug report discussion: Report title"* ]]
+  # A triage run produces the verdict and nothing else: no mock code change and
+  # no .commit-msg, since the driver files the issue itself.
+  [[ -f "${tmp}/.triage-verdict" ]] || { echo "FAIL: no .triage-verdict written"; exit 1; }
+  [[ ! -f "${tmp}/.commit-msg" ]] || { echo "FAIL: triage run wrote .commit-msg"; exit 1; }
+  [[ ! -f "${tmp}/conahcnuj.mock" ]] || { echo "FAIL: triage run wrote mock changes"; exit 1; }
+  # A triage handoff keeps the verdict contract (the session id from the fresh
+  # run lives in a subshell, so set it explicitly).
+  OPENCODE_SESSION_ID="ses_mock"
+  out="$(opencode_run "Report title" "Report body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/first" "" "triage")"
+  [[ "${out}" == *"taking over unfinished work from model opencode/first"* ]] || { echo "FAIL: no triage handoff prompt"; exit 1; }
+  [[ "${out}" != *".commit-msg"* ]] || { echo "FAIL: triage handoff prompt mentions .commit-msg"; exit 1; }
+  rm -rf "${tmp}"
+  unset OPENCODE_TEST_MODE MOCK_OPENCODE_TRIAGE_FILE OPENCODE_SESSION_ID
+  echo "opencode_run (triage) passed"
+}
+
 test_opencode_get_models
 test_opencode_build_prompt
 test_opencode_build_prompt_fresh
 test_opencode_build_prompt_collected
 test_opencode_build_handoff_prompt
+test_opencode_build_triage_prompt
+test_opencode_build_triage_handoff_prompt
 test_opencode_run
 test_opencode_run_message_only
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
+test_opencode_run_triage
 test_opencode_run_renders_log
 test_opencode_run_timeout
 

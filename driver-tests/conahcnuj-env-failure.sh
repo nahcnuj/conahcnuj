@@ -39,13 +39,18 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape: fetch_issue, get_repo, find_pr_by_head_any (empty),
-# create_issue. Reused by both runs (the sub-shell reopens it).
+# find discussion by title (category + no thread), create discussion
+# (category + mutation). Reused by both runs (the sub-shell reopens it).
+MOCK_CATEGORIES='{"data":{"repository":{"id":"R_kgDOXmplR3p","discussionCategories":{"nodes":[{"id":"DIC_kwDOBBBBBB","name":"Bug report","slug":"bug-report"}]}}}}'
 TAPE="${ROOT}/tape.txt"
-cat > "${TAPE}" <<'EOF'
+cat > "${TAPE}" <<EOF
 {"number": 14, "title": "test issue, providers down", "body": "dummy body", "labels": [], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
-{"number": 25}
+${MOCK_CATEGORIES}
+{"data":{"repository":{"discussions":{"nodes":[]}}}}
+${MOCK_CATEGORIES}
+{"data":{"createDiscussion":{"discussion":{"number":25,"url":"https://github.com/nahcnuj/conahcnuj/discussions/25"}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -79,7 +84,7 @@ grep -q "partial change from envdown/b" "${WORK}/conahcnuj.mock" && { echo "FAIL
 grep -q "partial change from netdown/d" "${WORK}/conahcnuj.mock" && { echo "FAIL: netdown/d ran despite its dead provider"; exit 1; }
 # The run names the environment instead of blaming a driver defect.
 grep -q "every model round died on an environment error" "${LOG1}" || { echo "FAIL: no environment diagnosis in the log"; exit 1; }
-grep -q "Bug report issue #25 created" "${LOG1}" || { echo "FAIL: no bug report was filed"; exit 1; }
+grep -q "Bug report discussion #25 created: https://github.com/nahcnuj/conahcnuj/discussions/25" "${LOG1}" || { echo "FAIL: no bug report was filed"; exit 1; }
 
 LOG2="${ROOT}/run2.log"
 RC2=0
@@ -107,14 +112,17 @@ grep -q "every model round died on an environment error" "${LOG2}" && { echo "FA
 
 # ---------------------------------------------------------------------------
 # Unit: the bug report words the failure as the environment (or not) based on
-# ENVIRONMENT_DOWN. Capture the body through a stubbed gh_api_create_issue.
+# ENVIRONMENT_DOWN. Capture the body through a stubbed gh_api_create_discussion.
 # ---------------------------------------------------------------------------
 export CONAHCNUJ_IMPORT=1
 # shellcheck source=bin/conahcnuj.sh
 source "${DRIVER}"
-gh_api_create_issue() {
-  printf '%s\n' "${4}" > "${ROOT}/captured-env.txt"
-  printf '99\n'
+gh_api_find_discussion_by_title() {
+  return 0
+}
+gh_api_create_discussion() {
+  printf '%s\n' "${5}" > "${ROOT}/captured-env.txt"
+  printf '99|https://github.com/nahcnuj/conahcnuj/discussions/99\n'
 }
 
 (
@@ -125,8 +133,8 @@ gh_api_create_issue() {
   BUG_REPORTED="0"
   report_bug_on_exit "1"
 )
-grep -q "stopped early on issue #14: every model round died on an environment error" "${ROOT}/captured-env.txt" || { echo "FAIL: environment opener missing from the bug report"; exit 1; }
-grep -q "Nothing in the log below points at a driver defect" "${ROOT}/captured-env.txt" || { echo "FAIL: environment closing missing from the bug report"; exit 1; }
+grep -q "The conahcnuj driver stopped early: every model round died on an environment error" "${ROOT}/captured-env.txt" || { echo "FAIL: environment opener missing from the bug report"; exit 1; }
+grep -q "Nothing in the log below points at a driver defect: the run's providers were unreachable" "${ROOT}/captured-env.txt" || { echo "FAIL: environment closing missing from the bug report"; exit 1; }
 grep -q "the driver bug can be fixed" "${ROOT}/captured-env.txt" && { echo "FAIL: the environment report still blames a driver bug"; exit 1; }
 
 (

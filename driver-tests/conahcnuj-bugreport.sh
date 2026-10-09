@@ -3,10 +3,10 @@
 #
 # When the driver cannot resolve the issue it must not die silently: an
 # abnormal exit (here: every model produces no changes, so implementation fails)
-# triggers the EXIT trap, which files a bug report issue in the repository.
-# The mocked API tape ends with the created issue's response. Asserts that the
-# original exit code is preserved, the failure is logged, and the bug report
-# issue was created.
+# triggers the EXIT trap, which files a bug report discussion in the repository.
+# The mocked API tape ends with the created discussion's response. Asserts that
+# the original exit code is preserved, the failure is logged, and the bug report
+# discussion was created.
 #
 # No secrets, no network.
 set -euo pipefail
@@ -28,17 +28,22 @@ printf 'base\n' > "${WORK}/file.txt"
 git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
+MOCK_CATEGORIES='{"data":{"repository":{"id":"R_kgDOXmplR3p","discussionCategories":{"nodes":[{"id":"DIC_kwDOBBBBBB","name":"Bug report","slug":"bug-report"}]}}}}'
+
 # Mocked response tape, in call order:
-#   fetch_issue, get_repo, find_pr_by_head_any (empty), create_issue (25).
+#   fetch_issue, get_repo, find_pr_by_head_any (empty), find discussion by
+#   title (category + no thread), create discussion (category + mutation).
 # The mocked opencode is a no-op for every model, so implement produces no
-# changes, start_issue exits 1, and the EXIT trap files the bug report (one
-# extra API call reading the created issue's number).
+# changes, start_issue exits 1, and the EXIT trap files the bug report.
 TAPE="${ROOT}/tape.txt"
-cat > "${TAPE}" <<'EOF'
+cat > "${TAPE}" <<EOF
 {"number": 14, "title": "test issue that cannot be implemented", "body": "dummy body", "labels": [], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
-{"number": 25}
+${MOCK_CATEGORIES}
+{"data":{"repository":{"discussions":{"nodes":[]}}}}
+${MOCK_CATEGORIES}
+{"data":{"createDiscussion":{"discussion":{"number":25,"url":"https://github.com/nahcnuj/conahcnuj/discussions/25"}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -63,9 +68,8 @@ echo "----------------------------------------"
 [[ ${RC} -eq 1 ]] || { echo "FAIL: driver exit code ${RC} (expected 1)"; exit 1; }
 
 grep -q "could not implement issue #14" "${LOG}" || { echo "FAIL: implementation failure was not logged"; exit 1; }
-grep -q "filing a bug report issue in nahcnuj/conahcnuj" "${LOG}" || { echo "FAIL: no bug report filing message"; exit 1; }
-grep -q "Bug report issue #25 created" "${LOG}" || { echo "FAIL: bug report issue #25 was not created"; exit 1; }
-grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAIL: bug report URL is missing"; exit 1; }
+grep -q "filing a bug report in nahcnuj/conahcnuj discussions (category: Bug report)" "${LOG}" || { echo "FAIL: no bug report filing message"; exit 1; }
+grep -q "Bug report discussion #25 created: https://github.com/nahcnuj/conahcnuj/discussions/25" "${LOG}" || { echo "FAIL: bug report discussion #25 was not created"; exit 1; }
 
 # Set once for the whole file: the unit blocks below source the driver, which
 # would otherwise run main() on source.
@@ -73,7 +77,7 @@ export CONAHCNUJ_IMPORT=1
 
 # --- unit: the bug report body carries a detailed error log -----------------
 # Source the driver (CONAHCNUJ_IMPORT=1, so main() is not run) and stub
-# gh_api_create_issue to capture the body it would send. Assert the report
+# gh_api_create_discussion to capture the body it would send. Assert the report
 # includes the tail of the run log and no longer repeats the self-evident
 # repository name (reviewer: the report is filed in that very repository).
 (
@@ -81,9 +85,12 @@ export CONAHCNUJ_IMPORT=1
   # Source the driver so its functions (plus our stub) run in one shell.
   # shellcheck source=bin/conahcnuj.sh
   source "${DRIVER}"
-  gh_api_create_issue() {
-    printf '%s\n' "${4}" > "${ROOT}/captured-body.txt"
-    printf '99\n'
+  gh_api_find_discussion_by_title() {
+    return 0
+  }
+  gh_api_create_discussion() {
+    printf '%s\n' "${5}" > "${ROOT}/captured-body.txt"
+    printf '25|https://github.com/nahcnuj/conahcnuj/discussions/25\n'
   }
   RUN_LOG_FILE="$(mktemp)"
   printf '%s\n' \
@@ -105,16 +112,23 @@ grep -q "Repository:" "${ROOT}/captured-body.txt" && { echo "FAIL: self-evident 
 # The report body is the tail of the run log, and that log holds the decoded
 # tab / carriage-return bytes opencode's escapes stand for (issue #156: GitHub
 # answered 400 "Problems parsing JSON" to the bug report for #155, so the
-# report itself was lost). Here the real gh_api_create_issue runs with only
-# gh_api_call stubbed, so the payload it would POST can be inspected byte for
-# byte: the raw bytes go in with the log and come out as \u00XX escapes.
+# report itself was lost). Here the real gh_api_create_discussion runs (the
+# category lookup and friend only stubbed) so the GraphQL query it would POST
+# can be inspected byte for byte: the raw bytes go in with the log and come out
+# as \u00XX escapes.
 (
-  unset CONAHCNUJ_REPO
+  unset CONAHCNUJ_REPO GH_API_TEST_MODE
   # shellcheck source=bin/conahcnuj.sh
   source "${DRIVER}"
+  gh_api_find_discussion_by_title() {
+    return 0
+  }
+  gh_api_discussion_category() {
+    printf 'R_kgDOXmplR3p|DIC_kwDOBBBBBB\n'
+  }
   gh_api_call() {
     printf '%s' "${3}" > "${ROOT}/payload.json"
-    printf '{"number":25}'
+    printf '{"data":{"createDiscussion":{"discussion":{"number":25,"url":"https://github.com/nahcnuj/conahcnuj/discussions/25"}}}}'
   }
   RUN_LOG_FILE="$(mktemp)"
   printf 'tool output: col1\tcol2\rprogress\r\033[31mred\033[0m\n' > "${RUN_LOG_FILE}"

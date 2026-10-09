@@ -11,6 +11,7 @@ issue（または PR）の解決を最後まで自律的に運ぶドライバで
 ```sh
 conahcnuj <issue番号>     # issue から開始
 conahcnuj <PR番号>        # PR なら自動で引き継いで再開
+conahcnuj --discussion <番号>  # バグ報告 discussion を調査（triage）
 bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内から直接実行する場合
 ```
 
@@ -38,8 +39,9 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
    終了。レビュースレッドへの返信はエージェント自身が行い、その返信は bot 著者
    として fingerprint から除外されるので自分の返信でループしない
 5. 異常終了時（タイムアウト・全モデル失敗・想定外エラー等、非 0 で終わる場合）は、
-   対象リポジトリへバグ報告 issue を自動作成する（終了コード・対象番号・ブランチ・
-   HEAD・実行ログ末尾を含む）
+   対象リポジトリの **Bug report カテゴリへバグ報告 discussion を自動投稿**する
+   （終了コード・対象番号・ブランチ・HEAD・実行ログ末尾を含む。同種の失敗は
+   同じスレッドにまとめ、再発時は返信として追記する）
 
 ポーリングは GitHub のレートリミット（`Retry-After` / `X-RateLimit-Reset`）と
 ジッター付きスリープで調整されます。
@@ -88,11 +90,29 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 | コード | 意味 |
 | --- | --- |
 | `0` | レビュー依頼の引き渡し（hand-off）完了 / ready to merge / PR は merge 済み |
-| `1` | 異常終了（バグ報告 issue が作られる） |
+| `1` | 異常終了（バグ報告 discussion が投稿される） |
 
 引き渡しは依頼 API を 1 回だけ再試行し、PR を読み返して「本当に誰かに依頼されたか」
 を確認します。読み返しが「誰も依頼されていない」と答えたときだけ失敗扱いにし、
 読み返し自体が読めなかった場合は WARNING で終了します（#134 / #139）。
+
+## バグ報告の triage（`--discussion`）
+
+バグ報告は issue ではなく discussion で受けます。報告がそのまま実装対象の issue
+にならないように、`conahcnuj --discussion <番号>` は調査だけを行う実行です:
+
+1. discussion を読む。Bug report カテゴリ以外、および triage マーカー
+   （`<!-- conahcnuj:triage issue=N -->`）があるスレッドはそこで終了する
+2. コーディングエージェントに調査させ、`.triage-issue`（実在する未修正の不具合
+   → 1 行目が issue タイトル、残りが本文）か `.triage-verdict`（バグではない・
+   追跡済み・再現不能・情報不足 → 1 行目が verdict、残りが根拠）を書かせる
+3. `.triage-issue` なら `conahcnuj-triage: ` 接頭辞で issue を作りスレッドへ
+   リンクを返信、`.triage-verdict` なら issue を作らず根拠だけ返信する
+
+実装は行いません（コミットも作らない）。triage 実行が自滅した場合のバグ報告は
+「failed to triage a bug report discussion」という discussion 番号を含まない
+タイトルでスレッドに投稿され、返信は `discussion` イベントを発火しないため
+報告の連鎖は 1 段で止まります。
 
 ## 環境変数（ドライバ）
 
@@ -106,6 +126,7 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level`（デバッグは `DEBUG`） |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止） |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | プロンプトへ同梱する作業ツリーファイル（スペース区切り。空で無効） |
+| `CONAHCNUJ_BUG_REPORT_CATEGORY` | `Bug report` | バグ報告 discussion を置くカテゴリ名（workflow のフィルタと同一値を使う） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード（モック API テープ + モック opencode） |
 
 全量は [environment.md](environment.md) を参照。
@@ -114,7 +135,7 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 
 opencode の JSON イベントは実行中に整形して stderr へ出て、そのままドライバの
 実行ログになります（整形は省略をしない＝モデルが書いた行もコマンドが出した行も
-全文）。表示量は `CONAHCNUJ_OPENCODE_LOG_LEVEL` で調整します。バグ報告 issue には
+全文）。表示量は `CONAHCNUJ_OPENCODE_LOG_LEVEL` で調整します。バグ報告 discussion には
 このログの末尾が添付されます。
 
 この実行ログは週次で `weekly-self-improvement.yml` が解析し、次の週の改善 issue

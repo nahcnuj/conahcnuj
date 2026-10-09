@@ -47,17 +47,34 @@ CI では行いません。
   **approve 以外の** review（`submitted` / `edited` / `dismissed`）、
   手動実行（`workflow_dispatch` + `number` 入力）
 - bot（`user.type == Bot`）が作った issue / review は再帰防止のためスキップ。
-  例外は `self-improvement` ラベル付きの issue（週次 findings）で、自己研鑽
-  ループだけは自分の入口として起動できる
+  例外は `self-improvement` ラベル付きの issue（週次 findings）と
+  `conahcnuj-triage: ` 接頭辞付きの issue（バグ報告 triage が作るもの）で、
+  これらだけは `issues: opened` からドライバを起動できる
+  （job レベルの `if` は `secrets` を参照できないため label / タイトル接頭辞で判定）
 - `timeout-minutes: 60` と `CONAHCNUJ_MAX_SECONDS=3540` をセットで持ち、
   ランナーに切られる前にドライバが自己終了してバグ報告を残す
 - 必要な repo secrets: `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /
   `PRIVATE_KEY`（PEM 全文）。PEM は `$RUNNER_TEMP` へ書き出して `app.env` を組み立てる
 - `GITHUB_TOKEN` の権限は `contents: read` のみ。書き込み（ブランチ・Verified
-  コミット・PR・レビュー依頼・コメント・バグ報告 issue）はすべて App の
+  コミット・PR・レビュー依頼・コメント・バグ報告 discussion）はすべて App の
   インストールトークンで行う
 - environment `conahcnuj` を使用
 - 同一 issue/PR に対する実行は concurrency で直列化される
+
+## Discussion triage（`discussion-driver.yml`）
+
+- 触発: Bug report カテゴリへの discussion の `created`。カテゴリ名は repo 変数
+  `CONAHCNUJ_BUG_REPORT_CATEGORY`（既定 `Bug report`）で、ドライバ側の判定と
+  同じ値を参照する
+- 実行: `conahcnuj --discussion <番号>`。調査のみで、`.triage-issue` なら
+  `conahcnuj-triage: ` 接頭辞付き issue を作ってスレッドへ返信、`.triage-verdict`
+  なら issue を作らず根拠を返信する。実装は別実行（上記 issue-driver.yml）に任せる
+- 再帰しない: 調査は issue 作成かスレッドへの返信だけで discussion イベントを
+  発火せず、バグ報告の送信元も discussion の `created` には反応しない。既に
+  triage マーカー（`<!-- conahcnuj:triage issue=N -->`）があるスレッドは
+  ドライバ側で再調査を抑止
+- タイムアウト・秘密鍵は `issue-driver.yml` と同じ。discussion 番号ごとに
+  concurrency で直列化される
 
 ## Weekly auto-drive self-improvement（`weekly-self-improvement.yml`）
 

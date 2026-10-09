@@ -3,7 +3,7 @@ name: Issue auto-drive
 # When an issue is created or reopened, or a non-approval review is submitted,
 # edited, or dismissed, attempt to resolve it with the conahcnuj driver
 # end-to-end (feature branch -> PR -> review feedback) and end with a
-# ready-to-merge PR, or file a bug-report issue on failure.
+# ready-to-merge PR, or file a bug-report discussion on failure.
 #
 # The timeout is controlled on the Actions side: "timeout-minutes" below is
 # the hard cap for the whole job, and CONAHCNUJ_MAX_SECONDS is kept just under
@@ -12,9 +12,12 @@ name: Issue auto-drive
 #
 # Least privilege for GITHUB_TOKEN: contents: read is all the runner needs for
 # checkout and the opencode install. Every write the driver performs (feature
-# branch, Verified commits, PR, review requests, comments, bug-report issues)
-# goes through the GitHub App installation token from gh-app/get-token.sh,
-# exactly like a local run.
+# branch, Verified commits, PR, review requests, comments, bug-report
+# discussions) goes through the GitHub App installation token from
+# gh-app/get-token.sh, exactly like a local run. A discussion never fires the
+# `issues` trigger above, so the driver's own bug reports cannot recurse into
+# another driver run; the issues that do come out of the triage workflow are
+# driven here on purpose (see the `if` below).
 
 on:
   issues:
@@ -41,22 +44,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: conahcnuj
-    # Do not chase the driver's own outputs: its tracking issue and bug-report
-    # issues are bot-authored and carry no `self-improvement` label, so they
-    # stay skipped and the loop cannot recurse. The weekly findings issue is
-    # bot-authored too but labelled, and that label is the one exception that
-    # lets the self-improvement loop start the driver by itself. A job-level
-    # `if` cannot read the `secrets` context (and APP_SLUG is not needed here),
-    # so the check keys off the label, not a secret. Missing secrets are not
-    # pre-checked either: the run fails loudly and the driver files its own bug
-    # report (no silent skip).
+    # Do not chase bot-authored issues: other automations file issues too, and
+    # running the driver on them would loop forever. Two exceptions are the
+    # planned work this workflow exists for: the weekly findings issue (labelled
+    # `self-improvement`, which lets the self-improvement loop start the driver by
+    # itself), and an issue the triage run filed from a bug-report discussion
+    # (titled with the "conahcnuj-triage: " prefix). The driver's own bug reports
+    # are discussions now and never fire the `issues` trigger; the guard on
+    # everything else stays as defense in depth. A job-level `if` cannot read the
+    # `secrets` context (and APP_SLUG is not needed here), so the check keys off
+    # the label and the title, not a secret. Missing secrets are not pre-checked
+    # either: the run fails loudly and the driver files its own bug report (no
+    # silent skip).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
         github.event_name == 'issues' &&
         (
           github.event.issue.user.type != 'Bot' ||
-          contains(github.event.issue.labels.*.name, 'self-improvement')
+          contains(github.event.issue.labels.*.name, 'self-improvement') ||
+          startsWith(github.event.issue.title, 'conahcnuj-triage: ')
         )
       ) ||
       (

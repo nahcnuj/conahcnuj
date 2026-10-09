@@ -38,6 +38,7 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level` |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow 名（カンマ区切り） |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | 最初のプロンプトへ同梱する作業ツリーファイル（スペース区切り）。空文字で同梱を無効化 |
+| `CONAHCNUJ_BUG_REPORT_CATEGORY` | `Bug report` | バグ報告 discussion を置くカテゴリ名（`discussion-driver.yml` のフィルタと同一値） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード |
 
 ## ドライバ ↔ プラグイン連携（自動設定）
