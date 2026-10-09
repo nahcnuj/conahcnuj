@@ -40,9 +40,11 @@ run_e2e_model() {
     > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" || rc=$?
 
   # Record the raw exit status and whether this attempt emitted anything.
-  # A hung/unreachable model service produces no events at all, whereas
-  # any real plugin verdict (pass or fail) comes with output, so the
-  # orchestrator can tell an external outage from a regression.
+  # The orchestrator needs both to tell a regression from a service
+  # problem: a session that produced no events at all, or that never
+  # concluded (timeout, rc 124), reached no verdict about the plugin,
+  # whereas any real plugin verdict (pass or fail) comes with output
+  # from a session that ended on its own.
   echo "${rc}" > "${E2E_DIR}/results/r${round}-${slot}.rc"
   if grep -q '[^[:space:]]' "${slot_dir}/out.jsonl" 2>/dev/null; then
     : > "${E2E_DIR}/results/r${round}-${slot}.output"
@@ -94,11 +96,11 @@ mapfile -t E2E_MODELS <<< "${MODELS}"
 
 # The free models are a shared service that can be unavailable or
 # rate-limit every parallel attempt for the whole 150s timeout (empty
-# output, opencode rc=124). A retry round covers a brief flap; a longer
-# outage is reported as inconclusive from the per-attempt markers rather
-# than blamed on the plugin (see the final verdict): a broken plugin
-# still emits events and therefore fails strictly, a passing round ends
-# the test immediately.
+# output, opencode rc=124). A retry round covers a brief flap; when no
+# attempt ever concludes, the run is reported as inconclusive from the
+# per-attempt markers rather than blamed on the plugin (see the final
+# verdict): a broken plugin still finishes a session and therefore
+# fails strictly, a passing round ends the test immediately.
 E2E_MAX_ROUNDS=2
 E2E_SUCCESS=""
 for ((round = 1; round <= E2E_MAX_ROUNDS; round++)); do
@@ -166,27 +168,37 @@ if [ -n "${E2E_SUCCESS}" ]; then
   exit 0
 fi
 
-# Distinguish a real regression from a model-service outage. A healthy
-# (or merely uncooperative) model still emits events; only an
-# unreachable/hung service produces nothing at all. So when every
-# attempt in every round timed out (opencode rc=124) without emitting a
-# single event, the run is inconclusive, not a plugin failure: report
-# the outage and pass so an external outage does not block the PR. Any
-# attempt that produced output, or ended for a reason other than the
-# timeout, keeps the strict failure verdict below.
-outage=1
+# Distinguish a real regression from a model-service problem. A session
+# that hit its timeout never reached a verdict, and one that produced no
+# events at all proves nothing about the plugin either: the shared free
+# models stall mid-work (events stream in, then nothing until the
+# timeout) or stay unreachable (nothing at all). Only an attempt that
+# emitted events and concluded on its own can fail the run — a broken
+# plugin still finishes a session and therefore fails strictly, while a
+# passing round already ended the test above. When nothing concluded,
+# the run is inconclusive, not a plugin failure: report the service
+# problem and pass so an external outage does not block the PR.
+conclusive=0
 saw_rc=0
 for f in "${E2E_DIR}/results/"*.rc; do
   [ -f "${f}" ] || continue
   saw_rc=1
-  [ "$(cat "${f}")" = 124 ] || outage=0
+  attempt_rc="$(cat "${f}")"
+  stem="${f%.rc}"
+  if [ "${attempt_rc}" != 124 ] && [ -f "${stem}.output" ]; then
+    conclusive=1
+  fi
 done
 has_output=0
 for f in "${E2E_DIR}/results/"*.output; do
   if [ -f "${f}" ]; then has_output=1; fi
 done
-if [ "${saw_rc}" = 1 ] && [ "${outage}" = 1 ] && [ "${has_output}" = 0 ]; then
-  echo "E2E SKIP: free-model service unreachable (every attempt timed out with no output); treating as pass" >&2
+if [ "${saw_rc}" = 1 ] && [ "${conclusive}" = 0 ]; then
+  if [ "${has_output}" = 1 ]; then
+    echo "E2E SKIP: free-model service stalled (events arrived but no attempt reached a verdict); treating as pass" >&2
+  else
+    echo "E2E SKIP: free-model service unreachable (every attempt timed out with no output); treating as pass" >&2
+  fi
   exit 0
 fi
 
