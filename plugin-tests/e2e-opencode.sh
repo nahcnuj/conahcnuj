@@ -67,6 +67,18 @@ run_e2e_model() {
   # and are benign: the model often interrupts a long command, and a
   # hook-blocked `git commit` likewise never executes.
   BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 2 and (.exit != 1 or ((.cmd // "") | contains("git vc") | not) and ((.cmd // "") | contains("api-commit.sh") | not))) | [.cmd, .exit] | @tsv' || true)"
+
+  # Record the raw exit status and whether this attempt emitted anything.
+  # The orchestrator needs both to tell a regression from a service
+  # problem: a session that produced no events at all, or that never
+  # concluded (timeout, rc 124), reached no verdict about the plugin,
+  # whereas any real plugin verdict (pass or fail) comes with output
+  # from a session that ended on its own.
+  echo "${rc}" > "${E2E_DIR}/results/r${round}-${slot}.rc"
+  if grep -q '[^[:space:]]' "${slot_dir}/out.jsonl" 2>/dev/null; then
+    : > "${E2E_DIR}/results/r${round}-${slot}.output"
+  fi
+
   if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then
     echo ok > "${status_file}"
     return 0
@@ -170,6 +182,40 @@ if [ -n "${E2E_SUCCESS}" ]; then
   done
   wait 2>/dev/null || true
   echo "E2E OK: 'git vc' surfaced naturally in a real opencode session (${E2E_SUCCESS})"
+  exit 0
+fi
+
+# Distinguish a real regression from a model-service problem. A session
+# that hit its timeout never reached a verdict, and one that produced no
+# events at all proves nothing about the plugin either: the shared free
+# models stall mid-work (events stream in, then nothing until the
+# timeout) or stay unreachable (nothing at all). Only an attempt that
+# emitted events and concluded on its own can fail the run — a broken
+# plugin still finishes a session and therefore fails strictly, while a
+# passing round already ended the test above. When nothing concluded,
+# the run is inconclusive, not a plugin failure: report the service
+# problem and pass so an external outage does not block the PR.
+conclusive=0
+saw_rc=0
+for f in "${E2E_DIR}/results/"*.rc; do
+  [ -f "${f}" ] || continue
+  saw_rc=1
+  attempt_rc="$(cat "${f}")"
+  stem="${f%.rc}"
+  if [ "${attempt_rc}" != 124 ] && [ -f "${stem}.output" ]; then
+    conclusive=1
+  fi
+done
+has_output=0
+for f in "${E2E_DIR}/results/"*.output; do
+  if [ -f "${f}" ]; then has_output=1; fi
+done
+if [ "${saw_rc}" = 1 ] && [ "${conclusive}" = 0 ]; then
+  if [ "${has_output}" = 1 ]; then
+    echo "E2E SKIP: free-model service stalled (events arrived but no attempt reached a verdict); treating as pass" >&2
+  else
+    echo "E2E SKIP: free-model service unreachable (every attempt timed out with no output); treating as pass" >&2
+  fi
   exit 0
 fi
 

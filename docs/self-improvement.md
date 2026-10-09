@@ -86,6 +86,16 @@ flowchart TD
    まとめ、`self-improvement` ラベルを付ける。新規作成なら `issues: opened` で、
    既存 issue への追記なら `workflow_dispatch` の再試行で、ドライバを起動する
 
+## 再実行
+
+失敗した run を再実行すると、GitHub は既定で `github.sha`（最初の試行の
+コミット）を使い回す。そのため修正を main にマージした直後に再実行しても、
+古いコードのまま同じ失敗を繰り返す（#190 の分割修正をマージ済みでも
+「Body is too long」の再実行が失敗し、#194 になった）。workflow の checkout は
+`ref: github.ref` を渡してその時点のブランチ先端（schedule は既定ブランチ、
+`workflow_dispatch` は選択した ref）を取ることで、再実行にも最新のコードを
+効かせる。
+
 ## finding の分類
 
 | アウトカム | 例 | 種別 |

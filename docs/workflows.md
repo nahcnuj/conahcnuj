@@ -79,6 +79,10 @@ CI では行いません。
   解決できなければ組み込み auto-add にフォールバックする。ドライバを再帰起動
   しない衛生ルールは
   [self-improvement.md](self-improvement.md#ループの衛生再帰しない理由) を参照
+- checkout は full-length SHA でピン留めしたうえで `ref: github.ref` を渡す。
+  再実行は `github.sha`（最初の試行のコミット）を使い回すため、既定のままだと
+  マージ済みの修正が効かず同じ失敗を繰り返す。ブランチ先端を取ることで
+  schedule も再実行も現在のコードで動く
 
 ## Owner-approved auto-merge（`auto-merge.yml` + `owner-approved-auto-merge.yml`）
 
