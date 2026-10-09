@@ -260,6 +260,10 @@ jobs:
   e2e-opencode:
     name: E2E opencode run (opencode free model)
     runs-on: windows-latest
+    # A normal run takes ~6 min (two 150s rounds plus setup). Cap it so a
+    # wedged runner or a hung opencode process fails fast instead of
+    # sitting "in progress" with no log for the 360-min default.
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -335,12 +339,20 @@ jobs:
           # Windows a just-killed opencode process can still hold a fixture
           # directory, so that `rm -rf` fails ("Device or resource busy")
           # and turns a passing run into exit 1. The script's own explicit
-          # verdict is authoritative: only fail when it never surfaced
-          # `git vc`.
+          # verdict is authoritative:
+          #  - "E2E OK": a model surfaced `git vc` (cleanup may have failed).
+          #  - "E2E SKIP": every attempt timed out with no output because
+          #    the shared free-model service was unreachable; that is not a
+          #    plugin regression and must not block the PR.
+          # Anything else fails the run.
           if grep -q "E2E OK: 'git vc' surfaced naturally" "$log"; then
             if [ "$rc" -ne 0 ]; then
               echo "e2e-opencode.sh exited ${rc} after a successful run (cleanup-only); treating as pass" >&2
             fi
+            exit 0
+          fi
+          if grep -q "E2E SKIP: free-model service unreachable" "$log"; then
+            echo "e2e-opencode.sh skipped: free-model service unreachable (inconclusive); treating as pass" >&2
             exit 0
           fi
           echo "e2e-opencode.sh failed (exit ${rc})" >&2
