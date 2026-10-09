@@ -16,26 +16,26 @@ slot_name() {
 # would collide on index.lock) or the config dir.
 run_e2e_model() {
   local model="$1"
-  local slot home
+  local slot slot_dir
   slot="$(slot_name "${model}")"
-  home="${E2E_DIR}/${slot}"
-  mkdir -p "${home}"
+  slot_dir="${E2E_DIR}/${slot}"
+  mkdir -p "${slot_dir}"
   # Guarantee a verdict even if this attempt dies unexpectedly
   # (set -e inside the subshell): the orchestrator polls these
   # files, so a missing one would stall the wait until the
   # deadline. An explicit verdict is never overwritten.
   trap '[ -f "${E2E_DIR}/results/${slot}.status" ] || echo fail > "${E2E_DIR}/results/${slot}.status"' EXIT
-  cp -a "${RUNNER_TEMP}/e2e-inst" "${home}/inst"
-  cp -a "${RUNNER_TEMP}/e2e-fixture" "${home}/fixture"
+  cp -a "${RUNNER_TEMP}/e2e-inst" "${slot_dir}/inst"
+  cp -a "${RUNNER_TEMP}/e2e-fixture" "${slot_dir}/fixture"
 
-  OPENCODE_CONFIG_DIR="${home}/inst" \
+  OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
     OPENCODE_DISABLE_AUTOUPDATE=true \
     OPENCODE_DISABLE_MODELS_FETCH=true \
-    timeout 150 opencode run --format json --model "${model}" --dir "${home}/fixture" --title e2e \
+    timeout 150 opencode run --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
     "Commit the staged changes with message e2e test. Execute the necessary commands." \
-    > "${home}/out.jsonl" 2> "${home}/err.log" || true
+    > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" || true
 
-  JSONL="$(grep -h '^{' "${home}/out.jsonl" || true)"
+  JSONL="$(grep -h '^{' "${slot_dir}/out.jsonl" || true)"
   TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
   echo "=== ${model}: last lines ==="
   echo "${TEXT}" | tail -5
