@@ -16,7 +16,7 @@ slot_name() {
 # would collide on index.lock) or the config dir.
 run_e2e_model() {
   local model="$1" round="$2"
-  local slot slot_dir status_file rc=0
+  local slot slot_dir status_file opid rc=0
   slot="$(slot_name "${model}")"
   slot_dir="${E2E_DIR}/r${round}-${slot}"
   status_file="${E2E_DIR}/results/r${round}-${slot}.status"
@@ -37,7 +37,18 @@ run_e2e_model() {
     OPENCODE_DISABLE_MODELS_FETCH=true \
     timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
     "Commit the staged changes with message e2e test. Execute the necessary commands." \
-    > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" || rc=$?
+    > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" &
+  opid=$!
+  # The orchestrator stops this attempt with a signal once another model
+  # already surfaced `git vc`. A foreground `timeout`/opencode would ignore
+  # that signal and outlive the subshell, holding the fixture directory open;
+  # on Windows the EXIT trap's `rm -rf` then fails with "Device or resource
+  # busy" and, under `set -e`, turns the passing run into exit 1. Running the
+  # attempt in the background lets the TERM/INT trap kill opencode (timeout
+  # forwards the signal) so the fixture is released.
+  # shellcheck disable=SC2064  # expand $opid now; it is local to this call
+  trap "kill '${opid}' 2>/dev/null || true" TERM INT
+  wait "${opid}" || rc=$?
 
   JSONL="$(grep -h '^{' "${slot_dir}/out.jsonl" || true)"
   TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
@@ -79,7 +90,10 @@ echo "E2E default model: ${DEFAULT_MODEL}"
 E2E_DIR="${RUNNER_TEMP}/e2e-parallel"
 rm -rf "${E2E_DIR}"
 mkdir -p "${E2E_DIR}/results"
-trap 'rm -rf "${E2E_DIR}"' EXIT
+# Cleanup is best-effort: a lingering opencode process can keep a fixture
+# directory busy on Windows, and a failing trap must not flip the script's
+# verdict (under `set -e` it would override the explicit exit status).
+trap 'rm -rf "${E2E_DIR}" 2>/dev/null || true' EXIT
 
 mapfile -t E2E_MODELS <<< "${MODELS}"
 
