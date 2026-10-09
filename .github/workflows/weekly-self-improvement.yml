@@ -55,7 +55,15 @@ jobs:
         shell: bash
 
     steps:
+      # Check out the branch tip, not the event's github.sha. A re-run reuses
+      # the original SHA, so without `ref:` a fix merged after the first attempt
+      # would not take effect and the re-run would reproduce the old failure
+      # (the "Body is too long" re-run of #190, filed as #194 "unresolved yet").
+      # `github.ref` is the default branch on schedule and the selected ref on
+      # workflow_dispatch, so both always run the current code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.ref }}
 
       # The findings issue must be authored by the App for its `issues` event to
       # start issue-driver.yml; the private key is staged outside the work tree.

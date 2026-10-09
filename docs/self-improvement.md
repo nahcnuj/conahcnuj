@@ -59,7 +59,7 @@ flowchart TD
 | --- | --- |
 | `bin/auto-drive-report.sh` | ログ解析。ログのパス群を渡すと markdown レポートを stdout へ出力。`--runs-url-prefix` で `run-<id>.log` に実行 URL を付ける。先頭のメタ行 `<!-- auto-drive-report runs=N findings=N actionable=N -->` が機械可読な要約 |
 | `bin/auto-drive-workflow.sh` | 週次ループの実体。Actions API で直近のログを集め、レポートをトラッキング issue に載せ、actionable な finding があれば findings issue を更新して `self-improvement` を付ける |
-| `.github/workflows/weekly-self-improvement.yml` | 上をスケジュールで回す（月曜 01:17 UTC）。入力は無く、App 鍵を stage して findings issue だけ App 名義で作る |
+| `.github/workflows/weekly-self-improvement.yml` | 上をスケジュールで回す（月曜 01:17 UTC）。入力は無く、App 鍵を stage して findings issue だけ App 名義で作る。checkout は full-length SHA でピン留めしつつ `ref: github.ref` を渡し、再実行でもその時点のブランチ先端を使う |
 
 ## 手順
 
@@ -76,6 +76,16 @@ flowchart TD
 4. **引き渡し**: `actionable > 0` のとき、findings を「auto-drive findings」issue に
    まとめ、`self-improvement` ラベルを付ける。新規作成なら `issues: opened` で、
    既存 issue への追記なら `workflow_dispatch` の再試行で、ドライバを起動する
+
+## 再実行
+
+失敗した run を再実行すると、GitHub は既定で `github.sha`（最初の試行の
+コミット）を使い回す。そのため修正を main にマージした直後に再実行しても、
+古いコードのまま同じ失敗を繰り返す（#190 の分割修正をマージ済みでも
+「Body is too long」の再実行が失敗し、#194 になった）。workflow の checkout は
+`ref: github.ref` を渡してその時点のブランチ先端（schedule は既定ブランチ、
+`workflow_dispatch` は選択した ref）を取ることで、再実行にも最新のコードを
+効かせる。
 
 ## finding の分類
 
