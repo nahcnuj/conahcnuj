@@ -32,6 +32,7 @@ git 操作・GitHub API を **GitHub App の名義**（`<slug>[bot]`）で行う
 | [plugin.md](plugin.md) | opencode プラグインのフックと注入する環境変数、`git vc` |
 | [environment.md](environment.md) | 環境変数の一覧（ドライバ・Docker・テスト用を含む） |
 | [workflows.md](workflows.md) | GitHub Actions（CI・自動ドライバ・auto-merge・Pages）と必須チェック |
+| [self-improvement.md](self-improvement.md) | 週次の auto-drive ログ解析（自己研鑽のループ） |
 | [installation.md](installation.md) | `install.ps1`・Docker による配置と実行 |
 | [llms.txt](llms.txt) | 上記全ページの索引（機械可読） |
 
