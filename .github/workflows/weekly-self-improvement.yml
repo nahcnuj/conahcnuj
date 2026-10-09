@@ -17,9 +17,14 @@ name: Weekly auto-drive self-improvement
 #   created with GITHUB_TOKEN would not. The driver's own bug reports are
 #   bot-authored but carry no such label, so they stay skipped and the loop
 #   cannot recurse. Every driver run still ends at the owner's review.
-# - The label is also what the repository's GitHub Project auto-adds on, so the
-#   item lands on the board without any Projects API call (GITHUB_TOKEN cannot
-#   reach Projects v2).
+# - The tracking and findings issues are also added to a GitHub Project, so the
+#   board carries the work items without relying on the owner enabling the
+#   Project's built-in "auto-add" by hand. GITHUB_TOKEN cannot reach Projects v2:
+#   set the `PROJECT_TOKEN` secret (a classic PAT with the `project` scope) for a
+#   user-owned Project, and optionally the `PROJECT_OWNER` / `PROJECT_NUMBER` /
+#   `PROJECT_TITLE` repository variables (the Project is found by title and
+#   created when missing, so none of them is required). Without a PROJECT_TOKEN
+#   or an explicit PROJECT_NUMBER the loop falls back to the built-in auto-add.
 #
 # The App secrets (APP_ID / INSTALLATION_ID / APP_SLUG / PRIVATE_KEY) are used
 # only to author the findings issue; GITHUB_TOKEN covers the Actions API reads,
@@ -80,6 +85,16 @@ jobs:
       - name: Run the weekly auto-drive self-improvement
         env:
           GH_TOKEN: ${{ github.token }}
+          # Projects v2 is unreachable with GITHUB_TOKEN. PROJECT_TOKEN (a
+          # classic PAT with the `project` scope) is required for a user-owned
+          # Project; the App token is used instead when it is unset, which works
+          # for an org-owned Project. The PROJECT_* variables are optional: the
+          # Project is found by PROJECT_TITLE (default "auto-drive
+          # self-improvement") and created when missing.
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+          PROJECT_TITLE: ${{ vars.PROJECT_TITLE }}
         run: |
           export GH_APP_TOKEN="$(bash gh-app/get-token.sh)"
           bash bin/auto-drive-workflow.sh \

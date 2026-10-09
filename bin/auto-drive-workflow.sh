@@ -20,12 +20,18 @@
 #     token on purpose: events raised through the workflow's GITHUB_TOKEN never
 #     start workflows, so a GITHUB_TOKEN issue could not reach the driver on its
 #     own. A labelled App issue starts it on `issues: opened`.
-#   - the repository's GitHub Project runs its built-in "auto-add" workflow on
-#     `label:self-improvement`, so the item lands on the board without any
-#     Projects API call (the GITHUB_TOKEN cannot reach Projects v2, and a
-#     user-owned Project is outside a GitHub App installation). The Project
-#     then drives status with its own built-in rules (for example, a closed
-#     item moves to Done).
+#   - the tracking and findings issues are added to a GitHub Project explicitly
+#     (gh project item-add), so the board shows the work items without relying
+#     on the owner enabling the Project's built-in "auto-add" by hand. The
+#     GITHUB_TOKEN cannot reach Projects v2: a user-owned Project needs a
+#     classic PAT with the `project` scope (PROJECT_TOKEN), while an org-owned
+#     Project works with the App installation token. When neither a
+#     PROJECT_TOKEN nor a PROJECT_NUMBER is configured, the loop falls back to
+#     the built-in "auto-add" workflow on `label:self-improvement`, so a Project
+#     the owner configured by hand keeps working.
+#   - the Project is addressed by PROJECT_NUMBER, or looked up by
+#     PROJECT_TITLE (default "auto-drive self-improvement") and created when it
+#     is missing, so no per-run manual input is needed.
 #
 # At most one findings issue is open: a new week's findings are appended to the
 # existing issue and the driver is dispatched once as a retry, while a freshly
@@ -38,11 +44,20 @@
 # Usage:
 #   auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
 #                          [--lookback-days N] [--ref BRANCH]
+#                          [--project-owner OWNER] [--project-number N]
+#                          [--project-title TITLE]
 #
 #   --repo OWNER/REPO     default: $GITHUB_REPOSITORY (required otherwise)
 #   --runs-url-prefix P   link run-<id>.log files to P/<id>
 #   --lookback-days N     default 7 (>= 1)
 #   --ref BRANCH          retry dispatch ref (default $GITHUB_REF_NAME)
+#   --project-owner OWNER default: repo owner (or $PROJECT_OWNER)
+#   --project-number N    Project number to add items to (or $PROJECT_NUMBER)
+#   --project-title TITLE Project to find/create when no number (or $PROJECT_TITLE)
+#
+# Environment: PROJECT_TOKEN is the token with `project` scope used for the
+# Projects API (a classic PAT for a user-owned Project; the App token is used
+# when PROJECT_TOKEN is unset, which works for an org-owned Project).
 #
 # Report -> stdout, progress -> stderr. Exit 0 on success; > 0 on any failure
 # so the Actions job fails loudly.
@@ -56,18 +71,23 @@ FINDINGS_PREFIX="auto-drive findings"
 SELF_IMPROVEMENT_LABEL="self-improvement"
 LABEL_COLOR="5319e7"
 LABEL_DESCRIPTION="weekly auto-drive self-improvement finding"
+PROJECT_TITLE_DEFAULT="auto-drive self-improvement"
 
 usage() {
   cat <<'EOF'
 Usage: auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
                               [--lookback-days N] [--ref BRANCH]
+                              [--project-owner OWNER] [--project-number N]
+                              [--project-title TITLE]
 
 Weekly self-improvement loop: collect the "Issue auto-drive" run logs through
 `gh`, analyze them (auto-drive-report.sh, stdout), publish the report on a
 tracking issue, and keep the standing "auto-drive findings" issue up to date
 with the `self-improvement` label when the report has actionable findings. The
-label lets issue-driver.yml pick the issue up by itself and lets the GitHub
-Project auto-add it. See the script header for the loop-hygiene rules.
+label lets issue-driver.yml pick the issue up by itself; the issues are also
+added to a GitHub Project (PROJECT_NUMBER, or a Project found/created by
+PROJECT_TITLE) so the board carries the work items. See the script header for
+the loop-hygiene rules.
 EOF
 }
 
@@ -75,6 +95,10 @@ repo=""
 runs_url_prefix=""
 lookback_days="7"
 dispatch_ref=""
+project_owner="${PROJECT_OWNER:-}"
+project_number="${PROJECT_NUMBER:-}"
+project_title="${PROJECT_TITLE:-}"
+project_token="${PROJECT_TOKEN:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,6 +106,9 @@ while [[ $# -gt 0 ]]; do
     --runs-url-prefix) runs_url_prefix="${2:-}"; shift 2 ;;
     --lookback-days) lookback_days="${2:-}"; shift 2 ;;
     --ref) dispatch_ref="${2:-}"; shift 2 ;;
+    --project-owner) project_owner="${2:-}"; shift 2 ;;
+    --project-number) project_number="${2:-}"; shift 2 ;;
+    --project-title) project_title="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -96,6 +123,7 @@ if [[ -z "${repo}" ]]; then
 fi
 [[ "${repo}" =~ ^[^/]+/[^/]+$ ]] || { echo "Invalid repo: ${repo}" >&2; exit 1; }
 [[ "${lookback_days}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid lookback-days: ${lookback_days}" >&2; exit 1; }
+[[ -z "${project_number}" || "${project_number}" =~ ^[0-9]+$ ]] || { echo "Invalid project-number: ${project_number}" >&2; exit 1; }
 
 command -v gh >/dev/null 2>&1 || { echo "gh CLI is required" >&2; exit 1; }
 [[ -x "${REPORT_SCRIPT}" || -f "${REPORT_SCRIPT}" ]] || { echo "missing ${REPORT_SCRIPT}" >&2; exit 1; }
@@ -114,6 +142,51 @@ gh_app() {
   else
     gh "$@"
   fi
+}
+
+# Projects v2 is outside the workflow's GITHUB_TOKEN, and a user-owned Project
+# is outside a GitHub App installation as well: it needs a classic PAT with the
+# `project` scope (PROJECT_TOKEN). An org-owned Project works with the App
+# installation token. Only run when the loop can actually reach the Project: an
+# explicit PROJECT_NUMBER (with whatever token is available) or a PROJECT_TOKEN
+# (which may discover/create the Project by title).
+project_configured() {
+  [[ -n "${project_number}" || -n "${project_token}" ]]
+}
+
+gh_project() {
+  if [[ -n "${project_token}" ]]; then
+    GH_TOKEN="${project_token}" gh "$@"
+  elif [[ -n "${GH_APP_TOKEN:-}" ]]; then
+    GH_TOKEN="${GH_APP_TOKEN}" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
+# Resolve the Project number to add items to: an explicit --project-number wins;
+# otherwise, with a PROJECT_TOKEN, find the Project by title and create it when
+# it is missing. Prints the number, or nothing on failure (the caller warns and
+# falls back to the Project's built-in auto-add).
+resolve_project_number() {
+  if [[ -n "${project_number}" ]]; then
+    printf '%s\n' "${project_number}"
+    return 0
+  fi
+  [[ -n "${project_token}" ]] || return 1
+  local owner="${project_owner:-${repo%%/*}}"
+  local title="${project_title:-${PROJECT_TITLE_DEFAULT}}"
+  title="${title//\"/}"
+  local number
+  number="$(gh_project project list --owner "${owner}" --limit 100 --format json \
+    --jq ".projects[] | select(.title == \"${title}\") | .number" 2>/dev/null \
+    | head -n 1 || true)"
+  if [[ -z "${number}" ]]; then
+    number="$(gh_project project create --owner "${owner}" --title "${title}" \
+      --format json --jq '.number' 2>/dev/null || true)"
+  fi
+  [[ "${number}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${number}"
 }
 
 # GitHub rejects an issue/comment body longer than 65536 characters
@@ -188,6 +261,31 @@ comment_file_continuation() {
   done
 }
 
+# Add an issue to the resolved Project. A failure only warns: the report and the
+# findings issue are already published, and a Project hiccup must not lose them.
+# Args: issue-url
+add_to_project() {
+  local issue_url="${1}"
+  [[ -n "${issue_url}" && -n "${project_number_resolved}" ]] || return 0
+  local owner="${project_owner:-${repo%%/*}}"
+  gh_project project item-add "${project_number_resolved}" --owner "${owner}" \
+    --url "${issue_url}" >/dev/null 2>&1 \
+    || echo "warning: failed to add ${issue_url} to project #${project_number_resolved}" >&2
+}
+
+# Resolve the Project once. project_number_resolved stays empty when no Project
+# is configured or it cannot be resolved; the loop then relies on the Project's
+# built-in auto-add.
+project_number_resolved=""
+if project_configured; then
+  if project_number_resolved="$(resolve_project_number)"; then
+    echo "using GitHub Project #${project_number_resolved} (owner: ${project_owner:-${repo%%/*}})" >&2
+  else
+    project_number_resolved=""
+    echo "warning: could not resolve the GitHub Project; relying on its built-in auto-add" >&2
+  fi
+fi
+
 # --- 1. collect --------------------------------------------------------------
 since="$(date -u -d "${lookback_days} days ago" +%Y-%m-%dT%H:%M:%SZ)"
 echo "Collecting completed Issue auto-drive runs created >= ${since}" >&2
@@ -246,10 +344,12 @@ while IFS= read -r part; do tracking_parts+=("${part}"); done \
 if [[ -n "${tracking}" ]]; then
   gh issue comment "${tracking}" --repo "${repo}" --body-file "${tracking_parts[0]}"
   comment_file_continuation "${tracking}" "${tracking_parts[@]:1}"
+  add_to_project "https://github.com/${repo}/issues/${tracking}"
   echo "appended this week's report to tracking issue #${tracking}" >&2
 else
   url="$(gh issue create --repo "${repo}" --title "${TRACKING_TITLE}" --body-file "${tracking_parts[0]}")"
   comment_file_continuation "${url##*/}" "${tracking_parts[@]:1}"
+  add_to_project "${url}"
   echo "created the tracking issue: ${url}" >&2
 fi
 
@@ -287,6 +387,7 @@ num="$(gh issue list --repo "${repo}" --state open --limit 200 \
 if [[ -n "${num}" ]]; then
   gh issue comment "${num}" --repo "${repo}" --body-file "${body_parts[0]}"
   comment_file_continuation "${num}" "${body_parts[@]:1}"
+  add_to_project "https://github.com/${repo}/issues/${num}"
   echo "added this week's findings to issue #${num}" >&2
   # An existing issue raises no `issues: opened`, so dispatch the driver once
   # for this week's findings; a freshly created issue starts it by itself.
@@ -302,8 +403,10 @@ else
   num="${url##*/}"
   [[ "${num}" =~ ^[0-9]+$ ]] || { echo "could not read the new issue number from ${url}" >&2; exit 1; }
   comment_file_continuation "${num}" "${body_parts[@]:1}"
+  add_to_project "${url}"
   # Created as the App with the self-improvement label: issue-driver.yml accepts
-  # the bot-authored issue and starts on `issues: opened`; the Project auto-adds
-  # it. No dispatch here, so the driver never runs twice for one opening.
+  # the bot-authored issue and starts on `issues: opened`, and the Project is
+  # populated explicitly above (or by its built-in auto-add as a fallback). No
+  # dispatch here, so the driver never runs twice for one opening.
   echo "created findings issue #${num}" >&2
 fi

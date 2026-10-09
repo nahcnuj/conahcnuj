@@ -149,6 +149,60 @@ case "${cmd}" in
     printf 'dispatch number=%s\n' "${n}" >> "${state}/events"
     echo "created workflow run"
     ;;
+  project)
+    # gh project list|create|item-add  (state/projects = "number|title" per line)
+    action="$1"
+    shift
+    case "${action}" in
+      list)
+        # gh project list --owner O --limit N --format json --jq FILTER
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --owner|--limit|--format|--jq) shift ;;
+          esac
+          shift
+        done
+        if [[ -f "${state}/projects" ]]; then
+          awk -F'|' '{print $1}' "${state}/projects" | head -n 1
+        fi
+        ;;
+      create)
+        # gh project create --owner O --title T --format json --jq FILTER
+        title=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --owner) shift ;;
+            --title) shift; title="$1" ;;
+            --format) shift ;;
+            --jq) shift ;;
+          esac
+          shift
+        done
+        n="$(cat "${state}/next-project" 2>/dev/null || echo 7)"
+        printf '%s|%s\n' "${n}" "${title}" >> "${state}/projects"
+        printf 'project create %s\n' "${title}" >> "${state}/events"
+        echo "${n}"
+        ;;
+      item-add)
+        # gh project item-add N --owner O --url URL
+        number=""
+        url=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --owner) shift ;;
+            --url) shift; url="$1" ;;
+            *) [[ "$1" =~ ^[0-9]+$ ]] && number="$1" ;;
+          esac
+          shift
+        done
+        printf 'project item-add %s %s\n' "${number}" "${url}" >> "${state}/events"
+        ;;
+      *)
+        echo "mock: unhandled project subcommand: ${action}" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   *)
     echo "mock: unhandled gh command: ${cmd} $*" >&2
     exit 1
@@ -236,6 +290,61 @@ grep -q '^dispatch number=5$' "${ROOT}/state/events" \
   || { echo "FAIL: the existing findings issue must be retried"; exit 1; }
 grep -q '^issue create auto-drive findings' "${ROOT}/state/events" \
   && { echo "FAIL: a second findings issue must not appear"; exit 1; }
+
+# --- a Project is configured: issues land on it, the Project is created -------
+# GITHUB_TOKEN cannot reach Projects v2, so the loop uses PROJECT_TOKEN (a
+# classic PAT) and finds the Project by title, creating it when missing. Both
+# the tracking issue and a fresh findings issue must become project items.
+true > "${ROOT}/state/events"
+true > "${ROOT}/state/issues"
+rm -f "${ROOT}/state/projects"
+echo 1500 > "${ROOT}/state/next"
+printf '401\n' > "${ROOT}/state/run-ids"
+cat > "${ROOT}/mock-logs/run-401.log" <<'EOF'
+opencode: trying model opencode/alpha
+Model opencode/alpha failed before completing the work: environment error (x)
+ERROR: no available model completed the work (tried: opencode/alpha; handoffs: none).
+Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnuj.
+Bug report issue #140 created: https://github.com/nahcnuj/conahcnuj/issues/140
+EOF
+export PROJECT_TOKEN=test-token
+run_workflow
+grep -q '^project create ' "${ROOT}/state/events" \
+  || { echo "FAIL: the Project must be created when missing"; cat "${ROOT}/state/events"; exit 1; }
+[[ "$(grep -c '^project item-add ' "${ROOT}/state/events" || true)" == "2" ]] \
+  || { echo "FAIL: the tracking and findings issues must both be added to the Project"; cat "${ROOT}/state/events"; exit 1; }
+
+# Re-running with the issues already present must still add them to the board
+# (item-add is idempotent) and must reuse, not re-create, the Project, so a
+# Project configured after the issues appeared still gets them.
+true > "${ROOT}/state/events"
+run_workflow
+grep -q '^project create ' "${ROOT}/state/events" \
+  && { echo "FAIL: an existing Project must not be re-created"; cat "${ROOT}/state/events"; exit 1; }
+grep -q '^issue comment' "${ROOT}/state/events" \
+  || { echo "FAIL: the second run must comment on the existing issues"; cat "${ROOT}/state/events"; exit 1; }
+[[ "$(grep -c '^project item-add ' "${ROOT}/state/events" || true)" == "2" ]] \
+  || { echo "FAIL: the existing tracking and findings issues must also be added"; cat "${ROOT}/state/events"; exit 1; }
+unset PROJECT_TOKEN
+
+# --- no Project configured: the Projects API stays untouched -----------------
+# Without PROJECT_TOKEN or PROJECT_NUMBER the loop must not call the Projects
+# API at all (the mock would exit 1 on an unhandled `gh project`), leaving the
+# Project's built-in auto-add as the only path.
+true > "${ROOT}/state/events"
+true > "${ROOT}/state/issues"
+rm -f "${ROOT}/state/projects"
+printf '402\n' > "${ROOT}/state/run-ids"
+cat > "${ROOT}/mock-logs/run-402.log" <<'EOF'
+opencode: trying model opencode/alpha
+Model opencode/alpha failed before completing the work: environment error (x)
+ERROR: no available model completed the work (tried: opencode/alpha; handoffs: none).
+Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnuj.
+Bug report issue #141 created: https://github.com/nahcnuj/conahcnuj/issues/141
+EOF
+run_workflow
+grep -q '^project ' "${ROOT}/state/events" \
+  && { echo "FAIL: an unconfigured Project must not be touched"; cat "${ROOT}/state/events"; exit 1; }
 
 # --- oversized report: split across bodies, never rejected -------------------
 # A single very long ERROR line pushes the report past GitHub's 65536-character

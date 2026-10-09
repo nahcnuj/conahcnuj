@@ -26,11 +26,13 @@ flowchart TD
     Q -- 無い --> Z[終了]
     Q -- ある --> F[findings issue を作成/更新<br>label: self-improvement]
 
-    subgraph project["GitHub Project（組み込み自動化）"]
+    subgraph project["GitHub Project"]
         B[ボードの項目] --> D[閉じたら Done]
     end
 
-    F -. 組み込み auto-add（label:self-improvement） .-> B
+    P --> A[Projects API: gh project item-add]
+    F --> A
+    A --> B
     F --> I[issue-driver.yml: issues opened]
     I --> DR[conahcnuj ドライバ<br>ブランチ / Verified コミット / PR]
     DR --> O[owner のレビューと Approve]
@@ -47,19 +49,25 @@ flowchart TD
 - **findings issue は App 名義で作成する**。`GITHUB_TOKEN` で作った issue は
   workflow を起動しないため、`issues: opened` でドライバを動かすには App の
   インストールトークンが必要（`gh-app/get-token.sh` を workflow が使う）。
-- **Projects API は呼ばない**。`GITHUB_TOKEN` は Projects v2 に到達できず、
-  ユーザー所有の Project は App のインストール対象外のため、Project 側の
-  組み込み auto-add に載せる。Project で一度だけ
-  **Settings → Workflows → Auto-add to project** を有効にし、フィルタを
-  `label:self-improvement` にする。任意で「item closed → Done」も有効にする。
+- **Projects へは明示的に追加する**。トラッキング issue と findings issue を
+  `gh project item-add` で Project に載せる。`GITHUB_TOKEN` は Projects v2 に
+  到達できないため、ユーザー所有の Project には `project` スコープの classic
+  PAT を `PROJECT_TOKEN` secret として渡す。組織所有の Project なら App の
+  インストールトークンで足りる。Project は `PROJECT_NUMBER` で指定するか、
+  `PROJECT_TITLE`（既定 `auto-drive self-improvement`）で探し、無ければ
+  ワークフローが作成する。人手で指定する入力は無い。
+- `PROJECT_TOKEN` も `PROJECT_NUMBER` も無いときは、Project 側の組み込み
+  **Settings → Workflows → Auto-add to project**（フィルタ
+  `label:self-improvement`）にフォールバックする。任意で「item closed → Done」
+  も有効にする。
 
 ## ファイル
 
 | パス | 役割 |
 | --- | --- |
 | `bin/auto-drive-report.sh` | ログ解析。ログのパス群を渡すと markdown レポートを stdout へ出力。`--runs-url-prefix` で `run-<id>.log` に実行 URL を付ける。先頭のメタ行 `<!-- auto-drive-report runs=N findings=N actionable=N -->` が機械可読な要約 |
-| `bin/auto-drive-workflow.sh` | 週次ループの実体。Actions API で直近のログを集め、レポートをトラッキング issue に載せ、actionable な finding があれば findings issue を更新して `self-improvement` を付ける |
-| `.github/workflows/weekly-self-improvement.yml` | 上をスケジュールで回す（月曜 01:17 UTC）。入力は無く、App 鍵を stage して findings issue だけ App 名義で作る |
+| `bin/auto-drive-workflow.sh` | 週次ループの実体。Actions API で直近のログを集め、レポートをトラッキング issue に載せ、actionable な finding があれば findings issue を更新して `self-improvement` を付ける。両 issue を `gh project item-add` で Project に追加する（`PROJECT_TOKEN` / `PROJECT_NUMBER` / `PROJECT_TITLE`、未設定なら組み込み auto-add へフォールバック） |
+| `.github/workflows/weekly-self-improvement.yml` | 上をスケジュールで回す（月曜 01:17 UTC）。入力は無く、App 鍵を stage して findings issue だけ App 名義で作る。`secrets.PROJECT_TOKEN` と `vars.PROJECT_*` を渡す |
 
 ## 手順
 
@@ -107,7 +115,8 @@ flowchart TD
 ## 無効化・試運転
 
 - `schedule:` の cron を消すか `concurrency:` グループを変更すると止まる
-- Project の組み込み auto-add を切るとボードには載らなくなる（ループ自体は続く）
+- `PROJECT_TOKEN` / `PROJECT_NUMBER` を外すと Projects へは載せず、Project の
+  組み込み auto-add に任せる（ループ自体は続く）
 
 ## 関連ページ
 
