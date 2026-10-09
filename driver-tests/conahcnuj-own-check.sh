@@ -19,13 +19,13 @@
 # Drives bin/conahcnuj.sh <PR> against a mocked GitHub API tape whose
 # statusCheckRollup enumerates the check contexts:
 #
-#   PR #15 state read -> head branch checked out -> constraints pass
+#   PR #15 state read -> head branch checked out -> collected context
+#   (no open threads, no README/AGENTS in the fixture) -> constraints pass
 #   (own run IN_PROGRESS and the pending auto-merge check are both
-#   excluded) -> CHANGES_REQUESTED detected -> addressed and committed ->
-#   constraints re-verified (a pending real CI check still waits, then the
-#   own run CANCELLED and the failed auto-merge check are excluded too) ->
-#   review re-requested from the owner -> replied -> "review requested"
-#   -> exit 0
+#   excluded) -> CHANGES_REQUESTED detected -> the agent addresses it and
+#   commits -> review re-requested from the owner -> constraints re-verified
+#   (a pending real CI check still waits, then the own run CANCELLED and the
+#   failed auto-merge check are excluded too) -> "review requested" -> exit 0
 #
 # No secrets, no network.
 set -euo pipefail
@@ -51,11 +51,12 @@ git -C "${WORK}" commit -qm init
 # statusCheckRollup.contexts list so the driver's own workflow run can be
 # told apart from real CI.
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue
-#   (stub body -> real issue body), update_pr (body sync), continuation
-#   comment, conditions (own run IN_PROGRESS + auto-merge IN_PROGRESS),
-#   fetch_reviews (CHANGES_REQUESTED), conditions (real CI running),
-#   conditions (own run CANCELLED + auto-merge FAILED), request_review,
-#   post_comment.
+#   (stub body -> real issue body), fetch_reviews (collection: nothing open),
+#   update_pr (body sync), continuation comment, conditions (own run
+#   IN_PROGRESS + auto-merge IN_PROGRESS), fetch_reviews (CHANGES_REQUESTED),
+#   request_review, conditions (real CI running), conditions (own run
+#   CANCELLED + auto-merge FAILED). The feedback round posts no comment of its
+#   own: the agent answers the reviewer in the thread.
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit
 # path runs `git add -A`).
 TAPE="${ROOT}/tape.txt"
@@ -63,14 +64,14 @@ cat > "${TAPE}" <<'EOF'
 {"title":"Fix something","body":"stub","labels":[],"pull_request":{}}
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"Closes #10","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"CHANGES_REQUESTED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}
 {"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {}
 {"id":889}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
+{}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"CANCELLED","checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"COMPLETED","conclusion":"FAILURE","checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}
-{}
-{"id":888}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -97,7 +98,9 @@ grep -q "Review requested on PR #15 (reviewer: nahcnuj): https://github.com/nahc
 # reviewer's part, and the merge job's.
 grep -q "Ready to merge" "${LOG}" && { echo "FAIL: the driver waited for an approval that never came"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: the requested changes were not acted on"; exit 1; }
-grep -q "Replied on PR #15 after addressing review feedback" "${LOG}" || { echo "FAIL: feedback reply was not posted"; exit 1; }
+# The driver posts no reply of its own: the agent answers the reviewer in the
+# thread (see conahcnuj-resume.sh for the reply-target assertions).
+grep -q "Addressed the review feedback" "${LOG}" && { echo "FAIL: the driver still posts its own review-feedback comment"; exit 1; }
 
 # The driver's own run (pending, then cancelled) and the auto-merge job's
 # check (pending, then failed) never became a constraint: the poll reported

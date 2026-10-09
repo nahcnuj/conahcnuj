@@ -22,19 +22,38 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
-├── test/                      # プラグインの smoke テスト（opencode の自動ロード対象外）
-├── tests/                     # ドライバの offline モックテスト
-├── test.sh                    # tests/ のランナー
+├── plugin-tests/               # プラグインの runtime テスト（smoke＋e2e。node/npm・pwsh・opencode が必要）
+├── driver-tests/               # ドライバの offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
+│   └── run.sh                  #   driver-tests/ 全体のランナー
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
+├── docs/                      # AI 向けリファレンス（GitHub Pages で配信。build.py が検証・HTML 化）
 ├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
 ├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
 ├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
 ├── .github/workflows/owner-approved-auto-merge.yml # 再利用用 auto-merge workflow
+├── .github/workflows/pages.yml        # docs/ を GitHub Pages へデプロイ
 ├── .gitignore
 └── AGENTS.md
 ```
+
+## ドキュメント（GitHub Pages）
+
+アプリとその API（設定・CLI・ドライバ・プラグイン・環境変数・ワークフロー）の
+リファレンスを `docs/` に置き、GitHub Pages で配信しています。常に最新版のみで、
+バージョン切り替えはありません。
+
+- サイト: <https://nahcnuj.github.io/conahcnuj/>
+- 機械可読な索引: <https://nahcnuj.github.io/conahcnuj/llms.txt>
+- 各ページは Markdown 原文（同じパスの `.md`）と HTML の両方で開けます
+
+`docs/*.md` がソースで、`.github/workflows/pages.yml` が push to main のたびに
+`docs/build.py`（リンク検証 + HTML 生成 → `_site/`）を実行してデプロイします。
+**初回のみ** Settings → Pages → Source = **GitHub Actions** を設定してください。
+CI の `Build docs site` ジョブが同じビルドを PR でも検証します。ローカルでは
+`pipenv sync && pipenv run python3 docs/build.py`（検証のみは
+`python3 docs/build.py --check`）で確認できます。
 
 ## 仕組み
 
@@ -56,9 +75,11 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
 GitHub 自身にコミットを作成させるしかない。
 
-`CONAHCNUJ_COMMIT_MODEL` にラベル（例: `Grok 4.7 (medium)`）が入っているとき、
-コミット本文の末尾へ Git trailer `Model: <ラベル>` を足す。未設定なら足さない。
-OpenCode ではプラグインがセッションの表示名と variant をこの変数へ入れる。
+`CONAHCNUJ_COMMIT_MODEL` に値（例: `xai (grok-4.7/medium)`）が入っているとき、
+コミット本文の末尾へ Git trailer `Co-Authored-By: <値>` を足す。未設定なら足さない。
+OpenCode ではプラグインがセッションの provider・model・effort を
+`provider (model/effort)` の形でこの変数へ入れる（本文に既に
+`Co-Authored-By` があれば足さない）。
 別のエージェントや手元のシェルは、同じ変数に好きな文字列を入れて使える。
 
 ## issue駆動自律開発（conahcnuj）
@@ -80,6 +101,13 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    共通で伝える。指示を積み増さないのは、コーディングエージェントの仕事を
    邪魔しないため（禁止コマンドの一覧や「これは成果物ではない」という注意を
    書くと、エージェントはそれが任務だと誤解してコードを書かなくなる）。
+   一方、決定論的に収集できる情報（issue / PR の本文、再開時 PR の未解決
+   レビュースレッド、`README.md` / `AGENTS.md` など `CONAHCNUJ_CONTEXT_FILES`
+   のファイル）は指示ではなく**材料**として `Collected context:` という別枠で
+   最初のプロンプトに同梱し、エージェントが初動で拾う手間を省く。例外はレビュー
+   スレッドへの返信で、これだけはエージェント自身が行う。契約には足さず、
+   フィードバック対応ラウンドの追加コンテキストで各スレッドの comment id と
+   返信エンドポイントを添えて「返信し、必要なら修正する」と伝える。
    コミットメッセージは必ずコーディングエージェントが決める（`.commit-msg`。
    ドライバが使う 1 行。未指定ならドライバはコミットしない。メッセージだけ
    書いて作業ツリーが無変更なら no work として次のモデルへ引き継ぐ）。
@@ -102,8 +130,13 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    `Closes #<番号>` と合わせて自動生成され、既存 PR を再利用した場合も同期される。
 2. 再開実行時に新しいレビュー意見（Comment / Request changes / 未解決の
    レビュースレッド。セキュリティレビューの指摘を含む）がある場合は、
-   モデルを使って対応し、api-commit.sh で Verified コミットを push して制約を
-   再確認し、PR へ返信して owner へレビューを再依頼してから終了する。
+   モデルを使って対応し、api-commit.sh で Verified コミットを push し、
+   owner へレビューを再依頼してから制約を再確認して終了する。レビュースレッド
+   への返信はエージェント自身が行い（ドライバは「Addressed the review
+   feedback」のような代行コメントを投稿しない）、返信は bot 著者として
+   レビュー fingerprint から除外されるので、自分の返信を新規意見と誤認して
+   ループしない。対応ラウンドの追加コンテキストには各スレッドの comment id と
+   返信エンドポイントを添える。
 3. owner の Approve と merge は `auto-merge.yml` /
    `owner-approved-auto-merge.yml` の担当で、ドライバ自身は自動マージしない。
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開・

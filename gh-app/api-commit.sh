@@ -30,11 +30,13 @@
 #   --dry-run         Print what would be committed without calling the API
 #                     (no token/network needed; usable for offline tests).
 #
-# Model trailer (optional): when CONAHCNUJ_COMMIT_MODEL is a non-empty
-# single-line label, the commit body gains a `Model: <label>` Git trailer.
-# Unset means no trailer. A message that already has a Model trailer is left
+# Attribution trailer (optional): when CONAHCNUJ_COMMIT_MODEL is a
+# non-empty single-line value, the commit body gains a
+# `Co-Authored-By: <value>` Git trailer. The plugin fills the value as
+# `provider (model/effort)` (e.g. `xai (grok-4.7/medium)`). Unset means no
+# trailer. A message that already carries a Co-Authored-By trailer is left
 # alone. OpenCode sessions set the variable from the live model; anything
-# else can export the same variable with whatever label it wants.
+# else can export the same variable with whatever value it wants.
 #
 # The author identity is the App (conahcnuj[bot]) and the committer is GitHub.com.
 
@@ -145,24 +147,35 @@ json_escape() {
 }
 
 # Collapse CONAHCNUJ_COMMIT_MODEL into one trailer value, or empty when unset.
+# A value that already carries a trailer key (the current `Co-Authored-By:` or
+# the older `Model:` prefix) loses it here, so the key is never printed twice.
 commit_model_label() {
   local model="${CONAHCNUJ_COMMIT_MODEL:-}"
   model="$(printf '%s' "${model}" | tr '\r\n\t' ' ' | sed 's/  */ /g; s/^ //; s/ $//')"
+  model="${model#Co-Authored-By:}"
+  model="${model#co-authored-by:}"
   model="${model#Model:}"
   model="${model#model:}"
   model="$(printf '%s' "${model}" | sed 's/^ //; s/ $//')"
   printf '%s' "${model}"
 }
 
+# True when MESSAGE already carries a Co-Authored-By trailer (case-insensitive
+# key), so the caller must not append a second one.
+has_attribution_trailer() {
+  printf '%s\n' "${1}" | grep -qiE '^[[:space:]]*co-authored-by:'
+}
+
 # Split MESSAGE into HEADLINE (first line) and COMMIT_BODY (the rest). Append
-# a Model trailer when a label is available and the message does not have one.
-# COMMIT_BODY, not BODY: this script already uses BODY for the refs API payload.
+# a Co-Authored-By trailer when a value is available and the message does not
+# have one. COMMIT_BODY, not BODY: this script already uses BODY for the refs
+# API payload.
 prepare_commit_message() {
   local message="${MESSAGE}"
   local model rest
   model="$(commit_model_label)"
-  if [[ -n "${model}" ]] && ! printf '%s\n' "${message}" | grep -qE '^[[:space:]]*[Mm]odel:'; then
-    message="${message}"$'\n\n'"Model: ${model}"
+  if [[ -n "${model}" ]] && ! has_attribution_trailer "${message}"; then
+    message="${message}"$'\n\n'"Co-Authored-By: ${model}"
   fi
   HEADLINE="${message%%$'\n'*}"
   if [[ "${message}" == *$'\n'* ]]; then

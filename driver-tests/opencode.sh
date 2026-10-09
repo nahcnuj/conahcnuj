@@ -52,6 +52,30 @@ test_opencode_build_prompt_fresh() {
   echo "opencode_build_prompt (fresh round, branch-name offered) passed"
 }
 
+test_opencode_build_prompt_collected() {
+  local prompt
+  # Deterministically collected material rides along as data. It must not
+  # turn the round into a "follow-up" one: a fresh round still offers the
+  # branch name, only extra_context (an already-named branch) suppresses it.
+  prompt="$(opencode_build_prompt "Issue title" "Issue body" "" "README.md:
+# Fixture README")"
+  [[ "${prompt}" == *"Issue: Issue title"* ]]
+  [[ "${prompt}" == *"Collected context:"* ]] || { echo "FAIL: collected context is not labelled"; exit 1; }
+  [[ "${prompt}" == *"# Fixture README"* ]] || { echo "FAIL: the collected context is missing"; exit 1; }
+  [[ "${prompt}" == *".branch-name"* ]] || { echo "FAIL: collected context suppressed the branch-name offer"; exit 1; }
+  # A follow-up round carries both blocks and keeps its existing branch.
+  prompt="$(opencode_build_prompt "Issue title" "Issue body" "extra ctx" "README.md:
+# Fixture README")"
+  [[ "${prompt}" == *"extra ctx"* ]]
+  [[ "${prompt}" == *"# Fixture README"* ]]
+  [[ "${prompt}" != *".branch-name"* ]]
+  # Collected context is data, not a second layer of instructions: the one
+  # short contract is still everything the prompt says about how to work.
+  [[ "${prompt}" == *"to the owner's approval"* ]] || { echo "FAIL: collected context displaced the contract"; exit 1; }
+  [[ "${prompt}" == *"gh pr create"* ]] && { echo "FAIL: the prompt enumerates commands the agent must not run"; exit 1; }
+  echo "opencode_build_prompt (collected context) passed"
+}
+
 test_opencode_build_handoff_prompt() {
   local prompt
   prompt="$(opencode_build_handoff_prompt "opencode/dead-model")"
@@ -102,6 +126,10 @@ test_opencode_run() {
   # and the mock honours the .commit-msg contract.
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
+  # The collected context reaches the prompt through the run itself.
+  out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "" "" "" "collected ctx")"
+  [[ "${out}" == *"Collected context:"* ]] || { echo "FAIL: opencode_run dropped the collected context"; exit 1; }
+  [[ "${out}" == *"collected ctx"* ]] || { echo "FAIL: the collected context is missing from the run prompt"; exit 1; }
   rm -rf "${tmp}"
   unset OPENCODE_TEST_MODE
   echo "opencode_run passed"
@@ -294,6 +322,7 @@ test_opencode_run_rate_limit() {
 test_opencode_get_models
 test_opencode_build_prompt
 test_opencode_build_prompt_fresh
+test_opencode_build_prompt_collected
 test_opencode_build_handoff_prompt
 test_opencode_run
 test_opencode_run_message_only

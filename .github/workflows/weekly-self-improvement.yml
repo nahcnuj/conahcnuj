@@ -1,0 +1,90 @@
+name: Weekly auto-drive self-improvement
+
+# Weekly self-study loop (週次の自己研鑽)。The driver's run logs only survive as
+# Actions job logs, so this workflow reads the last week of "Issue auto-drive"
+# runs through the Actions API, turns them into a markdown report, and posts
+# that report on a standing tracking issue.
+#
+# Autonomous and owner-gated, never self-triggering:
+# - It runs on a schedule only; there is nothing to configure or start by hand.
+# - When the report carries actionable findings (bug reports filed, model
+#   failures, time-budget stops, unrecognizable endings) the standing
+#   "auto-drive findings" issue is kept up to date and labelled
+#   `self-improvement`. Informational findings (provider outages,
+#   review-hand-off read-backs) never reach the driver.
+# - The findings issue is created as the App and labelled, so issue-driver.yml
+#   starts on `issues: opened`. An App-created issue does start workflows; one
+#   created with GITHUB_TOKEN would not. The driver's own bug reports are
+#   bot-authored but carry no such label, so they stay skipped and the loop
+#   cannot recurse. Every driver run still ends at the owner's review.
+# - The label is also what the repository's GitHub Project auto-adds on, so the
+#   item lands on the board without any Projects API call (GITHUB_TOKEN cannot
+#   reach Projects v2).
+#
+# The App secrets (APP_ID / INSTALLATION_ID / APP_SLUG / PRIVATE_KEY) are used
+# only to author the findings issue; GITHUB_TOKEN covers the Actions API reads,
+# the tracking issue, and the retry dispatch (actions: write, issues: write).
+# The checklist/loop body is `bin/auto-drive-workflow.sh`; this file only
+# stages the key and sets its arguments.
+
+on:
+  schedule:
+    - cron: '20 7 * * 5'
+      timezone: 'Asia/Tokyo'
+  workflow_dispatch: # FIXME: for the first time
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: weekly-self-improvement
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    name: Analyze auto-drive run logs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Same environment the driver uses, so the App secrets resolve the same way.
+    # The driver runs autonomously under it, so it is not approval-gated.
+    environment: conahcnuj
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # The findings issue must be authored by the App for its `issues` event to
+      # start issue-driver.yml; the private key is staged outside the work tree.
+      - name: Stage App private key and app.env
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
+          APP_SLUG: ${{ secrets.APP_SLUG }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          pem="$RUNNER_TEMP/conahcnuj-app.pem"
+          printf '%s\n' "$PRIVATE_KEY" > "$pem"
+          chmod 600 "$pem"
+          cat > gh-app/app.env <<EOF
+          APP_ID="$APP_ID"
+          INSTALLATION_ID="$INSTALLATION_ID"
+          APP_SLUG="$APP_SLUG"
+          PRIVATE_KEY_PATH="$pem"
+          BASH_EXE="/usr/bin/bash"
+          EOF
+
+      - name: Run the weekly auto-drive self-improvement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export GH_APP_TOKEN="$(bash gh-app/get-token.sh)"
+          bash bin/auto-drive-workflow.sh \
+            --repo "${GITHUB_REPOSITORY}" \
+            --runs-url-prefix "https://github.com/${GITHUB_REPOSITORY}/actions/runs" \
+            --ref "${GITHUB_REF_NAME}" \
+            > "${RUNNER_TEMP}/report.md"
+          cat "${RUNNER_TEMP}/report.md" >> "${GITHUB_STEP_SUMMARY}"

@@ -2,12 +2,12 @@
 # conahcnuj - issue-driven autonomous development driver.
 #
 # Resolves a GitHub issue (or resumes a pull request) end-to-end. The coding
-# agent's part is the change in the working tree; the driver creates everything
-# that needs GitHub (the branch, the commit, the push, the pull request and the
-# review request). The agent only labels its work: it writes the commit message
-# (.commit-msg) and may choose the feature branch name (.branch-name; when the
-# agent leaves none out, the driver picks one). A PR number given on the command
-# line is detected and resumed automatically:
+# agent's part is the change in the working tree and the answers it writes in
+# review threads; the driver creates the branch, the commit, the push, the pull
+# request and the review request. The agent labels its work: it writes the commit
+# message (.commit-msg) and may choose the feature branch name (.branch-name;
+# when the agent leaves none out, the driver picks one). A PR number given on
+# the command line is detected and resumed automatically:
 #   1. checks out the latest default branch and implements the issue with
 #      opencode (handing the same session and working tree to another model
 #      when one fails), committing only with the agent's .commit-msg
@@ -21,8 +21,9 @@
 #      at all ends the run with a warning (issues #134 / #139).
 #   3. when the run was resumed with fresh review feedback (comments /
 #      requested changes / security-review threads), addresses it, pushes a
-#      Verified commit, re-verifies the non-reviewer constraints, replies on
-#      the PR and re-requests review before exiting
+#      Verified commit, re-requests review (the agent answers the reviewer in
+#      the thread itself, so the driver posts no reply of its own), re-verifies
+#      the non-reviewer constraints and exits
 #   4. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the repository so a
 #      run the driver could not resolve is never silently lost. The report
@@ -37,10 +38,15 @@
 #                            retry (default: 15 s; 0 disables the pause)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
 #   CONAHCNUJ_TEST_MODE=1    offline driver test (mock API tape + mock opencode)
-#   CONAHCNUJ_COMMIT_MODEL   commit trailer label; when unset, the driver uses
-#                            the OpenCode display name (plugin) or the model id
+#   CONAHCNUJ_COMMIT_MODEL   Co-Authored-By trailer value; when unset, the
+#                            driver uses the plugin label (provider
+#                            (model/effort)) or builds the same shape from
+#                            the model id it recorded
 #   CONAHCNUJ_OPENCODE_LOG_LEVEL  opencode --log-level for the run
 #                            (default: WARN; DEBUG to debug a failing model)
+#   CONAHCNUJ_CONTEXT_FILES  space-separated checkout files whose contents are
+#                            collected into the prompt alongside the issue
+#                            (default: README.md AGENTS.md; empty sends none)
 #   CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS  poll interval of the rate-limit
 #                            watchdog that stops a round when the provider
 #                            reports a rate limit (default: 1 s)
@@ -64,7 +70,7 @@ MAX_DURATION="${CONAHCNUJ_MAX_SECONDS:-259200}"
 POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
 POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
 START_TIME="$(date +%s)"
-# Snapshot a caller-supplied trailer label. apply_driver_commit_model exports
+# Snapshot a caller-supplied trailer value. apply_driver_commit_model exports
 # CONAHCNUJ_COMMIT_MODEL for api-commit.sh, so a later commit must not treat
 # that export as a new explicit override.
 USER_COMMIT_MODEL="${CONAHCNUJ_COMMIT_MODEL:-}"
@@ -94,6 +100,13 @@ PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
 # assignment. log_review_handoff words its final line after it, so the run log
 # never claims a review request the run could not verify.
 REVIEW_HANDOFF_CONFIRMED="true"
+
+# What collect_initial_context gathered for this run (unresolved review threads
+# of a resumed PR, the orientation files of the checkout). The issue / PR body
+# is always in the prompt by itself; this is the rest of the deterministically
+# collectable material, set once per run after the branch checkout and handed
+# to every fresh prompt through implement().
+COLLECTED_CONTEXT=""
 
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
@@ -242,8 +255,21 @@ branch_has_commits() {
   [[ "${count}" -gt 0 ]]
 }
 
-# Pick the Model trailer label. An explicit CONAHCNUJ_COMMIT_MODEL wins.
-# Otherwise use the display name the OpenCode plugin wrote under os.tmpdir(), and
+# Shape a provider/model id like the plugin's label: `provider (model)`.
+# Only the effort part is missing, which the driver never sees.
+driver_model_value() {
+  local id="${1}" provider rest
+  provider="${id%%/*}"
+  rest="${id#*/}"
+  if [[ -n "${rest}" && "${rest}" != "${id}" ]]; then
+    printf '%s (%s)' "${provider}" "${rest}"
+  else
+    printf '%s' "${id}"
+  fi
+}
+
+# Pick the Co-Authored-By trailer value. An explicit CONAHCNUJ_COMMIT_MODEL
+# wins. Otherwise use the label the OpenCode plugin wrote under os.tmpdir(), and
 # fall back to the provider/model id that produced the working-tree change.
 apply_driver_commit_model() {
   if [[ -n "${USER_COMMIT_MODEL}" ]]; then
@@ -262,7 +288,7 @@ apply_driver_commit_model() {
     fi
   fi
   if [[ -n "${OPENCODE_LAST_MODEL:-}" ]]; then
-    CONAHCNUJ_COMMIT_MODEL="${OPENCODE_LAST_MODEL}"
+    CONAHCNUJ_COMMIT_MODEL="$(driver_model_value "${OPENCODE_LAST_MODEL}")"
     export CONAHCNUJ_COMMIT_MODEL
   fi
 }
@@ -272,8 +298,9 @@ apply_driver_commit_model() {
 # comes from the coding agent (.commit-msg); the driver never invents a fixed
 # message, so when the agent left none out it refuses to commit. Test mode:
 # plain local commit (no network / no secret) so flows can be exercised
-# offline. api-commit.sh appends the Model trailer from CONAHCNUJ_COMMIT_MODEL;
-# test mode adds the same trailer with a second -m paragraph.
+# offline. api-commit.sh appends the Co-Authored-By trailer from
+# CONAHCNUJ_COMMIT_MODEL; test mode adds the same trailer with a second -m
+# paragraph.
 commit_changes() {
   local message
   # .branch-name is metadata, never part of the implementation.
@@ -293,8 +320,8 @@ commit_changes() {
   apply_driver_commit_model
   if [[ "${TEST_MODE}" == "1" ]]; then
     git config commit.gpgsign false
-    if [[ -n "${CONAHCNUJ_COMMIT_MODEL:-}" ]] && ! printf '%s\n' "${message}" | grep -qE '^[[:space:]]*[Mm]odel:'; then
-      git commit -q -m "${message}" -m "Model: ${CONAHCNUJ_COMMIT_MODEL}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+    if [[ -n "${CONAHCNUJ_COMMIT_MODEL:-}" ]] && ! printf '%s\n' "${message}" | grep -qiE '^[[:space:]]*co-authored-by:'; then
+      git commit -q -m "${message}" -m "Co-Authored-By: ${CONAHCNUJ_COMMIT_MODEL}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
     else
       git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
     fi
@@ -621,6 +648,55 @@ resolve_agent_branch_name() {
   printf '%s\n' "${want}"
 }
 
+# --- collected context ------------------------------------------------------
+
+# Gather the material the first model round would otherwise have to look up
+# itself, so a run starts from what is already known: the review threads a
+# resumed PR still has open, and the orientation files of the checkout
+# (README.md / AGENTS.md by default; CONAHCNUJ_CONTEXT_FILES takes a
+# space-separated list, an explicitly empty value sends no files). Only
+# deterministically collectable information goes in - the prompt labels it
+# Collected context and shows it as data, never as instruction, so the agent
+# contract stays the single paragraph that says how to work. Read after the
+# branch checkout: the files must come from the head the agent will work on.
+# Args: owner repo [pr]. Prints the sections; empty when there is nothing.
+collect_initial_context() {
+  local owner="${1}" repo="${2}" pr="${3:-}"
+  local out="" labels="" rv payload raw threads
+  if [[ -n "${pr}" ]]; then
+    rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
+    payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
+    raw="$(gh_api_unb64 "${payload}")"
+    threads="$(printf '%s' "${raw}" | gh_api_unresolved_threads)"
+    if [[ -n "${threads}" ]]; then
+      out="Unresolved review threads on PR #${pr}:
+${threads}"
+      labels="unresolved review threads of PR #${pr}"
+    fi
+  fi
+
+  local file_list file content
+  # No colon in the expansion: an explicitly empty CONAHCNUJ_CONTEXT_FILES
+  # means "collect no files at all", while an unset one keeps the default.
+  file_list="${CONAHCNUJ_CONTEXT_FILES-README.md AGENTS.md}"
+  while IFS= read -r file; do
+    [[ -f "${file}" ]] || continue
+    content="$(cat -- "${file}")"
+    [[ -n "${content}" ]] || continue
+    if [[ -n "${out}" ]]; then
+      out="${out}
+
+"
+    fi
+    out="${out}${file}:
+${content}"
+    labels="${labels:+${labels}, }${file}"
+  done < <(printf '%s\n' "${file_list}" | tr ' ' '\n')
+
+  echo "Collected context up front: ${labels:-nothing}" >&2
+  printf '%s\n' "${out}"
+}
+
 # --- implementation ---------------------------------------------------------
 
 # Run opencode until one model completes the work. A failed model hands its
@@ -664,7 +740,7 @@ implement() {
       echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
     fi
     run_failed="false"
-    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}"; then
+    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
       run_failed="true"
     fi
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
@@ -1021,30 +1097,31 @@ drive() {
     if [[ "${actionable}" == "true" && -n "${sig}" && "${sig}" != "${last_sig}" ]]; then
       last_sig="${sig}"
       echo "New review feedback detected; addressing it." >&2
-      local addressed="false"
-      if implement "${title}" "${body}" "Address the pull request review feedback:
+      # The coding agent answers the reviewer in the thread itself (the reply
+      # endpoint and every thread comment id are in the summary), besides any
+      # code change the feedback asks for. The driver no longer posts its own
+      # "Addressed the review feedback" comment: the in-thread replies are how
+      # the reviewer learns what happened. Because the fingerprint drops
+      # bot-authored comments, those replies never look like fresh feedback.
+      local reply_help="Address the pull request review feedback. Reply in each unresolved thread below, saying what you changed or answering the question. Post the reply with the GitHub API (POST https://api.github.com/repos/${owner}/${repo}/pulls/${pr}/comments/<comment_id>/replies is the reply endpoint; \${GH_TOKEN} is set) using the comment id shown for each thread, and make code changes where the feedback asks for them."
+      if ! implement "${title}" "${body}" "${reply_help}
 
 ${summary}"; then
-        addressed="true"
+        echo "No working-tree change was produced for this feedback; keeping whatever thread replies were already made." >&2
       fi
       if workdir_changed "$(pwd)"; then
         commit_changes
-        addressed="true"
       fi
-      if [[ "${addressed}" == "true" ]]; then
-        if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
-          echo "Constraints failing after addressing feedback; fixing next cycle." >&2
-          continue
-        fi
-        request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
-        gh_api_post_comment "${owner}" "${repo}" "${pr}" "Addressed the review feedback:
-
-${summary}" >/dev/null || echo "WARNING: could not post the review-feedback reply on PR #${pr}." >&2
-        echo "Replied on PR #${pr} after addressing review feedback." >&2
-        log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
-        exit 0
+      # Hand the PR back to the reviewer before polling the non-reviewer
+      # constraints: the reviewer can start looking at the replies the moment
+      # the round is over, and the constraints are re-verified while they do.
+      request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
+      if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
+        echo "Constraints failing after addressing feedback; fixing next cycle." >&2
+        continue
       fi
-      echo "No changes could be produced for this feedback; leaving the review request as it is." >&2
+      log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
+      exit 0
     fi
 
     request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
@@ -1074,6 +1151,10 @@ start_issue() {
   base_branch="$(issue_branch_name "${num}" "${title}")"
   branch="$(next_free_branch "${owner}" "${repo}" "${base_branch}")"
   branch="$(ensure_issue_branch "${owner}" "${repo}" "${num}" "${title}" "${default_branch}" "${default_oid}" "${branch}")"
+
+  # Only after the checkout, so the files below are read from the head the
+  # agent will work on. An issue has no PR yet, hence no review threads.
+  COLLECTED_CONTEXT="$(collect_initial_context "${owner}" "${repo}")"
 
   # An earlier run may have already committed the implementation to this
   # branch. In that case there is nothing left to implement, so skip the
@@ -1141,6 +1222,9 @@ resume_pr() {
   esac
 
   ensure_pr_branch_head "${owner}" "${repo}" "${head}"
+  # The PR's still-open review threads are gathered here, once, instead of
+  # waiting for the review phase to hand them over mid-run.
+  COLLECTED_CONTEXT="$(collect_initial_context "${owner}" "${repo}" "${pr}")"
   drive "${owner}" "${repo}" "${pr}" "${head}" "${base}" "${title}" "${body}" "${closes}"
 }
 
