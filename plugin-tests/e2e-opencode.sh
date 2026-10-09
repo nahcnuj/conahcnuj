@@ -85,10 +85,11 @@ mapfile -t E2E_MODELS <<< "${MODELS}"
 
 # The free models are a shared service that can be briefly unavailable
 # or rate-limit every parallel attempt for the whole 150s timeout
-# (empty output, opencode rc=124). One retry round separates such a
-# transient outage from a real regression: a broken plugin fails both
-# rounds, a passing round ends the test immediately.
-E2E_MAX_ROUNDS=2
+# (empty output, opencode rc=124). Retry rounds separate such a transient
+# outage from a real regression: a broken plugin fails every round, a
+# passing round ends the test immediately. The backoff between rounds is
+# jittered so a service that recovers is not immediately re-burst into.
+E2E_MAX_ROUNDS=3
 E2E_SUCCESS=""
 for ((round = 1; round <= E2E_MAX_ROUNDS; round++)); do
   echo "E2E round ${round}/${E2E_MAX_ROUNDS}"
@@ -142,7 +143,7 @@ for ((round = 1; round <= E2E_MAX_ROUNDS; round++)); do
   wait 2>/dev/null || true
   if [ "${round}" -lt "${E2E_MAX_ROUNDS}" ]; then
     echo "E2E round ${round} surfaced no 'git vc'; retrying"
-    sleep 10
+    sleep $((20 + RANDOM % 21))
   fi
 done
 
