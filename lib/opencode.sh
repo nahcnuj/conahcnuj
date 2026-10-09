@@ -3,7 +3,10 @@
 # Provides model enumeration and hands the same opencode session to the next
 # model when the current model cannot complete the work. A failed round sets
 # OPENCODE_ROUND_ENVIRONMENT, so the driver can tell "this provider is down"
-# apart from "this model is not good enough".
+# apart from "this model is not good enough". A round whose provider says the
+# model itself is gone (deprecated) sets OPENCODE_ROUND_DEPRECATED instead:
+# that is permanent and model-specific, so the driver remembers the model as
+# dead without blaming the rest of its provider.
 #
 # opencode's own output is a stream of JSON events; lib/opencode-render.sh
 # turns it into the driver's run log, one context header per block. The stream
@@ -25,6 +28,12 @@ OPENCODE_RENDER_SH="${OPENCODE_LIB_DIR}/opencode-render.sh"
 # is down" apart from "this model is not good enough" -- only the former says
 # anything about the provider's other models (#149).
 OPENCODE_ROUND_ENVIRONMENT="false"
+
+# Whether the round that just finished died because the model itself is
+# permanently gone (deprecated). Deprecation is model-specific: no other model
+# of the same provider is affected and no retry brings the model back, so the
+# driver remembers just that model as dead (#209).
+OPENCODE_ROUND_DEPRECATED="false"
 
 # List available models, one per line. Test mode: $MOCK_OPENCODE_MODELS.
 opencode_get_models() {
@@ -110,6 +119,18 @@ opencode_round_is_environment() {
     grep -Eiq 'token refresh failed|invalid_grant|cannot connect to api|unable to connect|was there a typo in the url|transport error|fetch failed|endpoint is unavailable|upstream request failed|upstream error|service temporarily overloaded|socket connection|providerautherror|authenticationerror|unauthorized|enotfound|econnrefused|econnreset|etimedout|getaddrinfo'
 }
 
+# True when the round's error stream says the model itself is permanently gone:
+# the provider reports it as deprecated. Unlike an environment error this says
+# nothing about the rest of the provider -- the other models of the same
+# provider stay usable -- but the model will never come back, so the driver
+# marks just that model dead instead of re-running it.
+opencode_round_is_deprecated() {
+  local file="${1}"
+  [[ -f "${file}" ]] || return 1
+  grep -F '"type":"error"' "${file}" 2>/dev/null |
+    grep -Eiq 'has been deprecated|is deprecated|no longer supported'
+}
+
 # Run opencode with a specific model and publish its session ID in
 # OPENCODE_SESSION_ID so a later model can continue the same conversation.
 # Args: title body workdir model [extra_context] [session_id] [previous_model] [collected_context]
@@ -119,6 +140,7 @@ opencode_run() {
   local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}" collected_context="${8:-}"
   local prompt
   OPENCODE_ROUND_ENVIRONMENT="false"
+  OPENCODE_ROUND_DEPRECATED="false"
   if [[ -n "${session_id}" ]]; then
     prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
   else
@@ -143,7 +165,12 @@ opencode_run() {
     if [[ " ${MOCK_OPENCODE_ENV_ERROR:-} " == *" ${model} "* ]]; then
       OPENCODE_ROUND_ENVIRONMENT="true"
     fi
-    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+    # MOCK_OPENCODE_DEPRECATED lists the models the provider reports as
+    # permanently gone (also implies MOCK_OPENCODE_ERROR).
+    if [[ " ${MOCK_OPENCODE_DEPRECATED:-} " == *" ${model} "* ]]; then
+      OPENCODE_ROUND_DEPRECATED="true"
+    fi
+    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" || "${OPENCODE_ROUND_DEPRECATED}" == "true" ]]; then
       if [[ -d "${workdir}" && -w "${workdir}" ]]; then
         printf 'partial change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
       fi
@@ -222,6 +249,11 @@ opencode_run() {
   "${executable[@]}" "${args[@]}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
   # Only a failed round is classified: a round that ended fine may still carry
   # a retried-and-recovered error event, which says nothing about the provider.
+  # Deprecation is checked first: "the model is gone" is permanent and
+  # model-specific, so it must win over a transport blip in the same stream.
+  if [[ "${status}" != "0" ]] && opencode_round_is_deprecated "${output_file}"; then
+    OPENCODE_ROUND_DEPRECATED="true"
+  fi
   if [[ "${status}" != "0" ]] && opencode_round_is_environment "${output_file}"; then
     OPENCODE_ROUND_ENVIRONMENT="true"
   fi

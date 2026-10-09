@@ -81,8 +81,9 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `CONAHCNUJ_IMPORT=1` | `bin/conahcnuj.sh` を `main` 実行せずに source する（単体テスト用） |
 | `OPENCODE_TEST_MODE=1` | `opencode` の代わりにモックを使う |
 | `MOCK_OPENCODE_MODELS` | モックのモデル一覧（`provider/model` を 1 行ずつ） |
-| `MOCK_OPENCODE_ERROR` | 指定モデルを環境エラーで失敗させる |
+| `MOCK_OPENCODE_ERROR` | 指定モデルを失敗させる |
 | `MOCK_OPENCODE_ENV_ERROR` | 各ラウンドを環境エラーで終了させる（`conahcnuj-env-failure` 再現） |
+| `MOCK_OPENCODE_DEPRECATED` | 指定モデルを「非推奨（deprecated）で恒久的に利用不可」で失敗させる（`conahcnuj-deprecated-model` 再現） |
 | `MOCK_OPENCODE_MESSAGE_ONLY` | 作業ツリー無変更 + `.commit-msg` のみのラウンドを再現 |
 | `MOCK_OPENCODE_NOOP` | 指定モデルを no-op（実装を省略した振る舞い）にする |
 | `MOCK_OPENCODE_SESSION_ID` | モックが返す `sessionID` |
@@ -92,7 +93,8 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 ドライバとライブラリが内部状態として扱う変数です。ユーザー設定ではありません。
 
 `OPENCODE_SESSION_ID` / `OPENCODE_LAST_MODEL` / `OPENCODE_USED_MODELS` /
-`OPENCODE_HANDOFFS` / `OPENCODE_ROUND_ENVIRONMENT`（ラウンド成否の分類）/
+`OPENCODE_HANDOFFS` / `OPENCODE_ROUND_ENVIRONMENT` / `OPENCODE_ROUND_DEPRECATED`
+（ラウンド成否の分類）/ `OPENCODE_DEAD_MODELS`（途中で非推奨になったモデル）/
 `CONAHCNUJ_RUN_TIMEOUT_SECONDS`（単発ラウンドのタイムアウト）/
 `OPENCODE_LIB_DIR` / `OPENCODE_RENDER_SH`（ライブラリの場所）/
 `GH_API_LAST_HTTP_CODE`（最後の HTTP ステータス）/

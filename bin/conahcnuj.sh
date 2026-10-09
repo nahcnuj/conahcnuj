@@ -105,6 +105,12 @@ REVIEW_HANDOFF_CONFIRMED="true"
 # to every fresh prompt through implement().
 COLLECTED_CONTEXT=""
 
+# Models a round has shown to be permanently gone (deprecated). Deprecation is
+# model-specific, so the provider is not dropped for it; the model itself is
+# remembered across implement() rounds within this process so it is never run
+# again (#209).
+OPENCODE_DEAD_MODELS=""
+
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
   [[ "$(cat "${PR_BODY_SYNCED_FILE}" 2>/dev/null || true)" == "1" ]]
@@ -706,7 +712,9 @@ ${content}"
 # can reach it either, so the provider is given up on and its remaining models
 # are skipped. When every failure was environmental, the run ends with that
 # diagnosis and the bug report says so, instead of blaming the driver for an
-# environment that was down all along (#149).
+# environment that was down all along (#149). A round whose model is reported
+# as deprecated is the opposite: permanent but model-specific, so only that
+# model is remembered as dead and the provider stays usable (#209).
 implement() {
   local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider
   local dead_providers="" failed_rounds=0 env_failed_rounds=0 ran_without_failure=0
@@ -720,6 +728,10 @@ implement() {
     [[ -z "${model}" ]] && continue
     check_timeout
     provider="${model%%/*}"
+    if [[ " ${OPENCODE_DEAD_MODELS} " == *" ${model} "* ]]; then
+      echo "Skipping ${model}: it is permanently unavailable (deprecated); no point running it again." >&2
+      continue
+    fi
     if [[ " ${dead_providers} " == *" ${provider} "* ]]; then
       echo "Skipping ${model}: provider ${provider} already failed on an environment error, and no other of its models can change that." >&2
       continue
@@ -751,7 +763,10 @@ implement() {
     previous_model="${model}"
     if [[ "${run_failed}" == "true" ]]; then
       failed_rounds=$((failed_rounds + 1))
-      if [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+      if [[ "${OPENCODE_ROUND_DEPRECATED}" == "true" ]]; then
+        OPENCODE_DEAD_MODELS="${OPENCODE_DEAD_MODELS} ${model}"
+        echo "Model ${model} has been deprecated (permanently unavailable); skipping it for the rest of this run." >&2
+      elif [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
         env_failed_rounds=$((env_failed_rounds + 1))
         dead_providers="${dead_providers} ${provider}"
         echo "Model ${model} failed before completing the work: environment error (provider unreachable or credentials rejected); giving up on provider ${provider} for the rest of this run." >&2
