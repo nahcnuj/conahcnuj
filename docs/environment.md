@@ -67,10 +67,9 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 
 | 変数 / secret | 使う workflow | 内容 |
 | --- | --- | --- |
-| `secrets.APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY` | issue-driver / weekly-self-improvement | App 認証情報（PEM は `$RUNNER_TEMP` へ書き出し）。weekly-self-improvement では findings issue の作成と Projects API（`gh project item-add`。App に repository の **Projects** 権限が必要）にも使う |
-| `vars.PROJECT_OWNER` | weekly-self-improvement | Project の owner（既定は repo owner） |
-| `vars.PROJECT_NUMBER` | weekly-self-improvement | 追加先 Project の番号。未設定なら `PROJECT_TITLE` で検索・作成 |
-| `vars.PROJECT_TITLE` | weekly-self-improvement | 検索・作成する Project 名（既定 `auto-drive self-improvement`） |
+| `secrets.APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY` | issue-driver / weekly-self-improvement | App 認証情報（PEM は `$RUNNER_TEMP` へ書き出し）。weekly-self-improvement では findings issue の作成と classic repository Projects API（card 追加。App に repository の **Projects** 権限が必要）にも使う |
+| `vars.PROJECT_NUMBER` | weekly-self-improvement | 追加先 classic Project の番号。未設定なら `PROJECT_TITLE` で検索・作成 |
+| `vars.PROJECT_TITLE` | weekly-self-improvement | 検索・作成する classic Project 名（既定 `auto-drive self-improvement`） |
 | `CONAHCNUJ_INPUT` | issue-driver | issue / PR 番号（workflow 側の受け渡し用） |
 | `CONAHCNUJ_MAX_SECONDS=3540` | issue-driver | `timeout-minutes: 60` より前に自己終了するための予算 |
 | `OPENCODE_DISABLE_AUTOUPDATE` | issue-driver / e2e | opencode の自動更新を停止 |

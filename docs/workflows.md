@@ -72,11 +72,12 @@ CI では行いません。
 - ロジックの本体は `bin/auto-drive-workflow.sh`（`gh` API でのログ収集 →
   レポート作成 → トラッキング issue へ公開 → actionable 時に findings issue を
   更新し `self-improvement` を付与）。トラッキング issue と findings issue は
-  `gh project item-add` で GitHub Project に載せる。`GITHUB_TOKEN` は Projects
-  API に到達できないため、App のインストールトークン（App に repository の
-  **Projects** 権限が必要）を使う。Project は `vars.PROJECT_NUMBER` で指定するか
-  `vars.PROJECT_TITLE` で探し作成する。解決できなければ組み込み auto-add に
-  フォールバックする。ドライバを再帰起動しない衛生ルールは
+  classic repository Project の card として board に載せる。`GITHUB_TOKEN` は
+  Projects API に到達できないため、repository の **Projects** 権限を持つ App の
+  インストールトークン（`GH_APP_TOKEN`）で repository Projects API を叩く。
+  board は `vars.PROJECT_NUMBER` で指定するか `vars.PROJECT_TITLE` で探し作成する。
+  解決できなければ組み込み auto-add にフォールバックする。ドライバを再帰起動
+  しない衛生ルールは
   [self-improvement.md](self-improvement.md#ループの衛生再帰しない理由) を参照
 
 ## Owner-approved auto-merge（`auto-merge.yml` + `owner-approved-auto-merge.yml`）
