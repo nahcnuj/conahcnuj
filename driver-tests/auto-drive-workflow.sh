@@ -292,9 +292,10 @@ grep -q '^issue create auto-drive findings' "${ROOT}/state/events" \
   && { echo "FAIL: a second findings issue must not appear"; exit 1; }
 
 # --- a Project is configured: issues land on it, the Project is created -------
-# GITHUB_TOKEN cannot reach Projects v2, so the loop uses PROJECT_TOKEN (a
-# classic PAT) and finds the Project by title, creating it when missing. Both
-# the tracking issue and a fresh findings issue must become project items.
+# The Projects API is outside GITHUB_TOKEN, so the loop reaches it with the App
+# installation token (GH_APP_TOKEN). It finds the Project by title, creating it
+# when missing. Both the tracking issue and a fresh findings issue must become
+# project items.
 true > "${ROOT}/state/events"
 true > "${ROOT}/state/issues"
 rm -f "${ROOT}/state/projects"
@@ -307,7 +308,7 @@ ERROR: no available model completed the work (tried: opencode/alpha; handoffs: n
 Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnuj.
 Bug report issue #140 created: https://github.com/nahcnuj/conahcnuj/issues/140
 EOF
-export PROJECT_TOKEN=test-token
+export GH_APP_TOKEN=test-app-token
 run_workflow
 grep -q '^project create ' "${ROOT}/state/events" \
   || { echo "FAIL: the Project must be created when missing"; cat "${ROOT}/state/events"; exit 1; }
@@ -325,12 +326,13 @@ grep -q '^issue comment' "${ROOT}/state/events" \
   || { echo "FAIL: the second run must comment on the existing issues"; cat "${ROOT}/state/events"; exit 1; }
 [[ "$(grep -c '^project item-add ' "${ROOT}/state/events" || true)" == "2" ]] \
   || { echo "FAIL: the existing tracking and findings issues must also be added"; cat "${ROOT}/state/events"; exit 1; }
-unset PROJECT_TOKEN
+unset GH_APP_TOKEN
 
-# --- no Project configured: the Projects API stays untouched -----------------
-# Without PROJECT_TOKEN or PROJECT_NUMBER the loop must not call the Projects
-# API at all (the mock would exit 1 on an unhandled `gh project`), leaving the
-# Project's built-in auto-add as the only path.
+# --- no Project reachable: the Projects API stays untouched ------------------
+# Without the App token (offline) or an explicit PROJECT_NUMBER / PROJECT_TITLE
+# the loop must not call the Projects API at all (the mock would exit 1 on an
+# unhandled `gh project`), leaving the Project's built-in auto-add as the only
+# path.
 true > "${ROOT}/state/events"
 true > "${ROOT}/state/issues"
 rm -f "${ROOT}/state/projects"

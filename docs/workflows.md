@@ -68,17 +68,15 @@ CI では行いません。
 - 権限: `GITHUB_TOKEN` の `actions: write` / `issues: write` に加え、findings
   issue を App 名義で作るため repo secrets `APP_ID` / `INSTALLATION_ID` /
   `APP_SLUG` / `PRIVATE_KEY` を使う（`GITHUB_TOKEN` で作った issue は workflow
-  を起動できず、`issues: opened` でドライバを動かせないため）。Projects へ
-  追加するときは classic PAT の `PROJECT_TOKEN` secret を使う（任意）
+  を起動できず、`issues: opened` でドライバを動かせないため）
 - ロジックの本体は `bin/auto-drive-workflow.sh`（`gh` API でのログ収集 →
   レポート作成 → トラッキング issue へ公開 → actionable 時に findings issue を
   更新し `self-improvement` を付与）。トラッキング issue と findings issue は
   `gh project item-add` で GitHub Project に載せる。`GITHUB_TOKEN` は Projects
-  v2 に到達できないため、ユーザー所有の Project には classic PAT の
-  `PROJECT_TOKEN` secret（`project` スコープ）が必要。Project は
-  `vars.PROJECT_NUMBER` で指定するか `vars.PROJECT_TITLE` で探し作成する。
-  どちらも無ければ組み込み auto-add にフォールバックする。ドライバを再帰起動
-  しない衛生ルールは
+  API に到達できないため、App のインストールトークン（App に repository の
+  **Projects** 権限が必要）を使う。Project は `vars.PROJECT_NUMBER` で指定するか
+  `vars.PROJECT_TITLE` で探し作成する。解決できなければ組み込み auto-add に
+  フォールバックする。ドライバを再帰起動しない衛生ルールは
   [self-improvement.md](self-improvement.md#ループの衛生再帰しない理由) を参照
 
 ## Owner-approved auto-merge（`auto-merge.yml` + `owner-approved-auto-merge.yml`）

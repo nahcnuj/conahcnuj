@@ -21,14 +21,14 @@
 #     start workflows, so a GITHUB_TOKEN issue could not reach the driver on its
 #     own. A labelled App issue starts it on `issues: opened`.
 #   - the tracking and findings issues are added to a GitHub Project explicitly
-#     (gh project item-add), so the board shows the work items without relying
-#     on the owner enabling the Project's built-in "auto-add" by hand. The
-#     GITHUB_TOKEN cannot reach Projects v2: a user-owned Project needs a
-#     classic PAT with the `project` scope (PROJECT_TOKEN), while an org-owned
-#     Project works with the App installation token. When neither a
-#     PROJECT_TOKEN nor a PROJECT_NUMBER is configured, the loop falls back to
-#     the built-in "auto-add" workflow on `label:self-improvement`, so a Project
-#     the owner configured by hand keeps working.
+#     (gh project item-add) with the App installation token, so the board shows
+#     the work items without relying on the owner enabling the Project's
+#     built-in "auto-add" by hand. The Projects API is outside the workflow's
+#     GITHUB_TOKEN; it runs with the App token, which carries the repository
+#     "Projects" permission the owner granted. When the Project cannot be
+#     resolved the loop falls back to the built-in "auto-add" workflow on
+#     `label:self-improvement`, so a Project the owner configured by hand keeps
+#     working.
 #   - the Project is addressed by PROJECT_NUMBER, or looked up by
 #     PROJECT_TITLE (default "auto-drive self-improvement") and created when it
 #     is missing, so no per-run manual input is needed.
@@ -55,9 +55,9 @@
 #   --project-number N    Project number to add items to (or $PROJECT_NUMBER)
 #   --project-title TITLE Project to find/create when no number (or $PROJECT_TITLE)
 #
-# Environment: PROJECT_TOKEN is the token with `project` scope used for the
-# Projects API (a classic PAT for a user-owned Project; the App token is used
-# when PROJECT_TOKEN is unset, which works for an org-owned Project).
+# Environment: GH_APP_TOKEN is the App installation token used for the Projects
+# API (the App holds the repository "Projects" permission the owner granted);
+# GITHUB_TOKEN / the App token cover the rest as gh_app documents.
 #
 # Report -> stdout, progress -> stderr. Exit 0 on success; > 0 on any failure
 # so the Actions job fails loudly.
@@ -98,7 +98,6 @@ dispatch_ref=""
 project_owner="${PROJECT_OWNER:-}"
 project_number="${PROJECT_NUMBER:-}"
 project_title="${PROJECT_TITLE:-}"
-project_token="${PROJECT_TOKEN:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -144,20 +143,17 @@ gh_app() {
   fi
 }
 
-# Projects v2 is outside the workflow's GITHUB_TOKEN, and a user-owned Project
-# is outside a GitHub App installation as well: it needs a classic PAT with the
-# `project` scope (PROJECT_TOKEN). An org-owned Project works with the App
-# installation token. Only run when the loop can actually reach the Project: an
-# explicit PROJECT_NUMBER (with whatever token is available) or a PROJECT_TOKEN
-# (which may discover/create the Project by title).
+# The Projects API is outside the workflow's GITHUB_TOKEN, so the loop reaches
+# it with the App installation token (GH_APP_TOKEN), which carries the
+# repository "Projects" permission the owner granted. Only run when the loop can
+# reach the Project: the workflow always has the App token, while an offline run
+# needs an explicit PROJECT_NUMBER / PROJECT_TITLE.
 project_configured() {
-  [[ -n "${project_number}" || -n "${project_token}" ]]
+  [[ -n "${GH_APP_TOKEN:-}" || -n "${project_number}" || -n "${project_title}" ]]
 }
 
 gh_project() {
-  if [[ -n "${project_token}" ]]; then
-    GH_TOKEN="${project_token}" gh "$@"
-  elif [[ -n "${GH_APP_TOKEN:-}" ]]; then
+  if [[ -n "${GH_APP_TOKEN:-}" ]]; then
     GH_TOKEN="${GH_APP_TOKEN}" gh "$@"
   else
     gh "$@"
@@ -165,15 +161,14 @@ gh_project() {
 }
 
 # Resolve the Project number to add items to: an explicit --project-number wins;
-# otherwise, with a PROJECT_TOKEN, find the Project by title and create it when
-# it is missing. Prints the number, or nothing on failure (the caller warns and
-# falls back to the Project's built-in auto-add).
+# otherwise find the Project by title and create it when it is missing. Prints
+# the number, or nothing on failure (the caller warns and falls back to the
+# Project's built-in auto-add).
 resolve_project_number() {
   if [[ -n "${project_number}" ]]; then
     printf '%s\n' "${project_number}"
     return 0
   fi
-  [[ -n "${project_token}" ]] || return 1
   local owner="${project_owner:-${repo%%/*}}"
   local title="${project_title:-${PROJECT_TITLE_DEFAULT}}"
   title="${title//\"/}"
