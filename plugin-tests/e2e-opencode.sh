@@ -9,38 +9,45 @@ slot_name() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
 }
 
-# One model attempt. Every attempt runs in its own copy of the
-# installed plugin tree (OPENCODE_CONFIG_DIR) and of the fixture
+# One model attempt within a round. Every attempt runs in its own copy
+# of the installed plugin tree (OPENCODE_CONFIG_DIR) and of the fixture
 # repo, and writes its own output files: parallel opencode sessions
 # must not share the fixture's git index (concurrent git vc runs
 # would collide on index.lock) or the config dir.
 run_e2e_model() {
-  local model="$1"
-  local slot home
+  local model="$1" round="$2"
+  local slot slot_dir status_file rc=0
   slot="$(slot_name "${model}")"
-  home="${E2E_DIR}/${slot}"
-  mkdir -p "${home}"
+  slot_dir="${E2E_DIR}/r${round}-${slot}"
+  status_file="${E2E_DIR}/results/r${round}-${slot}.status"
+  mkdir -p "${slot_dir}"
   # Guarantee a verdict even if this attempt dies unexpectedly
-  # (set -e inside the subshell): the orchestrator polls these
-  # files, so a missing one would stall the wait until the
-  # deadline. An explicit verdict is never overwritten.
-  trap '[ -f "${E2E_DIR}/results/${slot}.status" ] || echo fail > "${E2E_DIR}/results/${slot}.status"' EXIT
-  cp -a "${RUNNER_TEMP}/e2e-inst" "${home}/inst"
-  cp -a "${RUNNER_TEMP}/e2e-fixture" "${home}/fixture"
+  # (set -e inside the subshell): the orchestrator polls these files,
+  # so a missing one would stall the wait until the deadline. The path
+  # is expanded here, while `slot` is still in scope — the EXIT trap
+  # runs after this function's locals are gone. An explicit verdict is
+  # never overwritten.
+  # shellcheck disable=SC2064  # expand $status_file now; it is unset at EXIT
+  trap "[ -f '${status_file}' ] || echo fail > '${status_file}'" EXIT
+  cp -a "${RUNNER_TEMP}/e2e-inst" "${slot_dir}/inst"
+  cp -a "${RUNNER_TEMP}/e2e-fixture" "${slot_dir}/fixture"
 
-  OPENCODE_CONFIG_DIR="${home}/inst" \
+  OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
     OPENCODE_DISABLE_AUTOUPDATE=true \
     OPENCODE_DISABLE_MODELS_FETCH=true \
-    timeout 150 opencode run --format json --model "${model}" --dir "${home}/fixture" --title e2e \
+    timeout 150 opencode run --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
     "Commit the staged changes with message e2e test. Execute the necessary commands." \
-    > "${home}/out.jsonl" 2> "${home}/err.log" || true
+    > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" || rc=$?
 
-  JSONL="$(grep -h '^{' "${home}/out.jsonl" || true)"
+  JSONL="$(grep -h '^{' "${slot_dir}/out.jsonl" || true)"
   TEXT="$(echo "${JSONL}" | jq -s -r '[.. | strings] | join("\n")')"
   echo "=== ${model}: last lines ==="
   echo "${TEXT}" | tail -5
   echo "=== ${model}: tool diagnostics ==="
   echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
+  echo "=== ${model}: opencode rc=${rc}$( [ "${rc}" = 124 ] && echo ' (timeout: exceeded 150s)' ) ==="
+  echo "=== ${model}: stderr ==="
+  cat "${slot_dir}/err.log" || true
 
   # Bad: a bash call that concluded with an unexplained failure -
   # neither success (0), nor the sandbox norm (2: no remote), nor a
@@ -50,11 +57,11 @@ run_e2e_model() {
   # hook-blocked `git commit` likewise never executes.
   BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 2 and (.exit != 1 or ((.cmd // "") | contains("git vc") | not) and ((.cmd // "") | contains("api-commit.sh") | not))) | [.cmd, .exit] | @tsv' || true)"
   if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then
-    echo ok > "${E2E_DIR}/results/${slot}.status"
+    echo ok > "${status_file}"
     return 0
   fi
   echo "E2E model ${model} unsuitable (missing git vc or bad exit: ${BAD})"
-  echo fail > "${E2E_DIR}/results/${slot}.status"
+  echo fail > "${status_file}"
   return 1
 }
 
@@ -75,40 +82,67 @@ mkdir -p "${E2E_DIR}/results"
 trap 'rm -rf "${E2E_DIR}"' EXIT
 
 mapfile -t E2E_MODELS <<< "${MODELS}"
-declare -A E2E_PIDS=()
-for m in "${E2E_MODELS[@]}"; do
-  slot="$(slot_name "${m}")"
-  run_e2e_model "${m}" > "${E2E_DIR}/${slot}.log" 2>&1 &
-  E2E_PIDS[$!]="${m}"
-done
 
-# Fail fast: stop the remaining attempts once any model surfaces
-# `git vc`. Every attempt is bounded by its own `timeout 150`; the
-# deadline is the hard safety net for a wedged attempt.
+# The free models are a shared service that can be briefly unavailable
+# or rate-limit every parallel attempt for the whole 150s timeout
+# (empty output, opencode rc=124). One retry round separates such a
+# transient outage from a real regression: a broken plugin fails both
+# rounds, a passing round ends the test immediately.
+E2E_MAX_ROUNDS=2
 E2E_SUCCESS=""
-E2E_DEADLINE=$((SECONDS + 300))
-while [ ${#E2E_PIDS[@]} -gt 0 ] && [ "${SECONDS}" -lt "${E2E_DEADLINE}" ]; do
-  for pid in "${!E2E_PIDS[@]}"; do
-    slot="$(slot_name "${E2E_PIDS[${pid}]}")"
-    if [ -f "${E2E_DIR}/results/${slot}.status" ]; then
-      if [ "$(cat "${E2E_DIR}/results/${slot}.status")" = "ok" ]; then
-        E2E_SUCCESS="${E2E_PIDS[${pid}]}"
+for ((round = 1; round <= E2E_MAX_ROUNDS; round++)); do
+  echo "E2E round ${round}/${E2E_MAX_ROUNDS}"
+  declare -A E2E_PIDS=()
+  for m in "${E2E_MODELS[@]}"; do
+    slot="$(slot_name "${m}")"
+    run_e2e_model "${m}" "${round}" > "${E2E_DIR}/r${round}-${slot}.log" 2>&1 &
+    E2E_PIDS[$!]="${m}"
+  done
+
+  # Fail fast: stop the remaining attempts once any model surfaces
+  # `git vc`. Every attempt is bounded by its own `timeout 150`; the
+  # deadline is the hard safety net for a wedged attempt.
+  E2E_DEADLINE=$((SECONDS + 300))
+  while [ ${#E2E_PIDS[@]} -gt 0 ] && [ "${SECONDS}" -lt "${E2E_DEADLINE}" ]; do
+    for pid in "${!E2E_PIDS[@]}"; do
+      slot="$(slot_name "${E2E_PIDS[${pid}]}")"
+      status="${E2E_DIR}/results/r${round}-${slot}.status"
+      if [ -f "${status}" ]; then
+        if [ "$(cat "${status}")" = "ok" ]; then
+          E2E_SUCCESS="${E2E_PIDS[${pid}]}"
+        fi
+        unset "E2E_PIDS[${pid}]"
       fi
-      unset "E2E_PIDS[${pid}]"
+    done
+    if [ -n "${E2E_SUCCESS}" ]; then
+      break
+    fi
+    sleep 2
+  done
+
+  # Diagnostics for every attempt of this round (the CI log is the
+  # run's only record), then the round verdict.
+  for m in "${E2E_MODELS[@]}"; do
+    slot="$(slot_name "${m}")"
+    log="${E2E_DIR}/r${round}-${slot}.log"
+    if [ -f "${log}" ]; then
+      cat "${log}"
     fi
   done
+
   if [ -n "${E2E_SUCCESS}" ]; then
     break
   fi
-  sleep 2
-done
 
-# Diagnostics for every attempt (the CI log is the run's only
-# record), then the verdict.
-for m in "${E2E_MODELS[@]}"; do
-  slot="$(slot_name "${m}")"
-  if [ -f "${E2E_DIR}/${slot}.log" ]; then
-    cat "${E2E_DIR}/${slot}.log"
+  # Drop stragglers before the next round so a wedged attempt's
+  # timeout does not stack up behind the retry.
+  for pid in "${!E2E_PIDS[@]}"; do
+    kill "${pid}" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  if [ "${round}" -lt "${E2E_MAX_ROUNDS}" ]; then
+    echo "E2E round ${round} surfaced no 'git vc'; retrying"
+    sleep 10
   fi
 done
 
@@ -119,15 +153,6 @@ if [ -n "${E2E_SUCCESS}" ]; then
   wait 2>/dev/null || true
   echo "E2E OK: 'git vc' surfaced naturally in a real opencode session (${E2E_SUCCESS})"
   exit 0
-fi
-
-if [ ${#E2E_PIDS[@]} -gt 0 ]; then
-  for pid in "${!E2E_PIDS[@]}"; do
-    kill "${pid}" 2>/dev/null || true
-  done
-  wait 2>/dev/null || true
-  echo "E2E FAIL: timed out waiting for model attempts" >&2
-  exit 1
 fi
 
 echo "E2E FAIL: no model surfaced 'git vc' with clean exits" >&2
