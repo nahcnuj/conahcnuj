@@ -11,19 +11,23 @@
 #   1. checks out the latest default branch and implements the issue with
 #      opencode (handing the same session and working tree to another model
 #      when one fails), committing only with the agent's .commit-msg
-#   2. opens a PR, waits until every non-reviewer constraint (CI checks,
-#      mergeability) passes, then assigns the repository owner as reviewer.
+#   2. opens a PR and asks the repository owner for review right away, so a
+#      human can review while CI still runs; the non-reviewer constraints (CI
+#      checks, mergeability) are then verified, and whatever fails is fixed.
 #      That hand-off to a human is the last thing a run owes the PR, so the
-#      driver exits there; an already APPROVED PR exits earlier as "ready to
-#      merge". Never auto-merges. The request is retried once, and the PR is
-#      read back before a hand-off is called lost; only a PR that GitHub says
-#      has nobody asked fails the run, while a hand-off that cannot be verified
-#      at all ends the run with a warning (issues #134 / #139).
-#   3. when the run was resumed with fresh review feedback (comments /
-#      requested changes / security-review threads), addresses it, pushes a
-#      Verified commit, re-requests review (the agent answers the reviewer in
-#      the thread itself, so the driver posts no reply of its own), re-verifies
-#      the non-reviewer constraints and exits
+#      driver exits once the constraints pass; an already APPROVED PR exits
+#      earlier as "ready to merge". Never auto-merges. The request is retried
+#      once, and the PR is read back before a hand-off is called lost; only a
+#      PR that GitHub says has nobody asked fails the run, while a hand-off
+#      that cannot be verified at all ends the run with a warning
+#      (issues #134 / #139).
+#   3. when the run was resumed with review feedback (comments / requested
+#      changes / unresolved review threads), addresses it first, before waiting
+#      on the non-reviewer constraints: a PR with open threads cannot reach
+#      those constraints until the threads are answered, so polling first only
+#      stalls (#219). It pushes a Verified commit, re-requests review (the agent
+#      answers the reviewer in the thread itself, so the driver posts no reply
+#      of its own), re-verifies the non-reviewer constraints and exits
 #   4. on an abnormal exit (timeout, no model completed the work, unexpected
 #      errors) automatically files a bug report issue in the repository so a
 #      run the driver could not resolve is never silently lost. The report
@@ -993,6 +997,12 @@ log_review_handoff() {
 drive() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}"
   local last_sig=""
+  # Whether this run opened the PR (start_issue passes no PR number) or resumed
+  # one. A freshly opened PR can be handed to the reviewer before the CI poll;
+  # a resumed PR is polled first because it may already be merged, and asking a
+  # merged PR for review is not a hand-off (#233).
+  local fresh="false"
+  [[ -n "${pr}" ]] || fresh="true"
 
   while true; do
     check_timeout
@@ -1039,30 +1049,15 @@ drive() {
       fi
     fi
 
-    if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
-      # CI failed or the branch conflicts: implement again with that context.
-      # When no model produces a change there is nothing new to push, so back
-      # off before re-checking instead of hammering every model in a tight loop
-      # (poll_conditions returns immediately on FAILURE).
-      echo "PR #${pr}: constraints failing; fixing with a new implementation round." >&2
-      local produced_change="false"
-      if implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
-        produced_change="true"
-      fi
-      if workdir_changed "$(pwd)"; then
-        commit_changes
-        produced_change="true"
-      fi
-      if [[ "${produced_change}" != "true" ]]; then
-        echo "No model completed work for the failing constraints; backing off before re-checking." >&2
-        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
-      fi
-      continue
-    fi
-
-    echo "PR #${pr}: non-reviewer constraints satisfied." >&2
-
-    # --- review phase ---
+    # --- review feedback phase ---
+    # Address the review feedback (open threads / requested changes) BEFORE
+    # waiting on the non-reviewer constraints. A PR that still has unresolved
+    # review threads, or that waits on required conversation resolution, cannot
+    # reach the constraints the poll below waits for until those threads are
+    # answered, so polling first only burns the time budget while the known
+    # feedback sits untouched (#219). The round runs even while checks are still
+    # PENDING: any commit it makes restarts CI, which is re-verified below.
+    #
     # Asking for review is what a run hands over to a human, so the review
     # request (not an approval) is the last thing the driver produces. The
     # approval, and the merge owner-approved-auto-merge chains off it, are the
@@ -1116,7 +1111,45 @@ ${summary}"; then
       exit 0
     fi
 
-    request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
+    # --- constraints phase ---
+    # A PR this run opened is handed to the reviewer before the CI poll: the
+    # reviewer can start looking while the checks still run, instead of waiting
+    # for green first. The poll still runs - and whatever fails is fixed -
+    # before the run ends, so the hand-off and the verification both happen, in
+    # that order. A resumed PR is polled first: it may already be merged, and
+    # asking a merged PR for review is not a hand-off (#233).
+    if [[ "${fresh}" == "true" ]]; then
+      request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
+    fi
+    if ! poll_conditions "${owner}" "${repo}" "${pr}"; then
+      # CI failed or the branch conflicts: implement again with that context.
+      # When no model produces a change there is nothing new to push, so back
+      # off before re-checking instead of hammering every model in a tight loop
+      # (poll_conditions returns immediately on FAILURE).
+      echo "PR #${pr}: constraints failing; fixing with a new implementation round." >&2
+      local produced_change="false"
+      if implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
+        produced_change="true"
+      fi
+      if workdir_changed "$(pwd)"; then
+        commit_changes
+        produced_change="true"
+      fi
+      if [[ "${produced_change}" != "true" ]]; then
+        echo "No model completed work for the failing constraints; backing off before re-checking." >&2
+        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
+      fi
+      continue
+    fi
+
+    echo "PR #${pr}: non-reviewer constraints satisfied." >&2
+    # A resumed PR hands off here (a fresh PR was handed off before the poll
+    # already); a fresh PR only asks again when the first request could not be
+    # confirmed, giving it a second chance without duplicating the "assigned"
+    # line on the normal path.
+    if [[ "${fresh}" != "true" || "${REVIEW_HANDOFF_CONFIRMED}" != "true" ]]; then
+      request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
+    fi
     log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
     exit 0
   done
