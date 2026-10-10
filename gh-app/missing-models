@@ -5,3 +5,4 @@
 # knowledge survives across runs (including a fresh CI checkout). Remove a line
 # to let the driver try that model again.
 opencode/exo-free
+opencode/ling-3.0-flash-fin-free

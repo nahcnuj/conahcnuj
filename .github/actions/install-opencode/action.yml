@@ -1,4 +1,13 @@
 name: Install opencode
+description: >
+  Install the v1 opencode release this repository is built on. The
+  opencode.ai/install endpoint now serves the rewritten v2 CLI, whose run
+  flags (--dir) and plugin API differ from the v1 line the plugin, driver
+  and e2e tests target, so the latest v1 release is resolved via the
+  authenticated GitHub CLI (avoids the shared-runner api.github.com rate
+  limit) and that exact version is installed. Adds the opencode and
+  conahcnuj bin dirs to PATH. Requires a prior actions/checkout step so
+  the action can be referenced as ./.github/actions/install-opencode.
 
 runs:
   using: composite
@@ -8,6 +17,9 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        curl -fsSL https://opencode.ai/install | bash
+        TAG="$(gh release view --repo anomalyco/opencode --json tagName --jq .tagName)"
+        VER="${TAG#v}"
+        test -n "$VER"
+        curl -fsSL https://opencode.ai/install | bash -s -- --version "$VER"
         echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
