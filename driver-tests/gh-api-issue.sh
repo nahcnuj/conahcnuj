@@ -361,6 +361,41 @@ test_http_status() {
   echo "gh_api_http_status passed"
 }
 
+# A GraphQL response that came back 201 (Created) is a successful POST, not a
+# transport error. Rejecting it threw the payload away, and the conditions
+# caller then read the empty body as "no checks, no merge problem" (issue
+# #253). gh_api_call is stubbed so the status can be set directly.
+test_graphql_http_status() {
+  local out
+  out="$(
+    export GH_API_TEST_MODE=0
+    gh_api_call() { GH_API_LAST_HTTP_CODE=201; printf '%s' '{"data":{"ok":true}}'; }
+    gh_api_graphql "query { viewer { login } }"
+  )"
+  [[ "${out}" == '{"data":{"ok":true}}' ]] || { echo "FAIL: a 201 GraphQL response was rejected"; exit 1; }
+  out="$(
+    export GH_API_TEST_MODE=0
+    gh_api_call() { GH_API_LAST_HTTP_CODE=500; printf '%s' 'boom'; }
+    gh_api_graphql "query { viewer { login } }" 2>/dev/null || printf 'failed'
+  )"
+  [[ "${out}" == "failed" ]] || { echo "FAIL: a 500 GraphQL response was accepted"; exit 1; }
+  echo "gh_api_graphql (HTTP status) passed"
+}
+
+# A conditions read that fails must be reported as a failure, never as an empty
+# (passing) PR payload: the driver retries instead of assuming the constraints
+# were satisfied (issue #253).
+test_fetch_pr_conditions_read_failure() {
+  local out
+  out="$(
+    export GH_API_TEST_MODE=0
+    gh_api_graphql() { return 1; }
+    gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15 2>/dev/null || printf 'failed'
+  )"
+  [[ "${out}" == "failed" ]] || { echo "FAIL: a failed conditions read was not propagated"; exit 1; }
+  echo "gh_api_fetch_pr_conditions (read failure) passed"
+}
+
 test_requested_reviewers() {
   local out
   # What the read-back reports for a PR somebody was asked to look at.
@@ -521,6 +556,8 @@ test_create_pr
 test_update_pr
 test_request_review
 test_http_status
+test_graphql_http_status
+test_fetch_pr_conditions_read_failure
 test_requested_reviewers
 test_requested_reviewers_pretty
 test_post_comment
