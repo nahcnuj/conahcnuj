@@ -6,7 +6,7 @@
 | ファイル | 名前 | 触発 | 役割 |
 | --- | --- | --- | --- |
 | `ci.yml` | CI | push to main / PR | lint・offline テスト・型チェック・smoke・e2e・docs ビルド |
-| `issue-driver.yml` | Issue auto-drive | issue open/reopen、非 approve の review、手動 | ドライバを Actions 上で実行 |
+| `issue-driver.yml` | Issue auto-drive | issue open/reopen、非 approve の review、required checks（CI）失敗、手動 | ドライバを Actions 上で実行 |
 | `weekly-self-improvement.yml` | Weekly auto-drive self-improvement | schedule（月曜） | 直近の auto-drive 実行ログを解析し、findings を Project とドライバへ引き渡す |
 | `auto-merge.yml` | Owner-approved auto-merge | owner が approve | 再利用 workflow を呼び出してマージ |
 | `owner-approved-auto-merge.yml` | Owner-approved auto-merge | `workflow_call` | マージ処理本体（他リポジトリからも利用可） |
@@ -44,8 +44,15 @@ CI では行いません。
 ## Issue auto-drive（`issue-driver.yml`）
 
 - 触発: issue の `opened` / `reopened`、open で draft でない同リポジトリ PR への
-  **approve 以外の** review（`submitted` / `edited` / `dismissed`）、
-  手動実行（`workflow_dispatch` + `number` 入力）
+  **approve 以外の** review（`submitted` / `edited` / `dismissed`）、同リポジトリ
+  PR の required checks（`CI` workflow）失敗、手動実行
+  （`workflow_dispatch` + `number` 入力）
+- required checks の失敗は `check_run` / `check_suite` ではなく `CI` の
+  `workflow_run`（`completed`）で拾い、`conclusion == 'failure'` かつ
+  `event == 'pull_request'` かつ head が同リポジトリのときだけドライバを起動する。
+  前者はドライバ自身の run（`Issue auto-drive`）でも発火して自己再帰するため。
+  起動されたドライバは制約を読み直し、失敗していれば修正ラウンドをエージェントへ
+  渡す
 - bot（`user.type == Bot`）が作った issue / review は再帰防止のためスキップ。
   例外は `self-improvement` ラベル付きの issue（週次 findings）で、自己研鑽
   ループだけは自分の入口として起動できる

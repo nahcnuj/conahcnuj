@@ -1,9 +1,10 @@
 name: Issue auto-drive
 
-# When an issue is created or reopened, or a non-approval review is submitted,
-# edited, or dismissed, attempt to resolve it with the conahcnuj driver
-# end-to-end (feature branch -> PR -> review feedback) and end with a
-# ready-to-merge PR, or file a bug-report issue on failure.
+# When an issue is created or reopened, a non-approval review is submitted,
+# edited, or dismissed, a required check (the CI workflow) fails on a pull
+# request, or the workflow is dispatched by hand, attempt to resolve it with the
+# conahcnuj driver end-to-end (feature branch -> PR -> review feedback) and end
+# with a ready-to-merge PR, or file a bug-report issue on failure.
 #
 # The timeout is controlled on the Actions side: "timeout-minutes" below is
 # the hard cap for the whole job, and CONAHCNUJ_MAX_SECONDS is kept just under
@@ -21,6 +22,15 @@ on:
     types: [opened, reopened]
   pull_request_review:
     types: [submitted, edited, dismissed]
+  # A failed required check is itself a reason to resume the driver: it re-runs,
+  # sees the failing constraint and hands a fix round to the coding agent. The
+  # trigger is the CI workflow's completion rather than check_run / check_suite:
+  # those also fire for this driver's own run and would recurse, while
+  # workflow_run lets the `on` side name the workflow to watch, and the job `if`
+  # keeps only the failures (on a same-repository pull request).
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       number:
@@ -32,7 +42,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: conahcnuj-${{ github.event_name == 'issues' && github.event.issue.number || github.event_name == 'pull_request_review' && github.event.pull_request.number || inputs.number }}
+  group: conahcnuj-${{ github.event_name == 'issues' && github.event.issue.number || github.event_name == 'pull_request_review' && github.event.pull_request.number || (github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0].number) || inputs.number }}
   cancel-in-progress: false
 
 jobs:
@@ -66,6 +76,13 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.review.user.type != 'Bot' &&
         github.event.review.state != 'approved'
+      ) ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'failure' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.pull_requests[0] != null
       )
     defaults:
       run:
@@ -103,7 +120,7 @@ jobs:
       - name: Run the conahcnuj driver
         env:
           CONAHCNUJ_REPO: ${{ github.repository }}
-          CONAHCNUJ_INPUT: ${{ github.event_name == 'issues' && github.event.issue.number || github.event_name == 'pull_request_review' && github.event.pull_request.number || inputs.number }}
+          CONAHCNUJ_INPUT: ${{ github.event_name == 'issues' && github.event.issue.number || github.event_name == 'pull_request_review' && github.event.pull_request.number || (github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0].number) || inputs.number }}
           # Just under the 60-minute job cap so the driver exits gracefully
           # and files its bug report before Actions kills the run.
           CONAHCNUJ_MAX_SECONDS: "3540"
