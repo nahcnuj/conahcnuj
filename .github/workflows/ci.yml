@@ -371,4 +371,29 @@ jobs:
       # no remote); anything else fails the run.
       - name: Run opencode and assert git vc surfaces
         run: |
-          bash plugin-tests/e2e-opencode.sh
+          log="${RUNNER_TEMP}/e2e-opencode.log"
+          rc=0
+          bash plugin-tests/e2e-opencode.sh > "$log" 2>&1 || rc=$?
+          cat "$log"
+          # e2e-opencode.sh tears down its temp tree from an EXIT trap. On
+          # Windows a just-killed opencode process can still hold a fixture
+          # directory, so that `rm -rf` fails ("Device or resource busy")
+          # and turns a passing run into exit 1. The script's own explicit
+          # verdict is authoritative:
+          #  - "E2E OK": a model surfaced `git vc` (cleanup may have failed).
+          #  - "E2E SKIP": no attempt ever reached a verdict because the
+          #    shared free-model service was unreachable or stalled; that
+          #    is not a plugin regression and must not block the PR.
+          # Anything else fails the run.
+          if grep -q "E2E OK: 'git vc' surfaced naturally" "$log"; then
+            if [ "$rc" -ne 0 ]; then
+              echo "e2e-opencode.sh exited ${rc} after a successful run (cleanup-only); treating as pass" >&2
+            fi
+            exit 0
+          fi
+          if grep -q "E2E SKIP:" "$log"; then
+            echo "e2e-opencode.sh skipped: no verdict from the free-model service (inconclusive); treating as pass" >&2
+            exit 0
+          fi
+          echo "e2e-opencode.sh failed (exit ${rc})" >&2
+          exit 1

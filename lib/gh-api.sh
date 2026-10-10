@@ -452,7 +452,7 @@ gh_api_fetch_pr_conditions() {
 # gh_api_review_summary to turn it into readable feedback text).
 gh_api_fetch_reviews() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { reviewDecision, reviews(last: 25) { nodes { state, body, author { login } } }, comments(last: 25) { nodes { body, author { login } } }, reviewThreads(first: 50) { nodes { isResolved, comments(first: 10) { nodes { body } } } } } } }"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { reviewDecision, reviews(last: 25) { nodes { state, body, author { login } } }, comments(last: 25) { nodes { body, author { login } } }, reviewThreads(first: 50) { nodes { isResolved, comments(first: 10) { nodes { databaseId, body, author { login } } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
   else
@@ -505,34 +505,57 @@ gh_api_review_summary() {
   done < <(printf '%s\n' "${comment_matches}")
 
   # Inline review threads: skip resolved ones, quote unresolved feedback.
-  local threads_part tn
+  local threads_part
   threads_part="$(printf '%s' "${json}" | sed -n 's/.*"reviewThreads":{"nodes":\(.*\)/\1/p')"
   if echo "${threads_part}" | grep -q '"isResolved":false'; then
     echo "REVIEW THREADS (unresolved):"
   fi
-  while IFS= read -r tn; do
-    [[ -z "${tn}" ]] && continue
-    local tbd
-    tbd="$(printf '%s' "${tn}" | grep -oE '"body":"[^"]*"' | sed 's/"body":"//; s/"$//' | tr '\n' ' ')"
-    printf -- '- %s\n' "${tbd}"
-  done < <(printf '%s' "${threads_part}" | grep -oE '\{"isResolved":false,"comments":\{"nodes":\[[^]]*\]' || true)
+  gh_api_format_unresolved_threads "${json}"
 }
 
 # Unresolved inline review threads from a raw reviews payload (stdin).
-# Output: one "- <body>" line per unresolved thread, nothing when every thread
-# is resolved (or there are none). The parse is the same one
-# gh_api_review_summary uses for its thread section, split out so the initial
-# context of a run can quote the feedback that is still open without dragging
-# the rest of the review state along; collect_initial_context in
-# bin/conahcnuj.sh is the caller.
+# Output: one "- [comment <id> by <author>] <body>" line per comment of an
+# unresolved thread, nothing when every thread is resolved (or there are none).
+# The comment id is what a reply is posted against (the agent answers the
+# reviewer in-thread; see the feedback round in bin/conahcnuj.sh), so the
+# summary names it. Split out so the initial context of a run can quote the
+# feedback that is still open without dragging the rest of the review state
+# along; collect_initial_context in bin/conahcnuj.sh is the caller.
 gh_api_unresolved_threads() {
-  local json threads_part tn tbd
+  local json
   json="$(gh_api_read_line)"
+  gh_api_format_unresolved_threads "${json}"
+}
+
+# Shared formatter for the two callers above: walk each unresolved thread and
+# print every comment with the numeric id a reply would target. Comments that
+# carry no id (an older/parsed-down payload) still print their body.
+gh_api_format_unresolved_threads() {
+  local json="${1}" threads_part tn
   threads_part="$(printf '%s' "${json}" | sed -n 's/.*"reviewThreads":{"nodes":\(.*\)/\1/p')"
   while IFS= read -r tn; do
     [[ -z "${tn}" ]] && continue
-    tbd="$(printf '%s' "${tn}" | grep -oE '"body":"[^"]*"' | sed 's/"body":"//; s/"$//' | tr '\n' ' ')"
-    printf -- '- %s\n' "${tbd}"
+    local cn cid ca cb printed="false"
+    while IFS= read -r cn; do
+      [[ -z "${cn}" ]] && continue
+      cid="$(gh_api_json_num "${cn}" "databaseId")"
+      ca="$(gh_api_json_str "${cn}" "login")"
+      cb="$(gh_api_json_str "${cn}" "body")"
+      [[ -n "${cb}" ]] || cb="(no body)"
+      printed="true"
+      if [[ -n "${cid}" ]]; then
+        printf -- '- [comment %s by %s] %s\n' "${cid}" "${ca:-unknown}" "${cb}"
+      else
+        printf -- '- %s\n' "${cb}"
+      fi
+    done < <(printf '%s' "${tn}" | grep -oE '\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}' || true)
+    if [[ "${printed}" != "true" ]]; then
+      local bn
+      while IFS= read -r bn; do
+        [[ -z "${bn}" ]] && continue
+        printf -- '- %s\n' "${bn}"
+      done < <(printf '%s' "${tn}" | grep -oE '"body":"[^"]*"' | sed 's/"body":"//; s/"$//' || true)
+    fi
   done < <(printf '%s' "${threads_part}" | grep -oE '\{"isResolved":false,"comments":\{"nodes":\[[^]]*\]' || true)
 }
 
@@ -540,9 +563,12 @@ gh_api_unresolved_threads() {
 # Returns empty when there is no reviewer feedback to act on, so a poll of the
 # initial "waiting for review" state (reviewDecision=REVIEW_REQUIRED or empty,
 # no reviews/comments/threads) is never mistaken for fresh feedback.
+# Comments carry their author, so the bot's own replies are dropped before the
+# hash: they are review comments too, and counting them would let a reply look
+# like fresh reviewer feedback (the driver would answer its own answer forever).
 gh_api_review_fingerprint() {
   local raw="${1}" matches="" decision=""
-  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '"body":"<!-- conahcnuj-continuation -->' || true)"
+  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '\[bot\]' | grep -v '"body":"<!-- conahcnuj-continuation -->' || true)"
   if [[ -z "${matches}" ]]; then
     # Only a decision that means "do work now" counts as feedback on its own;
     # REVIEW_REQUIRED / empty just mean "waiting for reviewers".

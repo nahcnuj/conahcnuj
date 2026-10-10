@@ -29,7 +29,7 @@ printf 'AGENTS fixture rule\n' > AGENTS.md
 # order it is the single response collect_initial_context reads for a PR.
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
-{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Please document the flag"}]}},{"isResolved":false,"comments":{"nodes":[{"body":"And add a test"}]}},{"isResolved":true,"comments":{"nodes":[{"body":"Already settled"}]}}]}}}}}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":101,"body":"Please document the flag","author":{"login":"reviewer"}}]}},{"isResolved":false,"comments":{"nodes":[{"databaseId":102,"body":"And add a test","author":{"login":"reviewer"}}]}},{"isResolved":true,"comments":{"nodes":[{"databaseId":103,"body":"Already settled","author":{"login":"reviewer"}}]}}]}}}}}
 EOF
 
 export GH_API_TEST_MODE=1
@@ -38,8 +38,8 @@ export GH_API_TEST_MODE=1
 ERR="${ROOT}/err.txt"
 out="$(collect_initial_context "nahcnuj" "conahcnuj" "15" < "${TAPE}" 2>"${ERR}")"
 [[ "${out}" == *"Unresolved review threads on PR #15:"* ]] || { echo "FAIL: the open threads have no heading"; exit 1; }
-[[ "${out}" == *"- Please document the flag"* ]] || { echo "FAIL: the first open thread was not collected"; exit 1; }
-[[ "${out}" == *"- And add a test"* ]] || { echo "FAIL: the second open thread was not collected"; exit 1; }
+[[ "${out}" == *"- [comment 101 by reviewer] Please document the flag"* ]] || { echo "FAIL: the first open thread was not collected"; exit 1; }
+[[ "${out}" == *"- [comment 102 by reviewer] And add a test"* ]] || { echo "FAIL: the second open thread was not collected"; exit 1; }
 [[ "${out}" != *"Already settled"* ]] || { echo "FAIL: a resolved thread was collected"; exit 1; }
 [[ "${out}" == *"README.md:"* ]] || { echo "FAIL: README.md has no section"; exit 1; }
 [[ "${out}" == *"Orientation fixture README"* ]] || { echo "FAIL: README.md content is missing"; exit 1; }
