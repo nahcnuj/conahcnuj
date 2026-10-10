@@ -18,9 +18,16 @@
 #   <!-- auto-drive-report runs=N findings=N actionable=N -->   <- machine-readable
 #   ## Outcomes     outcome -> run count
 #   ## Totals       rounds / handoffs / PRs / review requests / bug reports
-#   ## Models       per-model round table
 #   ## Findings     [actionable] and [informational] entries with log excerpts
+#   ## Models       per-model round table
 #   ## Runs         per-run table
+#
+# ## Findings comes before the large ## Models / ## Runs tables on purpose: the
+# weekly workflow posts the report on the issues in capped parts, cutting from
+# the tail (BODY_MAX_BYTES), and the driver that takes the findings issue reads
+# only its body, not the continuation comments. Findings placed after the tables
+# got sliced off the findings-issue body together with the run links and excerpts
+# that are the material the driver acts on.
 #
 # `actionable=` is the weekly workflow's gate: it dispatches the driver only
 # when that number is greater than zero.
@@ -393,6 +400,18 @@ printf -- '- review hand-offs: %d\n' "${total_reviews}"
 printf -- '- bug reports filed: %d\n' "${total_bugs}"
 printf -- '- round budget stops: %d\n' "${total_budget_stops}"
 
+printf '\n## Findings\n\n'
+if [[ ${findings_total} -eq 0 ]]; then
+  printf 'No findings for this period.\n'
+else
+  number=0
+  for ((i = 0; i < findings_total; i++)); do
+    number=$((number + 1))
+    printf '### F%d. [%s] %s\n\n' "${number}" "${finding_severity[$i]}" "${finding_title[$i]}"
+    printf '%s\n\n' "${finding_detail[$i]}"
+  done
+fi
+
 printf '\n## Models\n\n'
 printf '| model | rounds | completed | env errors | no work | incomplete | other failures |\n'
 printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n'
@@ -406,18 +425,6 @@ for model in ${sorted_models[@]+"${sorted_models[@]}"}; do
     "${model_incomplete["${model}"]:-0}" \
     "${model_fail["${model}"]:-0}"
 done
-
-printf '\n## Findings\n\n'
-if [[ ${findings_total} -eq 0 ]]; then
-  printf 'No findings for this period.\n'
-else
-  number=0
-  for ((i = 0; i < findings_total; i++)); do
-    number=$((number + 1))
-    printf '### F%d. [%s] %s\n\n' "${number}" "${finding_severity[$i]}" "${finding_title[$i]}"
-    printf '%s\n\n' "${finding_detail[$i]}"
-  done
-fi
 
 printf '## Runs\n\n'
 printf '| log | outcome | rounds | models |\n| --- | --- | ---: | --- |\n'

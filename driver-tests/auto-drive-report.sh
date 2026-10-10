@@ -114,4 +114,20 @@ grep -qE '.opencode/beta. \(1 round\(s\), 0 completed\)' <<<"${out}" \
 grep -q '| opencode/alpha | 3 | 0 | 1 | 0 | 1 | 0 |' <<<"${out}" \
   || { echo "FAIL: mixed per-model row for alpha is wrong"; exit 1; }
 
+# ## Findings is the actionable material, so it must precede the large
+# ## Models / ## Runs tables: the weekly workflow posts the report in capped
+# parts cut from the tail (BODY_MAX_BYTES), and the driver that takes the
+# findings issue reads only its body. A findings section placed after the tables
+# was sliced off the body together with the run links and excerpts (regression:
+# this report used to reach the driver cut inside the Models table at "| \").
+findings_line="$(grep -n '^## Findings$' <<<"${out}" | cut -d: -f1 | head -n1)"
+models_line="$(grep -n '^## Models$' <<<"${out}" | cut -d: -f1 | head -n1)"
+runs_line="$(grep -n '^## Runs$' <<<"${out}" | cut -d: -f1 | head -n1)"
+[[ -n "${findings_line}" && -n "${models_line}" && -n "${runs_line}" ]] \
+  || { echo "FAIL: the report must carry all of ## Findings / ## Models / ## Runs"; exit 1; }
+[[ "${findings_line}" -lt "${models_line}" ]] \
+  || { echo "FAIL: ## Findings must precede ## Models so a capped body split keeps it"; exit 1; }
+[[ "${findings_line}" -lt "${runs_line}" ]] \
+  || { echo "FAIL: ## Findings must precede ## Runs so a capped body split keeps it"; exit 1; }
+
 echo "auto-drive-report test passed"

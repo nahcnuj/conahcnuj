@@ -36,6 +36,11 @@
 # Environment overrides (all optional):
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
+#   CONAHCNUJ_MIN_ROUND_SECONDS  smallest model round worth starting
+#                            (default: 60 s). A run with less than this left
+#                            shuts down as "time budget exhausted" instead of
+#                            starting a round the round timeout would kill
+#                            seconds later and counting it as a failure.
 #   CONAHCNUJ_HANDOFF_RETRY_SECONDS  pause before the single review-request
 #                            retry (default: 15 s; 0 disables the pause)
 #   CONAHCNUJ_POLL_CONDITIONS_MIN/MAX  rate-limited poll window (default 15/300 s)
@@ -66,6 +71,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_MODE="${CONAHCNUJ_TEST_MODE:-0}"
 
 MAX_DURATION="${CONAHCNUJ_MAX_SECONDS:-259200}"
+MIN_ROUND_SECONDS="${CONAHCNUJ_MIN_ROUND_SECONDS:-60}"
 POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
 POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
 START_TIME="$(date +%s)"
@@ -729,6 +735,19 @@ implement() {
     now="$(date +%s)"
     run_timeout=$((MAX_DURATION - (now - START_TIME) - 30))
     (( run_timeout > 0 )) || run_timeout=1
+    # A round needs real budget to be worth starting: with only seconds left,
+    # opencode is killed by the round timeout a moment later, the round counts
+    # as a failure, and the hand-off chain keeps burning futile rounds on a
+    # budget that is already spent (this month's run logs showed a long tail of
+    # "opencode exceeded the remaining driver time budget" stops and
+    # no-model-completed runs whose last models never got a usable slice, while
+    # nearly every run ended by exhausting the budget). End the run with the
+    # budget diagnosis instead of another model failure.
+    if (( run_timeout < MIN_ROUND_SECONDS )); then
+      echo "ERROR: only ${run_timeout}s remain for another model round (minimum ${MIN_ROUND_SECONDS}s); not starting a round there is no budget left for." >&2
+      echo "ERROR: time budget (${MAX_DURATION}s) exhausted while waiting. Exiting." >&2
+      exit 1
+    fi
     if [[ -n "${OPENCODE_SESSION_ID}" ]]; then
       echo "Handing off session ${OPENCODE_SESSION_ID} from ${previous_model} to ${model}." >&2
       OPENCODE_HANDOFFS="${OPENCODE_HANDOFFS}${previous_model}->${model} "

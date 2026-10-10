@@ -31,6 +31,7 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | --- | --- | --- |
 | `CONAHCNUJ_REPO` | origin から検出 | `owner/repo` |
 | `CONAHCNUJ_MAX_SECONDS` | `259200`（72 h） | 1 実行の時間予算 |
+| `CONAHCNUJ_MIN_ROUND_SECONDS` | `60` | 新たにモデルラウンドを始める最小残り予算（秒）。これ未満なら「時間予算枯渇」として終了し、数秒でタイムアウトに殺されるだけのラウンドを始めない |
 | `CONAHCNUJ_HANDOFF_RETRY_SECONDS` | `15` | レビュー依頼リトライ前の待機秒（`0` で禁止） |
 | `CONAHCNUJ_POLL_CONDITIONS_MIN` | `15` | 制約ポーリングの最短間隔（秒） |
 | `CONAHCNUJ_POLL_CONDITIONS_MAX` | `300` | 制約ポーリングの最長間隔（秒） |

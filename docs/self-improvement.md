@@ -81,7 +81,11 @@ flowchart TD
    （初回のみ作成、以降はコメント追記）。GitHub の issue／コメント本文には
    65536 文字の上限があり、ログ抜粋が多い週は超える。その場合は本文を捨てずに
    複数のコメントへ分割して投稿する（バイト数で安全側に切り、行境界で割るので
-   マルチバイト文字は壊れない）
+   マルチバイト文字は壊れない）。分割は末尾から溢れるため、レポートは
+   `## Findings`（実行リンクとログ抜粋＝ actionable な材料）を `## Models` /
+   `## Runs` の前に置く。findings issue を読むドライバは本文しか見ないので、
+   表を先に置くと材料が続きコメント側へ切り落とされる（今週は本文が Models
+   表の途中で切れていた）
 4. **引き渡し**: `actionable > 0` のとき、findings を「auto-drive findings」issue に
    まとめ、`self-improvement` ラベルを付ける。新規作成なら `issues: opened` で、
    既存 issue への追記なら `workflow_dispatch` の再試行で、ドライバを起動する
