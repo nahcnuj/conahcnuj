@@ -4,6 +4,7 @@ gh-app/app.env
 node_modules/
 .venv/
 .smoke/
+.unit/
 _site/
 __pycache__/
 *.tmp

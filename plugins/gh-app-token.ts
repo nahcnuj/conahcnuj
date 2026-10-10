@@ -292,13 +292,38 @@ function parseBashCommand(args: unknown): string | null {
   return typeof cmd === "string" ? cmd : null
 }
 
+// The one sanctioned way to create a commit here: `git vc` is a git alias
+// this plugin injects into every shell (see shell.env), so it already wraps
+// api-commit.sh with owner/repo/branch auto-detection. Kept as a constant so
+// the hook redirects and the system-prompt rules never drift apart, and never
+// name api-commit.sh as an alternative to run.
+const VC_USAGE = 'git vc -m "<message>" [-a]'
+
 /**
- * True when a command line invokes `git commit` (the unsigned path under
- * the App identity). Other git subcommands are left alone.
+ * Commit rules appended to every system prompt, so a model reaches for `git vc`
+ * on its own instead of having to trip a hook first. Kept short and in the
+ * imperative: it is read on every single session.
  */
-function isGitCommitCommand(cmd: string): boolean {
-  return /(^|[;&|\n])\s*git(\.exe)?\s+(-C\s+\S+\s+)*commit\b/.test(cmd)
-}
+const COMMIT_RULES = [
+  "Git commits in this environment: this machine's git runs as a GitHub App,",
+  "so `git commit` can only create unsigned commits and branch rules reject",
+  `them. Commit with the \`git vc\` alias instead (${VC_USAGE}): it collects the`,
+  "same content as `git commit` (add files with `git add` first; `-a` for",
+  "tracked worktree changes) but GitHub creates and verifies the commit.",
+  "Prefer `git vc` over `git commit` and use it naturally. Do not run `git commit`,",
+  "and do not run gh-app/api-commit.sh or any other gh-app script directly:",
+  "`git vc` is the supported wrapper around it.",
+  "Do not edit or modify files under `gh-app/` (including `gh-app/api-commit.sh`);",
+  "those are implementation details of the verified-commit mechanism.",
+  "Commit only when the task asks for a commit; otherwise leave the change in",
+  "the working tree.",
+].join(" ")
+
+import {
+  API_COMMIT_SCRIPT,
+  isDirectApiCommitCommand,
+  isGitCommitCommand,
+} from "./lib/gh-app-commit"
 
 interface ShellIdentity {
   botName: string
@@ -340,13 +365,6 @@ async function injectShellEnv(
   })
 }
 
-/**
- * `tool.execute.before` hook body: `git commit` under the App identity is
- * always unsigned (commit.gpgsign is forced to false above) and fails
- * "Commits must have verified signatures" branch rules. Git aliases cannot
- * shadow the `commit` builtin, so block it here and point at the Verified
- * path instead. Throws to block, returns silently to allow.
- */
 interface SeenModel {
   provider: string
   model: string
@@ -451,20 +469,36 @@ function labelForSession(sessionID: string | undefined): string {
   return formatModelLabel(seen.provider, seen.model, seen.effort)
 }
 
-function blockUnsignedCommit(
+/**
+ * `tool.execute.before` hook body: `git commit` under the App identity is
+ * always unsigned (commit.gpgsign is forced to false above) and fails
+ * "Commits must have verified signatures" branch rules, and api-commit.sh is
+ * an implementation detail behind the `git vc` alias. Git aliases cannot
+ * shadow the `commit` builtin, so both paths are blocked here and redirected
+ * to `git vc`. Throws to block, returns silently to allow.
+ */
+function redirectToVerifiedCommit(
   tool: string,
   args: unknown,
-  botName: string,
-  vcUsage: string
+  botName: string
 ): void {
   if (tool !== "bash") {
     return
   }
   const cmd = parseBashCommand(args)
-  if (cmd !== null && isGitCommitCommand(cmd)) {
+  if (cmd === null) {
+    return
+  }
+  if (isGitCommitCommand(cmd)) {
     throw new Error(
       `Do not use \`git commit\`: commits made as ${botName} are unsigned and blocked by "Commits must have verified signatures" rules. ` +
-        `Create a Verified commit instead: ${vcUsage}`
+        `Create a Verified commit instead: ${VC_USAGE} (the \`git vc\` alias collects staged changes, or tracked ones with -a, and lets GitHub sign the commit).`
+    )
+  }
+  if (isDirectApiCommitCommand(cmd)) {
+    throw new Error(
+      `Do not run ${API_COMMIT_SCRIPT} directly: its owner/repo/branch detection and the App identity are already wired up behind \`git vc\`. ` +
+        `Use ${VC_USAGE} instead.`
     )
   }
 }
@@ -479,7 +513,6 @@ export const GhAppTokenPlugin: Plugin = async () => {
   // `git vc` (verified-commit): commit staged changes, or `-a` for tracked.
   // owner/repo/branch are auto-detected, so it works in any repo.
   const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
-  const vcUsage = `git vc -m "<message>" [-a] (or: bash "${apiCommitSh}" -m "<message>" [-a])`
 
   return {
     "chat.message": async (input) => {
@@ -514,8 +547,15 @@ export const GhAppTokenPlugin: Plugin = async () => {
         }
       }
     },
+    // Rules up front, so a model in any repository commits with `git vc`
+    // without having to trip the hook below first.
+    "experimental.chat.system.transform": async (_input, output) => {
+      if (!output.system.includes(COMMIT_RULES)) {
+        output.system.push(COMMIT_RULES)
+      }
+    },
     "tool.execute.before": async (input, output) => {
-      blockUnsignedCommit(input.tool, output.args, botName, vcUsage)
+      redirectToVerifiedCommit(input.tool, output.args, botName)
     },
   }
 }

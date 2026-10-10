@@ -22,7 +22,8 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
-├── plugin-tests/               # プラグインの runtime テスト（smoke＋e2e。node/npm・pwsh・opencode が必要）
+├── opencode/AGENTS.md         # opencode グローバルルール（コミットは git vc。install.ps1 が配置）
+├── plugin-tests/               # プラグインのテスト（unit＋smoke＋e2e と install.ps1 の AGENTS.md merge。node/npm・pwsh・opencode が必要）
 ├── driver-tests/               # ドライバの offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
 │   └── run.sh                  #   driver-tests/ 全体のランナー
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
@@ -61,9 +62,23 @@ CI の `Build docs site` ジョブが同じビルドを PR でも検証します
    `POST /app/installations/{id}/access_tokens` でインストールトークン（1時間有効）を取得。
    取得済みなら有効期限内はキャッシュ（`gh-app/token.cache`）を返す。
 2. opencode プラグイン `plugins/gh-app-token.ts` が `shell.env` フックで
-   `GH_TOKEN` と `GIT_CONFIG_*`（user.name / user.email / credential.helper / commit.gpgsign）を注入。
+   `GH_TOKEN` と `GIT_CONFIG_*`（user.name / user.email / credential.helper /
+   commit.gpgsign / alias.vc）を注入。
+3. `experimental.chat.system.transform` フックで「コミットは `git vc`」という
+   規則を全セッションのシステムプロンプトへ常時注入し、`tool.execute.before`
+   で `git commit` と `api-commit.sh` の直接実行を検知して `git vc` へ誘導する。
+4. `install.ps1` は `opencode/AGENTS.md` を `~/.config/opencode/AGENTS.md` へ
+   管理ブロックとしてマージし、リポジトリごとの指示が無い場合でも
+   エージェントが `git vc` を選べるようにする（既存の内容は保持）。
 
-## Verified コミットを作る（api-commit.sh）
+## Verified コミットを作る（`git vc`）
+
+コーディングエージェントは `git vc` でコミットする。`git vc` はプラグインが
+注入する git alias で、`gh-app/api-commit.sh` を正しい owner/repo/branch 付きで
+呼び出すラッパー。`git add` でステージしてから `git vc -m "<message>"`、
+tracked の作業ツリー変更をまとめるなら `git vc -m "<message>" -a`
+（`git commit` / `git commit -a` と収集内容は同じ）。`api-commit.sh` の直接実行は
+プラグインの `tool.execute.before` がブロックし、`git vc` へ誘導する。
 
 `gh-app/api-commit.sh` は GitHub GraphQL の `createCommitOnBranch` を使い、ブランチに
 **Verified 署名のついたコミット**を 1 件作成する。コミットは GitHub 側が作成するため、
@@ -120,10 +135,12 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    opencode を止め、待たずに次モデルへ進む（#155）。レートリミットは環境
    エラーではないので provider は落とさない。
    セッションIDを取得できなかった場合だけ新しいセッションで作業ツリーから再開する。
-1. PR を作成し、レビュアー以外の制約（status checks・mergeable）が通るまで
-   待ってから、**リポジトリ owner を reviewer にアサイン**してレビューを依頼する。
-   人がレビューを引き受ける引き渡し点（hand-off）がここなので、依頼付けられた
-   時点でドライバは正常終了する（既に Approved なら「ready to merge」で終了する）。
+1. PR を作成したら、まず **リポジトリ owner を reviewer にアサイン**して
+   レビューを依頼し、その後にレビュアー以外の制約（status checks・mergeable）を
+   ポーリングして、失敗していれば直す（人がレビューを引き受ける引き渡し点
+   hand-off を先に作るので、CI が green になるのを待ってから依頼するより
+   レビューが早く進む。#233）。依頼付けられて制約が通った時点でドライバは
+   正常終了する（既に Approved なら「ready to merge」で終了する）。
    依頼の API が失敗を返しても PR を読み返して実際に依頼が入っているかを
    確認する（GitHub が記録した後の通信エラーは拒绝と区別できないため。#134）。
    PR の本文はクローズ対象 issue の内容を基に
@@ -131,7 +148,10 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
 2. 再開実行時に新しいレビュー意見（Comment / Request changes / 未解決の
    レビュースレッド。セキュリティレビューの指摘を含む）がある場合は、
    モデルを使って対応し、api-commit.sh で Verified コミットを push し、
-   owner へレビューを再依頼してから制約を再確認して終了する。レビュースレッド
+   owner へレビューを再依頼してから制約を再確認して終了する。既知のレビュー
+   意見は制約（status checks・mergeable）のポーリングを待たずに先に対応する
+   （未解決スレッドが残る PR は、スレッドが片付くまで制約を満たせないため、
+   先に待つと時間予算を無駄にするだけ。#219）。レビュースレッド
    への返信はエージェント自身が行い（ドライバは「Addressed the review
    feedback」のような代行コメントを投稿しない）、返信は bot 著者として
    レビュー fingerprint から除外されるので、自分の返信を新規意見と誤認して

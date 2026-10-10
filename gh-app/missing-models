@@ -1,0 +1,7 @@
+# Models that opencode still lists but that are permanently unusable:
+# deprecated, removed, or otherwise gone. One provider/model per line. The
+# conahcnuj driver reads this before every round and skips these models, and it
+# appends a model here when a round proves the model itself is gone, so the
+# knowledge survives across runs (including a fresh CI checkout). Remove a line
+# to let the driver try that model again.
+opencode/exo-free

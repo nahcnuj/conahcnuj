@@ -20,12 +20,19 @@
 #     token on purpose: events raised through the workflow's GITHUB_TOKEN never
 #     start workflows, so a GITHUB_TOKEN issue could not reach the driver on its
 #     own. A labelled App issue starts it on `issues: opened`.
-#   - the repository's GitHub Project runs its built-in "auto-add" workflow on
-#     `label:self-improvement`, so the item lands on the board without any
-#     Projects API call (the GITHUB_TOKEN cannot reach Projects v2, and a
-#     user-owned Project is outside a GitHub App installation). The Project
-#     then drives status with its own built-in rules (for example, a closed
-#     item moves to Done).
+#   - the tracking and findings issues are added to the repository's classic
+#     Project board explicitly (the repository Projects API), so the board shows
+#     the work items without relying on the owner enabling the Project's
+#     built-in "auto-add" by hand. The Projects API is outside the workflow's
+#     GITHUB_TOKEN, but a repository classic Project is within a GitHub App
+#     installation: the App installation token carries the repository
+#     "Projects" permission the owner granted, so no classic PAT is needed.
+#     When the board cannot be resolved the loop falls back to the built-in
+#     "auto-add" workflow on `label:self-improvement`, so a Project the owner
+#     configured by hand keeps working.
+#   - the board is addressed by PROJECT_NUMBER, or looked up by PROJECT_TITLE
+#     (default "auto-drive self-improvement") and created when it is missing, so
+#     no per-run manual input is needed.
 #
 # At most one findings issue is open: a new week's findings are appended to the
 # existing issue and the driver is dispatched once as a retry, while a freshly
@@ -38,11 +45,18 @@
 # Usage:
 #   auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
 #                          [--lookback-days N] [--ref BRANCH]
+#                          [--project-number N] [--project-title TITLE]
 #
 #   --repo OWNER/REPO     default: $GITHUB_REPOSITORY (required otherwise)
 #   --runs-url-prefix P   link run-<id>.log files to P/<id>
 #   --lookback-days N     default 7 (>= 1)
 #   --ref BRANCH          retry dispatch ref (default $GITHUB_REF_NAME)
+#   --project-number N    classic Project number to add items to (or $PROJECT_NUMBER)
+#   --project-title TITLE classic Project to find/create when no number (or $PROJECT_TITLE)
+#
+# Environment: GH_APP_TOKEN is the App installation token used for the classic
+# Projects API (the App holds the repository "Projects" permission the owner
+# granted); GITHUB_TOKEN / the App token cover the rest as gh_app documents.
 #
 # Report -> stdout, progress -> stderr. Exit 0 on success; > 0 on any failure
 # so the Actions job fails loudly.
@@ -56,18 +70,23 @@ FINDINGS_PREFIX="auto-drive findings"
 SELF_IMPROVEMENT_LABEL="self-improvement"
 LABEL_COLOR="5319e7"
 LABEL_DESCRIPTION="weekly auto-drive self-improvement finding"
+PROJECT_TITLE_DEFAULT="auto-drive self-improvement"
+PROJECT_COLUMN_DEFAULT="To do"
 
 usage() {
   cat <<'EOF'
 Usage: auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
                               [--lookback-days N] [--ref BRANCH]
+                              [--project-number N] [--project-title TITLE]
 
 Weekly self-improvement loop: collect the "Issue auto-drive" run logs through
 `gh`, analyze them (auto-drive-report.sh, stdout), publish the report on a
 tracking issue, and keep the standing "auto-drive findings" issue up to date
 with the `self-improvement` label when the report has actionable findings. The
-label lets issue-driver.yml pick the issue up by itself and lets the GitHub
-Project auto-add it. See the script header for the loop-hygiene rules.
+label lets issue-driver.yml pick the issue up by itself; the issues are also
+added to the repository's classic Project board (PROJECT_NUMBER, or a board
+found/created by PROJECT_TITLE) so the board carries the work items. See the
+script header for the loop-hygiene rules.
 EOF
 }
 
@@ -75,6 +94,8 @@ repo=""
 runs_url_prefix=""
 lookback_days="7"
 dispatch_ref=""
+project_number="${PROJECT_NUMBER:-}"
+project_title="${PROJECT_TITLE:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,6 +103,8 @@ while [[ $# -gt 0 ]]; do
     --runs-url-prefix) runs_url_prefix="${2:-}"; shift 2 ;;
     --lookback-days) lookback_days="${2:-}"; shift 2 ;;
     --ref) dispatch_ref="${2:-}"; shift 2 ;;
+    --project-number) project_number="${2:-}"; shift 2 ;;
+    --project-title) project_title="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -96,6 +119,7 @@ if [[ -z "${repo}" ]]; then
 fi
 [[ "${repo}" =~ ^[^/]+/[^/]+$ ]] || { echo "Invalid repo: ${repo}" >&2; exit 1; }
 [[ "${lookback_days}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid lookback-days: ${lookback_days}" >&2; exit 1; }
+[[ -z "${project_number}" || "${project_number}" =~ ^[0-9]+$ ]] || { echo "Invalid project-number: ${project_number}" >&2; exit 1; }
 
 command -v gh >/dev/null 2>&1 || { echo "gh CLI is required" >&2; exit 1; }
 [[ -x "${REPORT_SCRIPT}" || -f "${REPORT_SCRIPT}" ]] || { echo "missing ${REPORT_SCRIPT}" >&2; exit 1; }
@@ -114,6 +138,64 @@ gh_app() {
   else
     gh "$@"
   fi
+}
+
+# A repository's classic Project board is within the App installation's reach:
+# the repository "Projects" permission the owner granted lets the installation
+# token (GH_APP_TOKEN) list/create the board and add cards, so no classic PAT is
+# needed. Only run when the loop can reach a board: the workflow always has the
+# App token, while an offline run needs an explicit PROJECT_NUMBER /
+# PROJECT_TITLE.
+project_configured() {
+  [[ -n "${GH_APP_TOKEN:-}" || -n "${project_number}" || -n "${project_title}" ]]
+}
+
+gh_project() {
+  if [[ -n "${GH_APP_TOKEN:-}" ]]; then
+    GH_TOKEN="${GH_APP_TOKEN}" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
+# Resolve the classic repository Project's id: an explicit --project-number
+# pins it, otherwise find the board by title and create it when missing. Prints
+# the id, or nothing on failure (the caller warns and falls back to the board's
+# built-in auto-add).
+resolve_project_id() {
+  local title="${project_title:-${PROJECT_TITLE_DEFAULT}}"
+  title="${title//\"/}"
+  local id
+  if [[ -n "${project_number}" ]]; then
+    id="$(gh_project api "repos/${repo}/projects?state=all&per_page=100" \
+      --jq ".[] | select(.number == ${project_number}) | .id" 2>/dev/null \
+      | head -n 1 || true)"
+  else
+    id="$(gh_project api "repos/${repo}/projects?state=open&per_page=100" \
+      --jq ".[] | select(.name == \"${title}\") | .id" 2>/dev/null \
+      | head -n 1 || true)"
+    if [[ -z "${id}" ]]; then
+      id="$(gh_project api --method POST "repos/${repo}/projects" \
+        -f "name=${title}" --jq '.id' 2>/dev/null || true)"
+    fi
+  fi
+  [[ "${id}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${id}"
+}
+
+# The column a card goes in: the board's first column, or a default one created
+# when the board has none.
+resolve_column_id() {
+  local project_id="${1}"
+  local column_id
+  column_id="$(gh_project api "projects/${project_id}/columns?per_page=100" \
+    --jq '.[0].id' 2>/dev/null || true)"
+  if [[ ! "${column_id}" =~ ^[0-9]+$ ]]; then
+    column_id="$(gh_project api --method POST "projects/${project_id}/columns" \
+      -f "name=${PROJECT_COLUMN_DEFAULT}" --jq '.id' 2>/dev/null || true)"
+  fi
+  [[ "${column_id}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${column_id}"
 }
 
 # GitHub rejects an issue/comment body longer than 65536 characters
@@ -188,6 +270,39 @@ comment_file_continuation() {
   done
 }
 
+# Add an issue to the resolved classic Project as a card. A failure only warns:
+# the report and the findings issue are already published, and a Project hiccup
+# must not lose them. Args: issue-url
+add_to_project() {
+  local issue_url="${1}"
+  [[ -n "${issue_url}" && -n "${project_column_resolved}" ]] || return 0
+  local number="${issue_url##*/}"
+  local content_id
+  content_id="$(gh_project api "repos/${repo}/issues/${number}" \
+    --jq '.id' 2>/dev/null || true)"
+  if [[ ! "${content_id}" =~ ^[0-9]+$ ]]; then
+    echo "warning: could not resolve issue ${issue_url} for the Project" >&2
+    return 0
+  fi
+  gh_project api --method POST "projects/columns/${project_column_resolved}/cards" \
+    -F "content_id=${content_id}" -f "content_type=Issue" >/dev/null 2>&1 \
+    || echo "warning: failed to add ${issue_url} to the Project" >&2
+}
+
+# Resolve the board and its column once. project_column_resolved stays empty
+# when there is no Project or it cannot be resolved; the loop then relies on
+# the Project's built-in auto-add.
+project_column_resolved=""
+if project_configured; then
+  if project_id_resolved="$(resolve_project_id)" \
+    && project_column_resolved="$(resolve_column_id "${project_id_resolved}")"; then
+    echo "using classic GitHub Project #${project_id_resolved}" >&2
+  else
+    project_column_resolved=""
+    echo "warning: could not resolve the classic GitHub Project; relying on its built-in auto-add" >&2
+  fi
+fi
+
 # --- 1. collect --------------------------------------------------------------
 since="$(date -u -d "${lookback_days} days ago" +%Y-%m-%dT%H:%M:%SZ)"
 echo "Collecting completed Issue auto-drive runs created >= ${since}" >&2
@@ -246,10 +361,12 @@ while IFS= read -r part; do tracking_parts+=("${part}"); done \
 if [[ -n "${tracking}" ]]; then
   gh issue comment "${tracking}" --repo "${repo}" --body-file "${tracking_parts[0]}"
   comment_file_continuation "${tracking}" "${tracking_parts[@]:1}"
+  add_to_project "https://github.com/${repo}/issues/${tracking}"
   echo "appended this week's report to tracking issue #${tracking}" >&2
 else
   url="$(gh issue create --repo "${repo}" --title "${TRACKING_TITLE}" --body-file "${tracking_parts[0]}")"
   comment_file_continuation "${url##*/}" "${tracking_parts[@]:1}"
+  add_to_project "${url}"
   echo "created the tracking issue: ${url}" >&2
 fi
 
@@ -287,6 +404,7 @@ num="$(gh issue list --repo "${repo}" --state open --limit 200 \
 if [[ -n "${num}" ]]; then
   gh issue comment "${num}" --repo "${repo}" --body-file "${body_parts[0]}"
   comment_file_continuation "${num}" "${body_parts[@]:1}"
+  add_to_project "https://github.com/${repo}/issues/${num}"
   echo "added this week's findings to issue #${num}" >&2
   # An existing issue raises no `issues: opened`, so dispatch the driver once
   # for this week's findings; a freshly created issue starts it by itself.
@@ -302,8 +420,10 @@ else
   num="${url##*/}"
   [[ "${num}" =~ ^[0-9]+$ ]] || { echo "could not read the new issue number from ${url}" >&2; exit 1; }
   comment_file_continuation "${num}" "${body_parts[@]:1}"
+  add_to_project "${url}"
   # Created as the App with the self-improvement label: issue-driver.yml accepts
-  # the bot-authored issue and starts on `issues: opened`; the Project auto-adds
-  # it. No dispatch here, so the driver never runs twice for one opening.
+  # the bot-authored issue and starts on `issues: opened`, and the Project is
+  # populated explicitly above (or by its built-in auto-add as a fallback). No
+  # dispatch here, so the driver never runs twice for one opening.
   echo "created findings issue #${num}" >&2
 fi

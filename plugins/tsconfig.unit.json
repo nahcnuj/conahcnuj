@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": ".",
+    "outDir": "../plugin-tests/.unit/out"
+  },
+  "include": ["gh-app-token.ts", "lib/gh-app-commit.ts", "lib/gh-app-commit.test.ts"]
+}

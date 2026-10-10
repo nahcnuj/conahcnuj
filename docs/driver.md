@@ -21,25 +21,39 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 - 依存: `opencode`（PATH 上）、`git`、`curl`、`openssl`、設定済みの
   `gh-app/app.env` + 秘密鍵
 - Windows + WSL 上で起動された場合、設定済みの `BASH_EXE`（Git Bash）へ
-  自動でリローンチしてから実行する
+  自動でリローンチしてから実行する。リローンチ先は `exec` せず**子プロセス**
+  として立ち上げて待ち合わせる: PowerShell からの Ctrl-C は先にこの WSL
+  シェルへ届くため、親が生き残って SIGINT を子へ SIGTERM として転送し、
+  Git Bash を止められる（中断が無視されて「効かない」ように見えなくする。#203）
 
 ## 流れ
 
 1. issue を読み、最新のデフォルトブランチからフィーチャーブランチを作って
    opencode で実装。最初のモデルが失敗（rate limit 等）したら、同じ
    `sessionID` と作業ツリーを次のモデルへ引き継えて完了まで継続する
-   （環境エラーで落ちた provider は切り分けられる）
+   （環境エラーで落ちた provider は切り分けられる）。モデル自体が
+   deprecated / 削除 / 利用不可で落ちた場合は provider ではなくそのモデルだけを
+   `gh-app/missing-models` に記録し、以後のラウンドと次回実行ではラウンドを
+   消費せずスキップする（#209）
 2. エージェントが書いた `.commit-msg` で Verified コミットを作成し、PR を開く
-3. レビュアー以外の制約（status checks・mergeable）が通るまでポーリングして、
-   **リポジトリ owner を reviewer にアサイン**してレビュー依頼 → ここで正常終了
-   （既に Approved なら「ready to merge」で終了）
+3. 新規 PR は **リポジトリ owner を reviewer にアサイン**して先にレビュー依頼する
+   （レビュアーは CI が green になるのを待たずにレビューを始められる。#233）。
+   その後にレビュアー以外の制約（status checks・mergeable）をポーリングし、
+   失敗していれば直す。制約が通った時点で正常終了（既に Approved なら
+   「ready to merge」で終了）。再開した PR は merge 済みの可能性があるため、
+   依頼の前に制約（PR の状態）を先に確認する
 4. 再開実行で新しいレビュー意見（Comment / Request changes / 未解決スレッド）が
    あれば、モデルで対応して Verified コミット → owner へ再依頼 → 制約再確認 →
-   終了。レビュースレッドへの返信はエージェント自身が行い、その返信は bot 著者
-   として fingerprint から除外されるので自分の返信でループしない
+   終了。既知のレビュー意見は制約のポーリングを待たずに**先に**対応する
+   （未解決スレッドが残る PR は、スレッドが片付くまで制約を満たせないので、
+   先に待つと時間予算を無駄にするだけ。#219）。レビュースレッドへの返信は
+   エージェント自身が行い、その返信は bot 著者として fingerprint から除外される
+   ので自分の返信でループしない
 5. 異常終了時（タイムアウト・全モデル失敗・想定外エラー等、非 0 で終わる場合）は、
    対象リポジトリへバグ報告 issue を自動作成する（終了コード・対象番号・ブランチ・
-   HEAD・実行ログ末尾を含む）
+   HEAD・実行ログ末尾を含む）。ただし **Ctrl-C 等による利用者からの中断**
+   （終了コード 130 / 143）はドライバのバグではなく、バグ報告を作成せずに
+   正常終了する（#203）
 
 ポーリングは GitHub のレートリミット（`Retry-After` / `X-RateLimit-Reset`）と
 ジッター付きスリープで調整されます。
@@ -106,6 +120,7 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level`（デバッグは `DEBUG`） |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止） |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | プロンプトへ同梱する作業ツリーファイル（スペース区切り。空で無効） |
+| `CONAHCNUJ_MISSING_MODELS_FILE` | `<gh-app>/missing-models` | 永久に使えないモデルの記録先（ラウンド前に読み、判明したモデルを追記） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード（モック API テープ + モック opencode） |
 
 全量は [environment.md](environment.md) を参照。

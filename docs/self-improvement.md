@@ -26,11 +26,13 @@ flowchart TD
     Q -- 無い --> Z[終了]
     Q -- ある --> F[findings issue を作成/更新<br>label: self-improvement]
 
-    subgraph project["GitHub Project（組み込み自動化）"]
+    subgraph project["GitHub Project"]
         B[ボードの項目] --> D[閉じたら Done]
     end
 
-    F -. 組み込み auto-add（label:self-improvement） .-> B
+    P --> A[Repository Projects API: add card]
+    F --> A
+    A --> B
     F --> I[issue-driver.yml: issues opened]
     I --> DR[conahcnuj ドライバ<br>ブランチ / Verified コミット / PR]
     DR --> O[owner のレビューと Approve]
@@ -47,19 +49,26 @@ flowchart TD
 - **findings issue は App 名義で作成する**。`GITHUB_TOKEN` で作った issue は
   workflow を起動しないため、`issues: opened` でドライバを動かすには App の
   インストールトークンが必要（`gh-app/get-token.sh` を workflow が使う）。
-- **Projects API は呼ばない**。`GITHUB_TOKEN` は Projects v2 に到達できず、
-  ユーザー所有の Project は App のインストール対象外のため、Project 側の
-  組み込み auto-add に載せる。Project で一度だけ
-  **Settings → Workflows → Auto-add to project** を有効にし、フィルタを
-  `label:self-improvement` にする。任意で「item closed → Done」も有効にする。
+- **Projects へは明示的に追加する**。トラッキング issue と findings issue を
+  classic repository Project の card として board に載せる。`GITHUB_TOKEN` は
+  Projects API に到達できないが、repository classic Project は App インストール
+  の範囲内で、owner が与えた repository の **Projects** 権限
+  （`repository_projects`）を持つ `GH_APP_TOKEN` で repository Projects API を
+  叩いて board を解決し card を追加する。board は `PROJECT_NUMBER` で指定するか、
+  `PROJECT_TITLE`（既定 `auto-drive self-improvement`）で探し、無ければワーク
+  フローが作成する。card は board 最初の column（無ければ `To do` を作成）に載せる。
+  人手で指定する入力は無い。
+- Project を解決できないときは、Project 側の組み込み **Settings → Workflows →
+  Auto-add to project**（フィルタ `label:self-improvement`）にフォールバックする。
+  任意で「item closed → Done」も有効にする。
 
 ## ファイル
 
 | パス | 役割 |
 | --- | --- |
 | `bin/auto-drive-report.sh` | ログ解析。ログのパス群を渡すと markdown レポートを stdout へ出力。`--runs-url-prefix` で `run-<id>.log` に実行 URL を付ける。先頭のメタ行 `<!-- auto-drive-report runs=N findings=N actionable=N -->` が機械可読な要約 |
-| `bin/auto-drive-workflow.sh` | 週次ループの実体。Actions API で直近のログを集め、レポートをトラッキング issue に載せ、actionable な finding があれば findings issue を更新して `self-improvement` を付ける |
-| `.github/workflows/weekly-self-improvement.yml` | 上をスケジュールで回す（月曜 01:17 UTC）。入力は無く、App 鍵を stage して findings issue だけ App 名義で作る |
+| `bin/auto-drive-workflow.sh` | 週次ループの実体。Actions API で直近のログを集め、レポートをトラッキング issue に載せ、actionable な finding があれば findings issue を更新して `self-improvement` を付ける。両 issue を classic repository Project の card として追加する（repository Projects API を App のインストールトークンで叩く。`PROJECT_NUMBER` / `PROJECT_TITLE` で board を解決、無ければ組み込み auto-add へフォールバック） |
+| `.github/workflows/weekly-self-improvement.yml` | 上をスケジュールで回す（月曜 01:17 UTC）。入力は無く、App 鍵を stage して findings issue だけ App 名義で作る。`vars.PROJECT_NUMBER` / `vars.PROJECT_TITLE` を渡す |
 
 ## 手順
 
@@ -76,6 +85,16 @@ flowchart TD
 4. **引き渡し**: `actionable > 0` のとき、findings を「auto-drive findings」issue に
    まとめ、`self-improvement` ラベルを付ける。新規作成なら `issues: opened` で、
    既存 issue への追記なら `workflow_dispatch` の再試行で、ドライバを起動する
+
+## 再実行
+
+失敗した run を再実行すると、GitHub は既定で `github.sha`（最初の試行の
+コミット）を使い回す。そのため修正を main にマージした直後に再実行しても、
+古いコードのまま同じ失敗を繰り返す（#190 の分割修正をマージ済みでも
+「Body is too long」の再実行が失敗し、#194 になった）。workflow の checkout は
+`ref: github.ref` を渡してその時点のブランチ先端（schedule は既定ブランチ、
+`workflow_dispatch` は選択した ref）を取ることで、再実行にも最新のコードを
+効かせる。
 
 ## finding の分類
 
@@ -107,7 +126,8 @@ flowchart TD
 ## 無効化・試運転
 
 - `schedule:` の cron を消すか `concurrency:` グループを変更すると止まる
-- Project の組み込み auto-add を切るとボードには載らなくなる（ループ自体は続く）
+- `PROJECT_NUMBER` / `PROJECT_TITLE` を外して App トークンも使えないときは
+  Projects へは載せず、Project の組み込み auto-add に任せる（ループ自体は続く）
 
 ## 関連ページ
 
