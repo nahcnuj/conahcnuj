@@ -13,6 +13,10 @@
 #                                       (resolves gh-app relative to itself)
 # plus:
 #   - <Destination>/plugins/gh-app-token.ts   opencode plugin
+#   - <Destination>/plugins/lib/gh-app-commit.ts   helper module (not auto-loaded)
+#   - <Destination>/AGENTS.md                 global opencode rules: the
+#                                            managed conahcnuj commit block is
+#                                            merged into whatever is there
 #   - <InstallPath>/conahcnuj                driver binary
 #   - <InstallPathParent>/lib/*.sh           driver runtime libs
 # If the config destination has no app.env yet, it is created from
@@ -39,6 +43,7 @@ if (-not $InstallPath) {
 $RepoRoot = $PSScriptRoot
 $SrcGhApp = Join-Path $RepoRoot "gh-app"
 $SrcPlugins = Join-Path $RepoRoot "plugins"
+$SrcOpencode = Join-Path $RepoRoot "opencode"
 $SrcBin = Join-Path $RepoRoot "bin"
 $SrcLib = Join-Path $RepoRoot "lib"
 
@@ -119,17 +124,86 @@ function Deploy-GhApp {
     }
 }
 
+# Merge the conahcnuj rules into the global opencode AGENTS.md.
+#
+# opencode reads <config dir>/AGENTS.md for every session in every project,
+# which is what makes an agent reach for `git vc` in repositories that carry no
+# conahcnuj docs of their own. A user may already keep personal rules in that
+# file, so the managed block is spliced in between markers: anything outside the
+# markers survives, and re-running install replaces the block instead of
+# stacking a second copy.
+function Install-GlobalAgentsMd {
+    param([string]$Dst)
+    $begin = "<!-- conahcnuj:begin -->"
+    $end = "<!-- conahcnuj:end -->"
+    $template = Join-Path $SrcOpencode "AGENTS.md"
+    if (-not (Test-Path -LiteralPath $template)) {
+        Write-Host "  WARNING: $template is missing; skipping global AGENTS.md"
+        return
+    }
+    $block = "$begin`n$((Get-NormalizedText $template).TrimEnd())`n$end`n"
+    $path = Join-Path $Dst "AGENTS.md"
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-NormalizedText $path $block
+        Write-Host "  created AGENTS.md (global rules: commit with git vc; use git vc, not git commit)"
+        return
+    }
+    $existing = Get-NormalizedText $path
+    $start = $existing.IndexOf($begin, [System.StringComparison]::Ordinal)
+    # Search for the end only after the begin, so a stray mention of the
+    # marker text earlier in the file cannot truncate the managed block.
+    $stop = if ($start -ge 0) {
+        $existing.IndexOf($end, $start + $begin.Length, [System.StringComparison]::Ordinal)
+    } else {
+        -1
+    }
+    if ($start -ge 0 -and $stop -gt $start) {
+        # Replace the managed block in place; re-running install is a no-op.
+        $after = $stop + $end.Length
+        if ($after -lt $existing.Length -and [string]$existing[$after] -eq "`n") {
+            $after += 1
+        }
+        $updated = $existing.Substring(0, $start) + $block + $existing.Substring($after)
+    } elseif ($start -ge 0) {
+        # Block start without its end: treat the tail as ours and rewrite it.
+        Write-Host "  WARNING: AGENTS.md has an unterminated conahcnuj block; rewriting it"
+        $updated = $existing.Substring(0, $start) + $block
+    } else {
+        $updated = $existing.TrimEnd() + "`n`n" + $block
+    }
+    if ($updated -ceq $existing) {
+        Write-Host "  AGENTS.md already up to date (conahcnuj rules unchanged)"
+        return
+    }
+    Write-NormalizedText $path $updated
+    Write-Host "  merged conahcnuj rules into AGENTS.md (personal rules kept)"
+}
+
 # 1. gh-app for the opencode plugin (config destination).
 Write-Host "Deploying gh-app to $DstGhAppConfig"
 Deploy-GhApp $DstGhAppConfig
 
-# 2. opencode plugin
-New-Item -ItemType Directory -Force -Path $DstPlugins | Out-Null
-$PluginName = "gh-app-token.ts"
-Copy-Item -LiteralPath (Join-Path $SrcPlugins $PluginName) -Destination (Join-Path $DstPlugins $PluginName) -Force
-Write-Host "  copied $PluginName"
+# 2. opencode plugin. opencode auto-loads every top-level plugins/*.ts and
+#    treats each export as a plugin, so only the factory lives there; the pure
+#    commit-detection module it imports goes in plugins/lib/, which the loader
+#    does not scan.
+$DstPluginsLib = Join-Path $DstPlugins "lib"
+New-Item -ItemType Directory -Force -Path $DstPluginsLib | Out-Null
+Copy-Item -LiteralPath (Join-Path $SrcPlugins "gh-app-token.ts") -Destination (Join-Path $DstPlugins "gh-app-token.ts") -Force
+Write-Host "  copied gh-app-token.ts"
+Copy-Item -LiteralPath (Join-Path (Join-Path $SrcPlugins "lib") "gh-app-commit.ts") -Destination (Join-Path $DstPluginsLib "gh-app-commit.ts") -Force
+Write-Host "  copied lib/gh-app-commit.ts"
+# Drop the helper where earlier installs put it (the loader would run it).
+$LegacyHelper = Join-Path $DstPlugins "gh-app-commit.ts"
+if (Test-Path -LiteralPath $LegacyHelper) {
+    Remove-Item -LiteralPath $LegacyHelper -Force
+    Write-Host "  removed legacy gh-app-commit.ts from the auto-loaded plugins dir"
+}
 
-# 3. driver runtime beside the binary (gh-app + lib).
+# 3. global opencode rules (opencode/AGENTS.md -> <Destination>/AGENTS.md)
+Install-GlobalAgentsMd $Destination
+
+# 4. driver runtime beside the binary (gh-app + lib).
 Write-Host "Deploying gh-app to $DstGhAppBin"
 Deploy-GhApp $DstGhAppBin
 New-Item -ItemType Directory -Force -Path $DstLibBin | Out-Null
@@ -139,7 +213,7 @@ Get-ChildItem -Path $SrcLib -Filter "*.sh" -File | ForEach-Object {
     Write-Host "  copied lib/$($_.Name)"
 }
 
-# 4. conahcnuj binary
+# 5. conahcnuj binary
 New-Item -ItemType Directory -Force -Path $DstBinDir | Out-Null
 $BinName = "conahcnuj"
 $SrcBinScript = Join-Path $SrcBin "conahcnuj.sh"
