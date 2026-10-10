@@ -20,6 +20,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 │   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
 │   └── app.env.example        #   設定テンプレート
 ├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
+├── TODO.md                    # issue ごとの進捗ファイル（着手で作成・完了で削除。実行中のみ存在）
 ├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
 ├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
 ├── opencode/AGENTS.md         # opencode グローバルルール（コミットは git vc。install.ps1 が配置）
@@ -131,12 +132,19 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    rate limit などのエラーで進められなくなった場合、opencode の同じ
    `sessionID` と現在の作業ツリーを次のモデルへ引き継ぎ、完了まで継続する。
    セッションIDを取得できなかった場合だけ新しいセッションで作業ツリーから再開する。
+   issue の進捗はリポジトリルートの `TODO.md`（生存期間は issue 毎）で管理・共有する。
+   エージェントが着手時に作成し、作業中に更新し、完了して ready to merge するときに
+   削除する（書式は問わない。）
 1. PR を作成したら、まず **リポジトリ owner を reviewer にアサイン**して
    レビューを依頼し、その後にレビュアー以外の制約（status checks・mergeable）を
    ポーリングして、失敗していれば直す（人がレビューを引き受ける引き渡し点
    hand-off を先に作るので、CI が green になるのを待ってから依頼するより
    レビューが早く進む。#233）。依頼付けられて制約が通った時点でドライバは
    正常終了する（既に Approved なら「ready to merge」で終了する）。
+   `TODO.md` がある状態では PR は **draft** として作られ、レビュー依頼をしない。
+   削除されて初めてドライバが draft を解除してレビュー依頼するので、
+   `TODO.md` がある限りエージェント自身で draft を解除できない（draft でない PR を
+   作成できない）。ドライバは削除されるまでラウンドを重ねて実装を続ける。
    依頼の API が失敗を返しても PR を読み返して実際に依頼が入っているかを
    確認する（GitHub が記録した後の通信エラーは拒绝と区別できないため。#134）。
    PR の本文はクローズ対象 issue の内容を基に
