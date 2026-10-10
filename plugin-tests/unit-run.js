@@ -652,6 +652,18 @@ test("system prompt: the git vc rules are appended exactly once and stay one lin
   assert.ok(rules.includes("`git commit`"), rules)
   assert.ok(rules.includes("api-commit.sh"), rules)
   assert.ok(rules.includes(VC_USAGE), rules)
+  // The two anti-patterns this issue exists for: running api-commit.sh
+  // directly, and editing the gh-app/ scripts that back git vc.
+  assert.ok(
+    rules.includes("do not run gh-app/api-commit.sh"),
+    `rules must forbid running api-commit.sh directly: ${rules}`
+  )
+  assert.ok(
+    rules.includes("Do not edit or modify files under `gh-app/`"),
+    `rules must forbid editing gh-app/: ${rules}`
+  )
+  // An agent that is told to commit stays told to prefer git vc naturally.
+  assert.ok(rules.includes("Prefer `git vc` over `git commit`"), rules)
   await plugin["experimental.chat.system.transform"]({}, output)
   assert.strictEqual(output.system.length, 2, "commit rules injected more than once")
 })
