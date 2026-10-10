@@ -69,6 +69,19 @@ function testIsGitCommitCommand() {
   assertEqual(isGitCommitCommand("cat api-commit.sh | bash"), false)
   assertEqual(isGitCommitCommand('bash "/tmp/api-commit.sh"'), false)
   assertEqual(isGitCommitCommand("FOO=bar bash -lc \"git commit -m hi\""), true)
+  // Launcher wrappers hand their argv to the wrapped command: a `git commit`
+  // reached through one blocks exactly like the bare form.
+  assertEqual(isGitCommitCommand("sudo git commit -m x"), true)
+  assertEqual(isGitCommitCommand("nohup git commit --amend"), true)
+  assertEqual(isGitCommitCommand("env git commit -m x"), true)
+  assertEqual(isGitCommitCommand("command git commit -m x"), true)
+  assertEqual(isGitCommitCommand("time git commit -m x"), true)
+  assertEqual(isGitCommitCommand("sudo bash -c 'git commit -m x'"), true)
+  // Non-commit verbs and non-commit commands stay untouched under a launcher.
+  assertEqual(isGitCommitCommand("sudo git push origin main"), false)
+  assertEqual(isGitCommitCommand("sudo git status"), false)
+  assertEqual(isGitCommitCommand("sudo ls"), false)
+  assertEqual(isGitCommitCommand("env -v"), false)
 }
 
 function testIsDirectApiCommitCommand() {
@@ -78,12 +91,25 @@ function testIsDirectApiCommitCommand() {
   assertEqual(isDirectApiCommitCommand("bash api-commit.sh"), true)
   assertEqual(isDirectApiCommitCommand('bash "/x/api-commit.sh"'), true)
   assertEqual(isDirectApiCommitCommand("cat api-commit.sh"), false)
+  // Same skipping for launcher wrappers around the script.
+  assertEqual(isDirectApiCommitCommand("sudo bash gh-app/api-commit.sh -m x"), true)
+  assertEqual(isDirectApiCommitCommand("nohup ./api-commit.sh -m x"), true)
+  assertEqual(isDirectApiCommitCommand("env BASH_EXE=/bin/bash ./api-commit.sh -m x"), true)
+  assertEqual(isDirectApiCommitCommand("time gh-app/api-commit.sh -a"), true)
+  // Reading or mentioning the script still passes.
+  assertEqual(isDirectApiCommitCommand("sudo cat api-commit.sh"), false)
+  assertEqual(isDirectApiCommitCommand("sudo grep -n api-commit.sh AGENTS.md"), false)
 }
 
 function testExecutedCommands() {
   assertDeepEqual(collect(executedCommands("git commit -m x")), [["git", "commit", "-m", "x"]])
   assertDeepEqual(collect(executedCommands("bash -c \"git commit\"")), [["git", "commit"]])
   assertDeepEqual(collect(executedCommands("VAR=a bash api-commit.sh")), [["api-commit.sh"]])
+  // A launcher is unwrapped so the wrapped command is what gets inspected.
+  assertDeepEqual(collect(executedCommands("sudo git commit -m x")), [["git", "commit", "-m", "x"]])
+  assertDeepEqual(collect(executedCommands("env BASH_EXE=/bin/bash ./api-commit.sh")), [
+    ["./api-commit.sh"],
+  ])
 }
 
 const tests = [

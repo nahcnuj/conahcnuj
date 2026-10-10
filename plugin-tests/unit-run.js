@@ -222,6 +222,16 @@ const GIT_COMMIT_COMMANDS = [
   "GH_TOKEN=x git commit -m x",
   'bash -c "git commit -m x"',
   "sh -c 'cd repo && git commit -m x'",
+  // Command launchers hand their argv to the wrapped command, so a commit
+  // reached through one is redirected exactly like the bare form.
+  "sudo git commit -m x",
+  "sudo -E git commit --amend",
+  "env git commit -m x",
+  "env GH_TOKEN=x git commit -m x",
+  "nohup git commit -m x",
+  "command git commit -m x",
+  "time git commit -m x",
+  "sudo bash -c 'git commit -m x'",
 ]
 
 const GIT_ALLOWED_COMMANDS = [
@@ -244,6 +254,12 @@ const GIT_ALLOWED_COMMANDS = [
   'bash "-C/path with space" -m x',
   "bash -x",
   "bash -c",
+  // Launchers must not turn reading the script or a non-commit git verb into a
+  // blocked command.
+  "sudo git status",
+  "sudo git push origin main",
+  "sudo cat gh-app/api-commit.sh",
+  "env -v",
 ]
 
 test("redirects: git commit (any form) points at git vc", async () => {
@@ -286,6 +302,11 @@ const API_COMMIT_COMMANDS = [
   'zsh -c "cd repo && api-commit.sh -m x"',
   'bash -c "cd repo && bash gh-app/api-commit.sh -m x"',
   "C:\\gh-app\\api-commit.sh -m x",
+  // Launcher wrappers still run the script, so they redirect too.
+  "sudo bash gh-app/api-commit.sh -m x",
+  "sudo ./gh-app/api-commit.sh -m x",
+  "env BASH_EXE=/bin/bash ./gh-app/api-commit.sh -m x",
+  "nohup gh-app/api-commit.sh -m x",
 ]
 
 const API_COMMIT_ALLOWED_COMMANDS = [
