@@ -1126,7 +1126,10 @@ drive() {
       if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created."; then
         produced_change="true"
       fi
-      if workdir_changed "$(pwd)"; then
+      # Only a round that both changed the tree AND named the commit may be
+      # committed: a failed round can leave a dirty tree without a .commit-msg,
+      # and the driver must not crash on it (it never invents a message).
+      if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
         commit_changes
         produced_change="true"
       fi
@@ -1190,7 +1193,11 @@ drive() {
 ${summary}"; then
         echo "No working-tree change was produced for this feedback; keeping whatever thread replies were already made." >&2
       fi
-      if workdir_changed "$(pwd)"; then
+      # A round can fail after leaving a partial change and no .commit-msg (a
+      # provider outage mid-round is what filed issue #251). There is nothing
+      # the driver may commit, and refusing must not abort the run: it hands the
+      # PR back to the reviewer below and keeps driving.
+      if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
         commit_changes
       fi
       # Hand the PR back to the reviewer before polling the non-reviewer
@@ -1225,7 +1232,9 @@ ${summary}"; then
       if implement "${title}" "${body}" "The pull request's CI / merge constraints are currently failing. Fix whatever breaks them."; then
         produced_change="true"
       fi
-      if workdir_changed "$(pwd)"; then
+      # Same rule as the feedback round: a dirty tree without a .commit-msg is
+      # no commit, never a crash; back off and re-check instead.
+      if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
         commit_changes
         produced_change="true"
       fi
