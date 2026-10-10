@@ -160,6 +160,16 @@ opencode_round_is_environment "${F}" && { echo "FAIL: a non-environment error wa
 printf '%s\n' '{"type":"text","part":{"type":"text","text":"eConnRefused token refresh failed cannot connect to API"}}' > "${F}"
 opencode_round_is_environment "${F}" && { echo "FAIL: text events were classified as environment"; exit 1; }
 
+# A model-level condition says nothing about the provider: a model that is
+# unavailable, deprecated or does not exist must not drop its provider (the
+# upstream wrapper may still prefix the model condition, e.g. "Upstream request
+# failed: Model is unavailable.", so the model signal must win over the wrapper).
+printf '%s\n' '{"type":"error","error":{"name":"APIError","data":{"message":"AI_APICallError: Upstream request failed: Model is unavailable."}}}' > "${F}"
+opencode_round_is_environment "${F}" && { echo "FAIL: a model-unavailable error was classified as environment"; exit 1; }
+
+printf '%s\n' '{"type":"error","error":{"name":"APIError","data":{"message":"AI_APICallError: Model exo-free has been deprecated."}}}' > "${F}"
+opencode_round_is_environment "${F}" && { echo "FAIL: a deprecated-model error was classified as environment"; exit 1; }
+
 : > "${F}"
 opencode_round_is_environment "${F}" && { echo "FAIL: an empty event stream was classified as environment"; exit 1; }
 

@@ -103,10 +103,17 @@ opencode_build_handoff_prompt() {
 # extractor would cut at the first escaped quote. Text events are ignored on
 # purpose -- a model that merely writes the words in its answer is not an
 # environment failure.
+# A model-level condition ("Model is unavailable", a model that has been
+# deprecated or does not exist) is NOT an environment error: it says nothing
+# about the provider's other models, so it must not drop the whole provider.
+# Such lines are filtered out before the environment patterns are matched, so
+# even a generic wrapper message ("Upstream request failed: Model is
+# unavailable.") that embeds both reads as the model being the problem.
 opencode_round_is_environment() {
   local file="${1}"
   [[ -f "${file}" ]] || return 1
   grep -F '"type":"error"' "${file}" 2>/dev/null |
+    grep -Evi 'model .*is unavailable|has been deprecated|model not found|no such model|unknown model|does not exist' |
     grep -Eiq 'token refresh failed|invalid_grant|cannot connect to api|unable to connect|was there a typo in the url|transport error|fetch failed|endpoint is unavailable|upstream request failed|upstream error|service temporarily overloaded|socket connection|providerautherror|authenticationerror|unauthorized|enotfound|econnrefused|econnreset|etimedout|getaddrinfo'
 }
 
