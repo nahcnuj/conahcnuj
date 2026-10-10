@@ -6,12 +6,14 @@
 # throwaway git repository. Exercises the happy path end to end:
 #
 #   issue #10 read -> feature branch -> implement -> PR #123 created ->
-#   non-reviewer constraints pass -> no review feedback yet -> owner assigned
-#   as reviewer -> "review requested" -> exit 0
+#   owner assigned as reviewer before the constraints poll -> non-reviewer
+#   constraints pass -> "review requested" -> exit 0
 #
-# The driver stops at the review request: approval (and the merge
-# owner-approved-auto-merge chains off it) belongs to the human reviewer. The
-# feedback round of a resumed run is covered by conahcnuj-resume.sh.
+# The driver hands the PR to the reviewer as soon as the PR exists, then
+# verifies the constraints: a fresh PR must not wait for green CI before the
+# human is asked. The driver stops at the review request: approval (and the
+# merge owner-approved-auto-merge chains off it) belongs to the human reviewer.
+# The feedback round of a resumed run is covered by conahcnuj-resume.sh.
 #
 # No secrets, no network.
 set -euo pipefail
@@ -40,9 +42,10 @@ git -C "${WORK}" commit -qm init
 # Mocked response tape. One JSON document per GitHub API call, in call order:
 #   fetch_issue, get_repo, find_pr_by_head (empty), repo id lookup, create_pr
 #   (123), continuation comment, fetch_reviews (REVIEW_REQUIRED, nothing to act
-#   on), conditions (SUCCESS|MERGEABLE), request_review. The reviews are read
-#   before the constraints poll: known review feedback must be handled before
-#   waiting on CI (#219).
+#   on), request_review, conditions (SUCCESS|MERGEABLE). The review request is
+#   made before the constraints poll: a fresh PR is handed to the reviewer while
+#   CI still runs (#233). The reviews are still read before the poll so known
+#   review feedback is handled before waiting on CI (#219).
 # Keep the tape and the run log OUTSIDE the repo: the driver's test-mode
 # commit path does `git add -A`, and a file living in the worktree would be
 # re-staged as it grows.
@@ -56,8 +59,8 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"createPullRequest":{"pullRequest":{"number":123}}}}
 {"id":776}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
-{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}
+{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -88,6 +91,11 @@ echo "-----------------------------"
 
 grep -q "Review requested on PR #123 (reviewer: nahcnuj): https://github.com/nahcnuj/conahcnuj/pull/123" "${LOG}" || { echo "FAIL: the driver did not hand the PR to the owner as reviewer"; exit 1; }
 grep -q "Assigned nahcnuj as reviewer on PR #123" "${LOG}" || { echo "FAIL: the owner was not assigned as reviewer"; exit 1; }
+# The reviewer is asked before the constraints are polled: a fresh PR is handed
+# to the human while CI still runs, instead of waiting for green first (#233).
+ASSIGNED_LINE="$(grep -n 'Assigned nahcnuj as reviewer on PR #123' "${LOG}" | head -1 | cut -d: -f1)"
+FIRST_CONSTRAINTS_LINE="$(grep -n 'PR #123 constraints: checks=' "${LOG}" | head -1 | cut -d: -f1)"
+[[ -n "${ASSIGNED_LINE}" && -n "${FIRST_CONSTRAINTS_LINE}" && "${ASSIGNED_LINE}" -lt "${FIRST_CONSTRAINTS_LINE}" ]] || { echo "FAIL: the review request must come before the constraints poll"; exit 1; }
 grep -q "Ready to merge" "${LOG}" && { echo "FAIL: the driver waited for an approval that never came"; exit 1; }
 grep -q "Created PR #123" "${LOG}" || { echo "FAIL: PR #123 was not created"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" && { echo "FAIL: a fresh PR must not fire an implementation round"; exit 1; }
