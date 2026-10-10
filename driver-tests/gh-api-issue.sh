@@ -367,14 +367,15 @@ test_http_status() {
 # #253). gh_api_call is stubbed so the status can be set directly.
 test_graphql_http_status() {
   local out
+  # gh_api_graphql reads the status gh_api_call leaves in GH_API_LAST_HTTP_CODE,
+  # not the test-mode flag, so no test-mode toggle is needed here: the stub
+  # below is the whole seam.
   out="$(
-    export GH_API_TEST_MODE=0
     gh_api_call() { GH_API_LAST_HTTP_CODE=201; printf '%s' '{"data":{"ok":true}}'; }
     gh_api_graphql "query { viewer { login } }"
   )"
   [[ "${out}" == '{"data":{"ok":true}}' ]] || { echo "FAIL: a 201 GraphQL response was rejected"; exit 1; }
   out="$(
-    export GH_API_TEST_MODE=0
     gh_api_call() { GH_API_LAST_HTTP_CODE=500; printf '%s' 'boom'; }
     gh_api_graphql "query { viewer { login } }" 2>/dev/null || printf 'failed'
   )"
@@ -387,10 +388,12 @@ test_graphql_http_status() {
 # were satisfied (issue #253).
 test_fetch_pr_conditions_read_failure() {
   local out
+  # GH_API_TEST_MODE is set as a command prefix (not exported inside the
+  # substitution) so the real gh_api_graphql branch runs without a persistent
+  # subshell assignment that shellcheck would flag as SC2030/SC2031.
   out="$(
-    export GH_API_TEST_MODE=0
     gh_api_graphql() { return 1; }
-    gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15 2>/dev/null || printf 'failed'
+    GH_API_TEST_MODE=0 gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15 2>/dev/null || printf 'failed'
   )"
   [[ "${out}" == "failed" ]] || { echo "FAIL: a failed conditions read was not propagated"; exit 1; }
   echo "gh_api_fetch_pr_conditions (read failure) passed"
