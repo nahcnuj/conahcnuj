@@ -71,10 +71,18 @@ CI では行いません。
   を起動できず、`issues: opened` でドライバを動かせないため）
 - ロジックの本体は `bin/auto-drive-workflow.sh`（`gh` API でのログ収集 →
   レポート作成 → トラッキング issue へ公開 → actionable 時に findings issue を
-  更新し `self-improvement` を付与）。Project への投入は Project 側の組み込み
-  auto-add（`label:self-improvement`）が行い、Projects API は呼ばない。ドライバを
-  再帰起動しない衛生ルールは
+  更新し `self-improvement` を付与）。トラッキング issue と findings issue は
+  classic repository Project の card として board に載せる。`GITHUB_TOKEN` は
+  Projects API に到達できないため、repository の **Projects** 権限を持つ App の
+  インストールトークン（`GH_APP_TOKEN`）で repository Projects API を叩く。
+  board は `vars.PROJECT_NUMBER` で指定するか `vars.PROJECT_TITLE` で探し作成する。
+  解決できなければ組み込み auto-add にフォールバックする。ドライバを再帰起動
+  しない衛生ルールは
   [self-improvement.md](self-improvement.md#ループの衛生再帰しない理由) を参照
+- checkout は full-length SHA でピン留めしたうえで `ref: github.ref` を渡す。
+  再実行は `github.sha`（最初の試行のコミット）を使い回すため、既定のままだと
+  マージ済みの修正が効かず同じ失敗を繰り返す。ブランチ先端を取ることで
+  schedule も再実行も現在のコードで動く
 
 ## Owner-approved auto-merge（`auto-merge.yml` + `owner-approved-auto-merge.yml`）
 
