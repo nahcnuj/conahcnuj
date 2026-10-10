@@ -30,9 +30,12 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
    `sessionID` と作業ツリーを次のモデルへ引き継えて完了まで継続する
    （環境エラーで落ちた provider は切り分けられる）
 2. エージェントが書いた `.commit-msg` で Verified コミットを作成し、PR を開く
-3. レビュアー以外の制約（status checks・mergeable）が通るまでポーリングして、
-   **リポジトリ owner を reviewer にアサイン**してレビュー依頼 → ここで正常終了
-   （既に Approved なら「ready to merge」で終了）
+3. 新規 PR は **リポジトリ owner を reviewer にアサイン**して先にレビュー依頼する
+   （レビュアーは CI が green になるのを待たずにレビューを始められる。#233）。
+   その後にレビュアー以外の制約（status checks・mergeable）をポーリングし、
+   失敗していれば直す。制約が通った時点で正常終了（既に Approved なら
+   「ready to merge」で終了）。再開した PR は merge 済みの可能性があるため、
+   依頼の前に制約（PR の状態）を先に確認する
 4. 再開実行で新しいレビュー意見（Comment / Request changes / 未解決スレッド）が
    あれば、モデルで対応して Verified コミット → owner へ再依頼 → 制約再確認 →
    終了。既知のレビュー意見は制約のポーリングを待たずに**先に**対応する
