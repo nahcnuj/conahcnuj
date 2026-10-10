@@ -189,9 +189,17 @@ opencode_run() {
   CONAHCNUJ_SESSION_MODEL="${model}"
   export CONAHCNUJ_SESSION_MODEL
 
-  local output_file status
+  local output_file prompt_file status
   local -a args executable
   output_file="$(mktemp)"
+  # The prompt carries the issue body plus every collected file (README.md /
+  # AGENTS.md), so it can outgrow the OS argument-list limit (E2BIG:
+  # "Argument list too long" from exec). opencode reads the message from stdin
+  # when no positional argument is given, so deliver it there and keep argv
+  # small. The redirect below is on the executable, not the whole pipeline, so
+  # $PIPESTATUS stays aligned with opencode.
+  prompt_file="$(mktemp)"
+  printf '%s\n' "${prompt}" > "${prompt_file}"
   executable=(opencode)
   if [[ -n "${CONAHCNUJ_RUN_TIMEOUT_SECONDS:-}" ]]; then
     executable=(timeout --signal=TERM --kill-after=30s "${CONAHCNUJ_RUN_TIMEOUT_SECONDS}s" opencode)
@@ -208,7 +216,6 @@ opencode_run() {
   else
     args+=(--title conahcnuj)
   fi
-  args+=("${prompt}")
   status=0
   # tee keeps the raw stream for the session id, the renderer prints the log to
   # stderr as the run proceeds (the header's SHA / diff only mean anything
@@ -226,7 +233,7 @@ opencode_run() {
     echo "WARNING: ${OPENCODE_RENDER_SH} is missing; printing the raw opencode output." >&2
     render=(cat)
   fi
-  "${executable[@]}" "${args[@]}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
+  "${executable[@]}" "${args[@]}" < "${prompt_file}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
   # Only a failed round is classified: a round that ended fine may still carry
   # a retried-and-recovered error event, which says nothing about the provider.
   if [[ "${status}" != "0" ]] && opencode_round_is_environment "${output_file}"; then
@@ -238,7 +245,7 @@ opencode_run() {
     OPENCODE_SESSION_ID="${detected_session}"
     export OPENCODE_SESSION_ID
   fi
-  rm -f "${output_file}"
+  rm -f "${output_file}" "${prompt_file}"
   if [[ "${status}" == "124" ]]; then
     echo "opencode exceeded the remaining driver time budget; stopping this model." >&2
   fi

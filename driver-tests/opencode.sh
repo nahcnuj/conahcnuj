@@ -198,6 +198,43 @@ EOF
   unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID
 }
 
+test_opencode_run_prompt_via_stdin() {
+  local tmp old_path rc
+  tmp="$(mktemp -d)"
+  old_path="${PATH}"
+  mkdir -p "${tmp}/bin"
+  # Record both argv and stdin so the test can tell where the prompt went.
+  cat > "${tmp}/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
+cat > "${OPENCODE_STDIN_FILE}"
+EOF
+  chmod +x "${tmp}/bin/opencode"
+  PATH="${tmp}/bin:${PATH}"
+  export PATH
+  OPENCODE_ARGS_FILE="${tmp}/args.txt"
+  OPENCODE_STDIN_FILE="${tmp}/stdin.txt"
+  export OPENCODE_ARGS_FILE OPENCODE_STDIN_FILE
+  # A prompt larger than the per-argument limit (MAX_ARG_STRLEN, 128 KiB on
+  # Linux) used to fail exec with E2BIG ("Argument list too long"). It must ride
+  # on stdin now, so the round succeeds and the whole prompt arrives intact.
+  local big
+  big="$(printf 'x%.0s' $(seq 1 200000))"
+  rc=0
+  opencode_run "Issue" "Body ${big}" "${tmp}" "opencode/big" >/dev/null 2>&1 || rc=$?
+  [[ "${rc}" -eq 0 ]] || { echo "FAIL: a large prompt did not survive the round (rc=${rc})"; exit 1; }
+  local stdin_content args_content
+  stdin_content="$(cat "${OPENCODE_STDIN_FILE}")"
+  args_content="$(cat "${OPENCODE_ARGS_FILE}")"
+  [[ "${stdin_content}" == "Issue: Issue"* ]] || { echo "FAIL: the prompt did not arrive on stdin"; exit 1; }
+  [[ "${stdin_content}" == *"${big}"* ]] || { echo "FAIL: the large prompt was truncated on stdin"; exit 1; }
+  [[ "${args_content}" != *"${big}"* ]] || { echo "FAIL: the prompt still rides in argv"; exit 1; }
+  PATH="${old_path}"
+  rm -rf "${tmp}"
+  unset OPENCODE_ARGS_FILE OPENCODE_STDIN_FILE
+  echo "opencode_run (prompt via stdin, large prompt) passed"
+}
+
 test_opencode_run_renders_log() {
   local tmp old_path log
   tmp="$(mktemp -d)"
@@ -271,6 +308,7 @@ test_opencode_run
 test_opencode_run_message_only
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
+test_opencode_run_prompt_via_stdin
 test_opencode_run_renders_log
 test_opencode_run_timeout
 
