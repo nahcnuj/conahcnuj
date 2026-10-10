@@ -8,6 +8,6 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        curl -fsSL https://opencode.ai/v2/install | bash
+        curl -fsSL https://opencode.ai/install | bash
         echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
