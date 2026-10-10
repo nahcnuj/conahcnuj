@@ -109,6 +109,19 @@ REVIEW_HANDOFF_CONFIRMED="true"
 # to every fresh prompt through implement().
 COLLECTED_CONTEXT=""
 
+# Where the driver remembers models a round proved to be permanently gone
+# (deprecated, removed, unavailable). The default is a file committed to the
+# repository so the knowledge survives across runs -- including a fresh CI
+# checkout that has none of the last run's process state. A run reads it before
+# every round and appends to it when a round proves a model is gone, so a dead
+# model is never tried (nor logged) again (#209). Overridable for tests and for
+# a driver installed away from its repository.
+MISSING_MODELS_FILE="${CONAHCNUJ_MISSING_MODELS_FILE:-${HERE}/../gh-app/missing-models}"
+
+# Models a round has shown to be permanently gone, space-separated (loaded from
+# MISSING_MODELS_FILE and extended at runtime). Consulted before every round.
+OPENCODE_DEAD_MODELS=""
+
 # True once the per-process PR body sync has already run.
 pr_body_synced() {
   [[ "$(cat "${PR_BODY_SYNCED_FILE}" 2>/dev/null || true)" == "1" ]]
@@ -722,6 +735,44 @@ ${content}"
 
 # --- implementation ---------------------------------------------------------
 
+# Load the persistently-remembered dead models into OPENCODE_DEAD_MODELS.
+# One provider/model per line; blank lines and #-comments are ignored. Additive
+# and idempotent, so implement() can call it every round without duplicating.
+load_missing_models() {
+  [[ -f "${MISSING_MODELS_FILE}" ]] || return 0
+  local line
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%%#*}"
+    line="${line//[[:space:]]/}"
+    [[ -n "${line}" ]] || continue
+    case " ${OPENCODE_DEAD_MODELS} " in
+      *" ${line} "*) ;;
+      *) OPENCODE_DEAD_MODELS="${OPENCODE_DEAD_MODELS} ${line}" ;;
+    esac
+  done < "${MISSING_MODELS_FILE}"
+}
+
+# Whether a model is remembered as permanently gone (exact match).
+is_missing_model() {
+  local model="${1}"
+  [[ -n "${model}" ]] || return 1
+  [[ " ${OPENCODE_DEAD_MODELS} " == *" ${model} "* ]]
+}
+
+# Remember a model a round proved permanently gone: skip it for the rest of
+# this process and append it to the committed list so the next run (a fresh CI
+# checkout) skips it before spending a round on it (#209). Only a file that
+# already exists is written to: a repository that never opted into the list
+# must not have one created for it by a run. Appending to a tracked file makes
+# the knowledge part of the run's own commit.
+persist_missing_model() {
+  local model="${1}"
+  is_missing_model "${model}" || OPENCODE_DEAD_MODELS="${OPENCODE_DEAD_MODELS} ${model}"
+  [[ -f "${MISSING_MODELS_FILE}" ]] || return 0
+  grep -qxF "${model}" "${MISSING_MODELS_FILE}" 2>/dev/null && return 0
+  printf '%s\n' "${model}" >> "${MISSING_MODELS_FILE}" 2>/dev/null || true
+}
+
 # Run opencode until one model completes the work. A failed model hands its
 # session and working tree to the next model. Records tried models and handoffs.
 # A model that left the tree untouched and only wrote .commit-msg is logged as
@@ -733,19 +784,37 @@ ${content}"
 # are skipped. When every failure was environmental, the run ends with that
 # diagnosis and the bug report says so, instead of blaming the driver for an
 # environment that was down all along (#149).
+#
+# A round that dies because the model itself is gone (deprecated, removed,
+# unavailable) says nothing about the provider: only that model is remembered
+# as dead -- in MISSING_MODELS_FILE too, so later runs skip it up front instead
+# of spending a round (and a log full of errors) on it (#209).
 implement() {
   local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider
   local dead_providers="" failed_rounds=0 env_failed_rounds=0 ran_without_failure=0
+  local model_list known_skipped=""
   ENVIRONMENT_DOWN="0"
   workdir="$(pwd)"
   echo "Implementing with available models..." >&2
   OPENCODE_USED_MODELS=""
   OPENCODE_HANDOFFS=""
   OPENCODE_SESSION_ID=""
-  for model in $(opencode_get_models); do
+  load_missing_models
+  model_list="$(opencode_get_models)"
+  for model in ${model_list}; do
+    [[ -z "${model}" ]] && continue
+    is_missing_model "${model}" && known_skipped="${known_skipped} ${model}"
+  done
+  [[ -n "${known_skipped}" ]] && echo "Skipping models remembered as permanently unavailable:${known_skipped}" >&2
+  for model in ${model_list}; do
     [[ -z "${model}" ]] && continue
     check_timeout
     provider="${model%%/*}"
+    # A model a previous round (this run or a past one) proved gone is not even
+    # tried: no round, no error in the log.
+    if is_missing_model "${model}"; then
+      continue
+    fi
     if [[ " ${dead_providers} " == *" ${provider} "* ]]; then
       echo "Skipping ${model}: provider ${provider} already failed on an environment error, and no other of its models can change that." >&2
       continue
@@ -777,7 +846,10 @@ implement() {
     previous_model="${model}"
     if [[ "${run_failed}" == "true" ]]; then
       failed_rounds=$((failed_rounds + 1))
-      if [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+      if [[ "${OPENCODE_ROUND_MODEL_GONE}" == "true" ]]; then
+        persist_missing_model "${model}"
+        echo "Model ${model} failed before completing the work: the model itself is gone (deprecated / removed / unavailable); remembering it as unavailable and skipping it from now on." >&2
+      elif [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
         env_failed_rounds=$((env_failed_rounds + 1))
         dead_providers="${dead_providers} ${provider}"
         echo "Model ${model} failed before completing the work: environment error (provider unreachable or credentials rejected); giving up on provider ${provider} for the rest of this run." >&2

@@ -38,6 +38,7 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level` |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow 名（カンマ区切り） |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | 最初のプロンプトへ同梱する作業ツリーファイル（スペース区切り）。空文字で同梱を無効化 |
+| `CONAHCNUJ_MISSING_MODELS_FILE` | `<gh-app>/missing-models` | 永久に使えない（deprecated / 削除済み）モデルの記録先。ラウンド前に読み、判明したモデルを追記する |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード |
 
 ## ドライバ ↔ プラグイン連携（自動設定）
@@ -85,6 +86,7 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `MOCK_OPENCODE_MODELS` | モックのモデル一覧（`provider/model` を 1 行ずつ） |
 | `MOCK_OPENCODE_ERROR` | 指定モデルを環境エラーで失敗させる |
 | `MOCK_OPENCODE_ENV_ERROR` | 各ラウンドを環境エラーで終了させる（`conahcnuj-env-failure` 再現） |
+| `MOCK_OPENCODE_DEPRECATED` | 指定モデルを「モデル自体が消失（deprecated / 削除 / 利用不可）」で失敗させる（`conahcnuj-missing-models` 再現） |
 | `MOCK_OPENCODE_MESSAGE_ONLY` | 作業ツリー無変更 + `.commit-msg` のみのラウンドを再現 |
 | `MOCK_OPENCODE_NOOP` | 指定モデルを no-op（実装を省略した振る舞い）にする |
 | `MOCK_OPENCODE_SESSION_ID` | モックが返す `sessionID` |
@@ -95,6 +97,8 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 
 `OPENCODE_SESSION_ID` / `OPENCODE_LAST_MODEL` / `OPENCODE_USED_MODELS` /
 `OPENCODE_HANDOFFS` / `OPENCODE_ROUND_ENVIRONMENT`（ラウンド成否の分類）/
+`OPENCODE_ROUND_MODEL_GONE`（モデル自体の消失。provider は落とさない）/
+`OPENCODE_DEAD_MODELS` / `MISSING_MODELS_FILE`（永久に使えないモデルの記録）/
 `CONAHCNUJ_RUN_TIMEOUT_SECONDS`（単発ラウンドのタイムアウト）/
 `OPENCODE_LIB_DIR` / `OPENCODE_RENDER_SH`（ライブラリの場所）/
 `GH_API_LAST_HTTP_CODE`（最後の HTTP ステータス）/
