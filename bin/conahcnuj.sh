@@ -957,7 +957,16 @@ poll_conditions() {
   while true; do
     check_timeout
     local cond state mergeable mss pr_state
-    cond="$(gh_api_fetch_pr_conditions "${owner}" "${repo}" "${pr}")"
+    # A conditions call that failed is a transport problem, not a verdict on
+    # the PR: retry it. Reading the failure as an empty payload used to coerce
+    # the checks to SUCCESS and let the driver assume MERGEABLE, so a PR whose
+    # merge state was never actually observed was reported as passing (issue
+    # #253).
+    if ! cond="$(gh_api_fetch_pr_conditions "${owner}" "${repo}" "${pr}")"; then
+      echo "PR #${pr}: could not read constraints; retrying." >&2
+      rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
+      continue
+    fi
     state="$(printf '%s' "${cond}" | cut -d'|' -f1)"
     mergeable="$(printf '%s' "${cond}" | cut -d'|' -f2)"
     mss="$(printf '%s' "${cond}" | cut -d'|' -f3)"
@@ -981,16 +990,15 @@ poll_conditions() {
       echo "All non-reviewer constraints pass." >&2
       return 0
     fi
-    # Fallback: if checks pass but mergeable is empty (API parsing issue),
-    # assume mergeable since CI passes.
-    if [[ "${state}" == "SUCCESS" && -z "${mergeable}" ]]; then
-      echo "Checks pass but mergeable state unknown; assuming MERGEABLE." >&2
-      return 0
-    fi
     if [[ "${state}" == "FAILURE" || "${state}" == "ERROR" || "${mergeable}" == "CONFLICTING" || "${mss}" == "DIRTY" ]]; then
       echo "Constraints require changes (state=${state} mergeable=${mergeable})." >&2
       return 1
     fi
+    # Anything else (checks still running, mergeable UNKNOWN, or a mergeable
+    # state the API has not computed yet) is "not known to pass": keep polling
+    # rather than assume the PR is mergeable. GitHub computes mergeability
+    # asynchronously, so UNKNOWN is normal right after a push and resolves on a
+    # later poll.
     rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
   done
 }

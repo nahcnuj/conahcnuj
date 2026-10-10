@@ -203,11 +203,24 @@ gh_api_graphql() {
   fi
   local payload
   payload="$(printf '{"query":"%s","variables":%s}' "$(gh_api_escape "${query}")" "${vars_json}")"
-  local json http_code
-  json="$(gh_api_call POST "${GH_APP_API_BASE:-https://api.github.com}/graphql" "${payload}")"
+  # Run gh_api_call in this shell (its stdout goes to a file) rather than in a
+  # command substitution: a command substitution is a subshell, so the
+  # GH_API_LAST_HTTP_CODE gh_api_call sets would be lost and this function would
+  # read whatever status an earlier REST call left in the parent (creating a
+  # branch or a PR sets 201). The stale 201 then looked like a GraphQL HTTP
+  # error and a perfectly good payload was discarded, which is how a live PR
+  # ended up reported as passing (issue #253).
+  local json http_code bodyfile
+  bodyfile="$(mktemp)"
+  gh_api_call POST "${GH_APP_API_BASE:-https://api.github.com}/graphql" "${payload}" > "${bodyfile}" || true
+  json="$(cat "${bodyfile}")"
+  rm -f "${bodyfile}"
   http_code="${GH_API_LAST_HTTP_CODE:-}"
-  # Check for HTTP-level errors (401, 403, etc.) that gh_api_call doesn't retry
-  if [[ -n "${http_code}" && "${http_code}" != "200" ]]; then
+  # Only 2xx responses carry a GraphQL payload; anything else is a transport or
+  # gateway error and its body is not a JSON document. 201 is accepted for the
+  # same reason gh_api_call accepts it: a POST that came back "Created" is still
+  # a successful response.
+  if [[ -n "${http_code}" && "${http_code}" != "200" && "${http_code}" != "201" ]]; then
     echo "GraphQL HTTP error ${http_code}: ${json}" >&2
     return 1
   fi
@@ -424,13 +437,27 @@ gh_api_rollup_state() {
 # polling. state is the PR state, so the caller can tell "still open" from
 # "merged/closed while we waited"; it is empty when the payload does not carry
 # it, which the caller reads as unknown (keep polling).
+# Exits non-zero when the conditions could not be read at all, so the caller
+# retries instead of mistaking a failed call for an empty (passing) PR.
 gh_api_fetch_pr_conditions() {
   local owner="${1}" repo="${2}" number="${3}" json
   local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, state, commits(last: 1) { nodes { commit { statusCheckRollup { state, contexts(first: 100) { nodes { __typename, ... on CheckRun { name, status, conclusion, checkSuite { workflowRun { workflow { name } } } }, ... on StatusContext { context, state } }, pageInfo { hasNextPage } } } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
-  else
-    json="$(gh_api_graphql "${query}")"
+    # An exhausted/empty mock line stands for a failed read the same way an
+    # empty real response would: report it, do not hand back an empty payload.
+    if [[ -z "${json}" ]]; then
+      echo "ERROR: could not read the merge conditions of PR #${number}." >&2
+      return 1
+    fi
+  elif ! json="$(gh_api_graphql "${query}")"; then
+    # A failed read is not an empty PR: the caller must be able to tell a
+    # transient API error (retry) from a payload that truly says "no checks"
+    # (SUCCESS). Returning an empty value here let poll_conditions coerce the
+    # failure to SUCCESS and assume MERGEABLE, so a run whose conditions call
+    # had just errored reported the constraints as passing (issue #253).
+    echo "ERROR: could not read the merge conditions of PR #${number}." >&2
+    return 1
   fi
 
   local state mergeable mss pr_state
