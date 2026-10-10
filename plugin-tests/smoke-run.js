@@ -4,8 +4,10 @@
 //
 // Loads the compiled plugin with a fake gh-app dir (fake app.env; the bot
 // ID itself is auto-resolved from the public API), then asserts the
-// shell.env contract (GIT_CONFIG identity + alias.vc) and the
-// tool.execute.before redirect (git commit blocked, others pass through).
+// shell.env contract (GIT_CONFIG identity + alias.vc), the system-prompt
+// commit rules, and the tool.execute.before redirects (git commit and a
+// direct api-commit.sh run both blocked toward git vc, everything else
+// passing through).
 // The require target is a fixed literal path on purpose: requiring an
 // argv-provided path trips CodeQL path-injection (high). smoke.sh stages
 // the compiled artifact plus a fake gh-app dir at ./.smoke/ (same relative
@@ -56,9 +58,47 @@ async function main() {
     threw = /git vc/.test(String((err && err.message) || err))
   }
   assert(threw, "git commit was not redirected to git vc")
+  // The hook must also steer a direct api-commit.sh run to git vc: that is
+  // the path this whole mechanism exists to avoid.
+  threw = false
+  try {
+    await before(
+      { tool: "bash" },
+      { args: { command: "bash gh-app/api-commit.sh -m x" }, env: {} }
+    )
+  } catch (err) {
+    threw = /git vc/.test(String((err && err.message) || err))
+  }
+  assert(threw, "direct api-commit.sh run was not redirected to git vc")
   // Must not interfere with anything else.
   await before({ tool: "bash" }, { args: { command: "git status" }, env: {} })
   await before({ tool: "read" }, { args: { filePath: "x" }, env: {} })
+
+  // System-prompt rules: the guidance that makes an agent reach for git vc
+  // before the hook ever fires. This is what keeps a model away from
+  // `git commit`, from running api-commit.sh itself, and from editing the
+  // gh-app scripts.
+  const sysOutput = { system: [] }
+  await plugin["experimental.chat.system.transform"]({}, sysOutput)
+  assert.strictEqual(
+    sysOutput.system.length,
+    1,
+    "commit rules were not injected into the system prompt"
+  )
+  const rules = sysOutput.system[0]
+  assert(!/[\r\n]/.test(rules), "commit rules must be a single line")
+  assert(rules.includes("`git vc`"), `rules must name git vc: ${rules}`)
+  assert(
+    rules.includes("do not run gh-app/api-commit.sh"),
+    `rules must forbid running api-commit.sh directly: ${rules}`
+  )
+  assert(
+    rules.includes("Do not edit or modify files under `gh-app/`"),
+    `rules must forbid editing gh-app/: ${rules}`
+  )
+  // Injecting twice must stay idempotent (the rules are pushed once).
+  await plugin["experimental.chat.system.transform"]({}, sysOutput)
+  assert.strictEqual(sysOutput.system.length, 1, "commit rules injected more than once")
 
   // OpenCode reports the effort variant on the user message and the model id
   // on chat.params. The shell that runs `git vc` must see one trailer value.

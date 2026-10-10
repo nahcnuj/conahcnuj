@@ -3,7 +3,9 @@
 # install to a temp dir, stage the INSTALLED files (not the repo files),
 # compile the installed plugin, load it against the installed gh-app dir
 # (fake app.env overlaid), and assert the shell.env contract (GIT_CONFIG
-# identity + alias.vc) plus the git-commit redirect via smoke-run.js.
+# identity + alias.vc), the system-prompt commit rules and the
+# tool.execute.before redirects (git commit / api-commit.sh) via
+# smoke-run.js.
 # Needs node/npm (typescript from plugins/package.json) and pwsh/powershell
 # for install.ps1. No secrets, no GitHub network.
 set -euo pipefail
@@ -35,8 +37,9 @@ INST="${TMP}/inst"
 #    relative layout (so __dirname resolution finds the staged gh-app dir).
 #    smoke-run.js must not require() an argv-provided path (CodeQL
 #    path-injection), hence the fixed ./.smoke/ location.
-mkdir -p "${STAGE}/src" "${STAGE}/gh-app"
+mkdir -p "${STAGE}/src/lib" "${STAGE}/gh-app"
 cp "${INST}/plugins/gh-app-token.ts" "${STAGE}/src/"
+cp "${INST}/plugins/lib/gh-app-commit.ts" "${STAGE}/src/lib/"
 cp "${INST}/gh-app/"*.sh "${STAGE}/gh-app/"
 # Seed the bot-ID cache: keeps this test deterministic and offline-safe
 # (the public-API lookup behind it shares runner IPs and gets rate-limited).
@@ -65,7 +68,7 @@ cat > "${STAGE}/src/tsconfig.json" <<'EOF'
     "outDir": "../out",
     "types": ["node"]
   },
-  "include": ["gh-app-token.ts"]
+  "include": ["gh-app-token.ts", "lib/gh-app-commit.ts"]
 }
 EOF
 

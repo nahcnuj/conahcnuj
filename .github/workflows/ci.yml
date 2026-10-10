@@ -70,10 +70,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Run install into temp dir
+      # The AGENTS.md merge (Install-GlobalAgentsMd) has its own test file:
+      # personal rules are kept, the managed conahcnuj block appears exactly
+      # once and re-running install is idempotent. It runs the real
+      # install.ps1 against temp destinations.
+      - name: Test the global AGENTS.md merge
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./plugin-tests/install-agents-md.ps1
+
+      - name: Install into temp dir for deployment verification
         shell: pwsh
         run: |
           $dest = Join-Path $env:RUNNER_TEMP "opencode-deploy-test"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
           & ./install.ps1 -Destination $dest
 
       - name: Verify deployed files
@@ -87,7 +97,9 @@ jobs:
             "gh-app/api-commit.sh",
             "gh-app/bot-user-id.sh",
             "gh-app/app.env.example",
-            "plugins/gh-app-token.ts"
+            "gh-app/missing-models",
+            "plugins/gh-app-token.ts",
+            "plugins/lib/gh-app-commit.ts"
           )
           foreach ($rel in $required) {
             $p = Join-Path $dest $rel
@@ -105,7 +117,11 @@ jobs:
             Write-Error "app.env was not created from example"
             exit 1
           }
-          # Only gh-app-token.ts may live in the deployed plugins dir:
+          # The AGENTS.md merge assertions live in plugin-tests/install-agents-md.ps1
+          # (runs above); this step only verifies the deployed file tree.
+          # Only gh-app-token.ts may live at the top level of the deployed
+          # plugins dir (opencode loads every top-level file there as a
+          # plugin; the helper module sits in plugins/lib/):
           # package.json/lock, tsconfig, node_modules are local typecheck
           # tooling and must never be deployed. @( ) because a single
           # result has no .Count.
@@ -126,10 +142,13 @@ jobs:
             @($dest, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),
             @($dest, "gh-app/bot-user-id.sh", "gh-app/bot-user-id.sh"),
             @($dest, "gh-app/app.env.example", "gh-app/app.env.example"),
+            @($dest, "gh-app/missing-models", "gh-app/missing-models"),
             @($dest, "plugins/gh-app-token.ts", "plugins/gh-app-token.ts"),
+            @($dest, "plugins/lib/gh-app-commit.ts", "plugins/lib/gh-app-commit.ts"),
             @($binSide, "gh-app/get-token.sh", "gh-app/get-token.sh"),
             @($binSide, "gh-app/setup-git.sh", "gh-app/setup-git.sh"),
             @($binSide, "gh-app/api-commit.sh", "gh-app/api-commit.sh"),
+            @($binSide, "gh-app/missing-models", "gh-app/missing-models"),
             @($binSide, "lib/gh-api.sh", "lib/gh-api.sh"),
             @($binSide, "lib/opencode.sh", "lib/opencode.sh"),
             @($binSide, "lib/opencode-render.sh", "lib/opencode-render.sh"),
@@ -199,6 +218,34 @@ jobs:
           cd plugins
           npm ci --no-audit --no-fund
           ./node_modules/.bin/tsc -p ../plugins --noEmit
+
+  plugin-unit:
+    name: Plugin unit tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Cache npm
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('plugins/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      # Compiles the real plugin with its internals intact and runs the unit
+      # suite (command inspection behind the git vc redirects, app.env and
+      # cache parsing, hook wiring). Needs node/npm only: no pwsh, no secrets,
+      # no GitHub network.
+      - name: Run plugin unit tests
+        run: bash plugin-tests/unit.sh
 
   plugin-smoke:
     name: Plugin runtime smoke test
@@ -327,4 +374,29 @@ jobs:
       # no remote); anything else fails the run.
       - name: Run opencode and assert git vc surfaces
         run: |
-          bash plugin-tests/e2e-opencode.sh
+          log="${RUNNER_TEMP}/e2e-opencode.log"
+          rc=0
+          bash plugin-tests/e2e-opencode.sh > "$log" 2>&1 || rc=$?
+          cat "$log"
+          # e2e-opencode.sh tears down its temp tree from an EXIT trap. On
+          # Windows a just-killed opencode process can still hold a fixture
+          # directory, so that `rm -rf` fails ("Device or resource busy")
+          # and turns a passing run into exit 1. The script's own explicit
+          # verdict is authoritative:
+          #  - "E2E OK": a model surfaced `git vc` (cleanup may have failed).
+          #  - "E2E SKIP": no attempt ever reached a verdict because the
+          #    shared free-model service was unreachable or stalled; that
+          #    is not a plugin regression and must not block the PR.
+          # Anything else fails the run.
+          if grep -q "E2E OK: 'git vc' surfaced naturally" "$log"; then
+            if [ "$rc" -ne 0 ]; then
+              echo "e2e-opencode.sh exited ${rc} after a successful run (cleanup-only); treating as pass" >&2
+            fi
+            exit 0
+          fi
+          if grep -q "E2E SKIP:" "$log"; then
+            echo "e2e-opencode.sh skipped: no verdict from the free-model service (inconclusive); treating as pass" >&2
+            exit 0
+          fi
+          echo "e2e-opencode.sh failed (exit ${rc})" >&2
+          exit 1
