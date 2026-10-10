@@ -106,6 +106,15 @@ function Deploy-GhApp {
         Write-Host "  copied app.env.example"
     }
 
+    # missing-models: the driver's persisted list of models proven permanently
+    # unavailable. Read before every round and appended to at runtime, so it
+    # must travel with the driver's gh-app tree (#209).
+    $Missing = Join-Path $SrcGhApp "missing-models"
+    if (Test-Path -LiteralPath $Missing) {
+        Copy-Item -LiteralPath $Missing -Destination (Join-Path $Dst "missing-models") -Force
+        Write-Host "  copied missing-models"
+    }
+
     # app.env: copy the real one if it ships with the repo source, otherwise
     # create from example (fresh clone / CI) unless one already exists at the
     # destination (keep existing local config).

@@ -26,6 +26,13 @@ OPENCODE_RENDER_SH="${OPENCODE_LIB_DIR}/opencode-render.sh"
 # anything about the provider's other models (#149).
 OPENCODE_ROUND_ENVIRONMENT="false"
 
+# Whether the round that just finished died because the model itself is gone:
+# the provider reports it as deprecated, removed, unavailable or otherwise
+# unknown. Unlike an environment error this is specific to one model, so the
+# driver remembers only that model as dead (never the whole provider) and skips
+# it in later rounds (#209). opencode_run sets it for every round.
+OPENCODE_ROUND_MODEL_GONE="false"
+
 # List available models, one per line. Test mode: $MOCK_OPENCODE_MODELS.
 opencode_get_models() {
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
@@ -117,6 +124,18 @@ opencode_round_is_environment() {
     grep -Eiq 'token refresh failed|invalid_grant|cannot connect to api|unable to connect|was there a typo in the url|transport error|fetch failed|endpoint is unavailable|upstream request failed|upstream error|service temporarily overloaded|socket connection|providerautherror|authenticationerror|unauthorized|enotfound|econnrefused|econnreset|etimedout|getaddrinfo'
 }
 
+# True when the round's error stream says the model itself is permanently gone:
+# the provider reports it as deprecated, removed, unavailable or otherwise
+# unknown. These are exactly the model-level lines opencode_round_is_environment
+# filters out, so a gone model never drops its whole provider. The driver uses
+# this to remember just that model as dead and skip it in later rounds (#209).
+opencode_round_is_model_gone() {
+  local file="${1}"
+  [[ -f "${file}" ]] || return 1
+  grep -F '"type":"error"' "${file}" 2>/dev/null |
+    grep -Eiq 'model .*is unavailable|has been deprecated|is deprecated|no longer supported|model not found|no such model|unknown model|does not exist'
+}
+
 # Run opencode with a specific model and publish its session ID in
 # OPENCODE_SESSION_ID so a later model can continue the same conversation.
 # Args: title body workdir model [extra_context] [session_id] [previous_model] [collected_context]
@@ -126,6 +145,7 @@ opencode_run() {
   local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}" collected_context="${8:-}"
   local prompt
   OPENCODE_ROUND_ENVIRONMENT="false"
+  OPENCODE_ROUND_MODEL_GONE="false"
   if [[ -n "${session_id}" ]]; then
     prompt="$(opencode_build_handoff_prompt "${previous_model:-unknown}")"
   else
@@ -150,7 +170,14 @@ opencode_run() {
     if [[ " ${MOCK_OPENCODE_ENV_ERROR:-} " == *" ${model} "* ]]; then
       OPENCODE_ROUND_ENVIRONMENT="true"
     fi
-    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+    # MOCK_OPENCODE_DEPRECATED lists the models whose round dies because the
+    # model itself is gone (deprecated / removed / unavailable). It implies
+    # MOCK_OPENCODE_ERROR for those models, but is a model-level, not an
+    # environment, failure: only that model is remembered as dead.
+    if [[ " ${MOCK_OPENCODE_DEPRECATED:-} " == *" ${model} "* ]]; then
+      OPENCODE_ROUND_MODEL_GONE="true"
+    fi
+    if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" || "${OPENCODE_ROUND_MODEL_GONE}" == "true" ]]; then
       if [[ -d "${workdir}" && -w "${workdir}" ]]; then
         printf 'partial change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
       fi
@@ -236,6 +263,11 @@ opencode_run() {
   "${executable[@]}" "${args[@]}" < "${prompt_file}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
   # Only a failed round is classified: a round that ended fine may still carry
   # a retried-and-recovered error event, which says nothing about the provider.
+  # A model that is gone is classified first; it is a model-level condition, so
+  # it must not be read as the provider being down.
+  if [[ "${status}" != "0" ]] && opencode_round_is_model_gone "${output_file}"; then
+    OPENCODE_ROUND_MODEL_GONE="true"
+  fi
   if [[ "${status}" != "0" ]] && opencode_round_is_environment "${output_file}"; then
     OPENCODE_ROUND_ENVIRONMENT="true"
   fi
