@@ -172,8 +172,14 @@ driver_needs_relaunch() {
 # /c/... private key path, the Windows credential helper, opencode) sees the
 # path space it was written for. Passes the script back to Git Bash as a
 # Windows path (wslpath -m) and keeps the original arguments.
+#
+# Git Bash runs as a child, not via exec: the Windows console delivers Ctrl-C
+# to this WSL shell (the process PowerShell started), while an exec'd interop
+# process no longer reliably receives that interrupt, so Ctrl-C looked
+# ineffective (issue #203). Staying alive lets us pass the cancellation on.
+# A non-interactive async child ignores SIGINT, so TERM is what stops it.
 driver_relaunch() {
-  local bash_exe bash_mnt self self_win
+  local bash_exe bash_mnt self self_win child rc
   bash_exe="$(driver_bash_exe)"
   bash_mnt="$(wslpath -u "${bash_exe}")"
   self="${0}"
@@ -190,7 +196,14 @@ driver_relaunch() {
     return 1
   fi
   echo "Re-launching under ${bash_exe} so the GitHub App paths resolve." >&2
-  exec "${bash_mnt}" "${self_win}" "$@"
+  "${bash_mnt}" "${self_win}" "$@" &
+  child=$!
+  trap 'kill -TERM "${child}" 2>/dev/null || true' INT TERM
+  rc=0
+  wait "${child}" || rc=$?
+  wait "${child}" 2>/dev/null || true
+  trap - INT TERM
+  exit "${rc}"
 }
 
 # --- helpers ----------------------------------------------------------------
@@ -480,6 +493,15 @@ report_bug_on_exit() {
   # sees the whole console output, then always clean up, successful run or not.
   run_log_finalize
   if [[ -z "${code}" || "${code}" == "0" || "${BUG_REPORTED}" == "1" ]]; then
+    run_log_cleanup
+    return 0
+  fi
+  # 130 (SIGINT) / 143 (SIGTERM): the user stopped the run on purpose (Ctrl-C in
+  # PowerShell sends the interrupt through the WSL relaunch as a TERM). That is
+  # not a driver defect, so it must not file a bug report (issue #203).
+  if [[ "${code}" == "130" || "${code}" == "143" ]]; then
+    echo "Interrupted (exit ${code}); not filing a bug report." >&2
+    BUG_REPORTED="1"
     run_log_cleanup
     return 0
   fi
