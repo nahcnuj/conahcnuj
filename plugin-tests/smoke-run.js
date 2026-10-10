@@ -8,8 +8,6 @@
 // commit rules, and the tool.execute.before redirects (git commit and a
 // direct api-commit.sh run both blocked toward git vc, everything else
 // passing through).
-// shell.env contract (GIT_CONFIG identity + alias.vc) and the
-// tool.execute.before redirect (git commit blocked, others pass through).
 // The require target is a fixed literal path on purpose: requiring an
 // argv-provided path trips CodeQL path-injection (high). smoke.sh stages
 // the compiled artifact plus a fake gh-app dir at ./.smoke/ (same relative

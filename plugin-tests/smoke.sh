@@ -6,7 +6,6 @@
 # identity + alias.vc), the system-prompt commit rules and the
 # tool.execute.before redirects (git commit / api-commit.sh) via
 # smoke-run.js.
-# identity + alias.vc) plus the git-commit redirect via smoke-run.js.
 # Needs node/npm (typescript from plugins/package.json) and pwsh/powershell
 # for install.ps1. No secrets, no GitHub network.
 set -euo pipefail
@@ -41,8 +40,6 @@ INST="${TMP}/inst"
 mkdir -p "${STAGE}/src/lib" "${STAGE}/gh-app"
 cp "${INST}/plugins/gh-app-token.ts" "${STAGE}/src/"
 cp "${INST}/plugins/lib/gh-app-commit.ts" "${STAGE}/src/lib/"
-mkdir -p "${STAGE}/src" "${STAGE}/gh-app"
-cp "${INST}/plugins/gh-app-token.ts" "${STAGE}/src/"
 cp "${INST}/gh-app/"*.sh "${STAGE}/gh-app/"
 # Seed the bot-ID cache: keeps this test deterministic and offline-safe
 # (the public-API lookup behind it shares runner IPs and gets rate-limited).
