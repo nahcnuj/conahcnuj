@@ -6,11 +6,20 @@
 グローバル AGENTS.md を全セッションへ読み込むため、nahcnuj のどのリポジトリでも
 同じ指示が効く。個別リポジトリに同じことを書く必要はない。
 
+## opencode V2 移行について
+
+OpenCode V2 以降、以下のポイントに注意してください：
+
+- コミットは依然として `git vc` で行います（V2 でも Verified コミットが必要です）
+- プラグイン API が変更されています（V1 プラグインは V2 で動作しません）
+- 権限形式が変更されています（新しい `permissions` 配列形式）
+- ターミナル設定は `cli.json` へ移行してください
+
 ## コミットは `git vc`
 
 - **コミットは `git vc` で行うこと。`git commit` は使ってはいけない。**
   この環境（conahcnuj）では git が GitHub App 名義で動くため、`git commit` が
-  作るコミットは署名なしになり、「Commits must have verified signatures」等の
+  作るコミットは署名なしになり「Commits must have verified signatures」等の
   ブランチルールで弾かれる（bot アカウントには署名鍵を登録できない）。
 - 使い方は `git commit` と同じ:
 
@@ -22,7 +31,7 @@
 
 - `git vc` は conahcnuj の opencode プラグイン（`plugins/gh-app-token.ts`）が
   セッションのシェルへ注入する git alias で、内部で `gh-app/api-commit.sh` を
-  正しい owner/repo/branch 付きで呼ぶ。**`api-commit.sh` を直接実行しないこと**
+  正しい owner/repo/branch 付きで呼びます。**`api-commit.sh` を直接実行しないこと**
   （直接実行はフックに止められ `git vc` へ誘導される）。
 - **`gh-app/` 配下のファイル（特に `gh-app/api-commit.sh`）は編集・変更しないこと。**
   これらは verified commit 機構の実装詳細であり、変更する必要はない。

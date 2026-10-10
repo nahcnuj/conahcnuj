@@ -6,19 +6,11 @@
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Destination C:\path\to\dir
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -InstallPath C:\path\to\bin
 #
+# V2 notes: OpenCode V2 reads the same config locations as V1. This script
+# deploys to those locations unchanged. For V2 migration, see:
+# https://opencode.ai/v2/docs/migrate-v1/
+#
 # Deploys two gh-app trees:
-#   - <Destination>/gh-app/...          used by the opencode plugin (resolves
-#                                       gh-app relative to its own plugins dir)
-#   - <InstallPathParent>/gh-app/...    used by the conahcnuj driver binary
-#                                       (resolves gh-app relative to itself)
-# plus:
-#   - <Destination>/plugins/gh-app-token.ts   opencode plugin
-#   - <Destination>/plugins/lib/gh-app-commit.ts   helper module (not auto-loaded)
-#   - <Destination>/AGENTS.md                 global opencode rules: the
-#                                            managed conahcnuj commit block is
-#                                            merged into whatever is there
-#   - <InstallPath>/conahcnuj                driver binary
-#   - <InstallPathParent>/lib/*.sh           driver runtime libs
 # If the config destination has no app.env yet, it is created from
 # app.env.example. plugins/package.json, package-lock.json, tsconfig.json and
 # node_modules are local typecheck tooling and are never deployed; gh-app/tests

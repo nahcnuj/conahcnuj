@@ -1,4 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin"
+// Note: V2 plugin API has breaking changes from V1. This plugin has been
+// updated for V2 compatibility. See https://opencode.ai/v2/docs/migrate-v1/
 import { createSign } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
@@ -411,7 +413,9 @@ function formatModelLabel(provider: string, model: string, effort: string): stri
     const id = [p, m].filter(Boolean).join("/")
     return e && id ? `${id}/${e}` : id
   }
-  return e ? `${p} (${m}/${e})` : `${p} (${m})`
+  // V2 format: provider/model#variant (e.g. xai/grok-4.7#medium)
+  // V1 format was: provider (model/effort) (e.g. xai (grok-4.7/medium))
+  return e ? `${p}/${m}#${e}` : `${p}/${m}`
 }
 
 /**
@@ -425,11 +429,13 @@ function matchesSessionModel(providerID: string, modelID: string): boolean {
   if (!want) {
     return true
   }
-  const slash = want.indexOf("/")
+  // Support V2 format: provider/model#variant (strip variant for matching)
+  const base = want.split("#")[0]
+  const slash = base.indexOf("/")
   if (slash < 0) {
     return want === modelID || want === `${providerID}/${modelID}`
   }
-  return want === `${providerID}/${modelID}`
+  return base === `${providerID}/${modelID}`
 }
 
 function rememberModel(
