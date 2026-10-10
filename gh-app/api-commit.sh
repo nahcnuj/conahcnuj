@@ -368,6 +368,16 @@ if [[ -z "${COMMIT_SHA}" ]]; then
   exit 1
 fi
 
+# Sync the local checkout to the commit just created. `git pull` refuses while a
+# merge is in progress ("You have not concluded your merge (MERGE_HEAD exists)")
+# even though the resolved content is already in the commit GitHub created, which
+# turned a successful commit into a reported failure (issue #250). The caller
+# resolved the branch conflict in the work tree and staged it, so forget the
+# merge - the index and work tree stay put - and let the fast-forward pull
+# conclude it, exactly as an ordinary commit would.
+if [[ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null)" ]]; then
+  git merge --quit
+fi
 git pull origin "${BRANCH}"
 
 printf '%s' "${COMMIT_SHA}"
