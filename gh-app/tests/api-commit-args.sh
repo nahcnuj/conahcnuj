@@ -42,3 +42,11 @@ if bash "${APICOMMIT}" -m msg --bogus >/dev/null 2>&1; then
   exit 1
 fi
 echo "PASS api-commit.sh rejects unknown flag"
+
+# --create-branch was a git-commit-alien option: a missing remote branch is
+# now created automatically, so the flag itself is rejected like any unknown.
+if bash "${APICOMMIT}" -m msg --create-branch >/dev/null 2>&1; then
+  echo "FAIL: api-commit.sh with removed --create-branch should exit non-zero" >&2
+  exit 1
+fi
+echo "PASS api-commit.sh rejects removed --create-branch"

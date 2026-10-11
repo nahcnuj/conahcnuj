@@ -18,6 +18,10 @@
 #   bash gh-app/api-commit.sh <branch> -m "<message>"   # repo auto-detected
 #   bash gh-app/api-commit.sh <owner>/<repo> -m "<message>"  # branch auto-detected
 #
+# A branch the remote does not have yet is created from the default branch
+# head, so the ordinary `git switch -c <branch>` + commit workflow needs no
+# extra option (the same thing a first `git push -u origin <branch>` does).
+#
 # New files go through `git add` like normal git usage; there is no
 # content-passing option on purpose.
 #
@@ -25,8 +29,6 @@
 #   -a                Commit tracked worktree changes (modified/deleted tracked
 #                     files, staged or not; untracked files excluded).
 #   --delete path     Delete path from the branch.
-#   --create-branch   Create <branch> from the default branch if it does not
-#                     exist yet (no unsigned commits involved).
 #   --dry-run         Print what would be committed without calling the API
 #                     (no token/network needed; usable for offline tests).
 #
@@ -70,7 +72,6 @@ auto_repo() {
 MESSAGE=""
 declare -a DELETE_PATHS=()
 TRACKED=false
-CREATE_BRANCH=false
 DRY_RUN=false
 REPO=""
 BRANCH=""
@@ -99,8 +100,6 @@ while [[ $# -gt 0 ]]; do
       DELETE_PATHS+=( "${2}" ); shift 2 ;;
     -a)
       TRACKED=true; shift ;;
-    --create-branch)
-      CREATE_BRANCH=true; shift ;;
     --dry-run)
       DRY_RUN=true; shift ;;
     *)
@@ -114,8 +113,10 @@ if [[ -z "${REPO}" ]]; then
 fi
 if [[ -z "${BRANCH}" ]]; then
   BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  if [[ -z "${BRANCH}" ]]; then
-    echo "ERROR: cannot auto-detect <branch>. Pass it as the second argument (not inside a git work tree)." >&2
+  # `git rev-parse --abbrev-ref HEAD` prints the literal "HEAD" on a detached
+  # HEAD; refuse rather than create a remote branch named HEAD.
+  if [[ -z "${BRANCH}" || "${BRANCH}" == "HEAD" ]]; then
+    echo "ERROR: cannot auto-detect <branch>. Create/switch to a branch (git switch -c <branch>) or pass it as the second argument." >&2
     exit 1
   fi
 fi
@@ -307,15 +308,14 @@ TOKEN="$(bash "${DIR}/get-token.sh")"
 API="${API_BASE}/repos/${REPO}"
 
 # 2) Current HEAD sha of the branch (|| true: a missing branch must fall
-#    through to the --create-branch handling instead of tripping set -e).
+#    through to the branch-creation handling instead of tripping set -e).
 HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
 HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
 if [[ -z "${HEAD_SHA}" ]]; then
-  if [[ "${CREATE_BRANCH}" != true ]]; then
-    echo "ERROR: branch ${BRANCH} not found (does it exist? use --create-branch to create it from the default branch)" >&2
-    exit 1
-  fi
-  # 2b) Create the branch ref from the default branch head (no commits pushed).
+  # 2b) The remote does not have the branch yet. Create the ref from the default
+  #     branch head (no commits pushed), the same thing a first
+  #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
+  #     followed by a commit needs no extra option.
   DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
