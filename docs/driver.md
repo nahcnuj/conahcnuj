@@ -30,14 +30,11 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 
 1. issue を読み、最新のデフォルトブランチからフィーチャーブランチを作って
    opencode で実装。最初のモデルが失敗（rate limit 等）したら、同じ
-   `sessionID` と作業ツリーを次のモデルへ引き継いで完了まで継続する
-   （環境エラーで落ちた provider は切り分けられる）。rate limit
-   （`Rate limit exceeded. Please try again later.`）は opencode が自前の
-   再試行バックオフで数分待つため、ドライバが検知した時点でラウンドを打ち切り、
-   再試行を待たずに次モデルへ移る（rate limit は環境エラーではないので provider
-   は落とさない。#155）。モデル自体が deprecated / 削除 / 利用不可で落ちた場合は
-   provider ではなくそのモデルだけを `gh-app/missing-models` に記録し、以後の
-   ラウンドと次回実行ではラウンドを消費せずスキップする（#209）
+   `sessionID` と作業ツリーを次のモデルへ引き継げて完了まで継続する
+   （環境エラーで落ちた provider は切り分けられる）。モデル自体が
+   deprecated / 削除 / 利用不可で落ちた場合は provider ではなくそのモデルだけを
+   `gh-app/missing-models` に記録し、以後のラウンドと次回実行ではラウンドを
+   消費せずスキップする（#209）
 2. エージェントが書いた `.commit-msg` で Verified コミットを作成し、PR を開く。
    issue の進捗ファイル `TODO.md`（生存期間は issue 毎）がある間は PR を **draft**
    として開き、レビュー依頼をしない。エージェントが作業中に `TODO.md` を更新し、
@@ -66,6 +63,11 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 
 ポーリングは GitHub のレートリミット（`Retry-After` / `X-RateLimit-Reset`）と
 ジッター付きスリープで調整されます。
+
+provider の rate limit（`Rate limit exceeded. Please try again later.`）でモデルが
+止まった場合は、opencode が自前の再試行バックオフで数分待つのを待たず、ドライバが
+検知した時点でラウンドを打ち切って次モデルへ移ります（rate limit は provider の
+障害ではなくクォータ枯渇なので provider は落としません。#155）。
 
 ## エージェントとの契約
 
