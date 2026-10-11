@@ -201,15 +201,17 @@ submit・編集・dismiss された場合も、PR 番号でドライバを再開
 ## owner 承認後の自動マージ（GitHub Actions）
 
 `.github/workflows/auto-merge.yml` は、owner が open 中の draft でない PR を
-approve すると auto-merge を有効化します。必要な status checks が既に green なら
-その場でマージされ、まだ green でなければ条件達成後にマージされます。書き込みには
-GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
+approve すると、承認された head に一致するときだけ即時マージを試します。必要な
+status checks が既に green ならその場でマージされ、まだ green でなければネイティブ
+auto-merge を有効化してジョブを終えます（CI の完了は GitHub 側で判断され、ジョブ
+自身は CI を待ちません。「merge if it's mergeable, or enable auto-merge」）。書き込みに
+は GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
 auto-merge が有効になっている必要があります。
 
 承認からマージまでのあいだに別の PR が base ブランチへ入ると、head が base に
 遅れて GitHub が即時マージを拒否します。この Workflow はその場合に `--auto` で
-マージをキューイングするので（head が最新に戻れば自動的にマージされる）、
-ジョブが失敗にはなりません。キューイングもできない場合はエラーとして報告します。
+ネイティブ auto-merge を有効化するので（head が最新に戻れば自動的にマージされる）、
+ジョブが失敗にはなりません。有効化もできない場合はエラーとして報告します。
 
 ### 他のリポジトリで使う（Reusable Workflow）
 

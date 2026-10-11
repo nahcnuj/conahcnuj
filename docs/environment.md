@@ -75,7 +75,6 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `CONAHCNUJ_INPUT` | issue-driver | issue / PR 番号（workflow 側の受け渡し用） |
 | `CONAHCNUJ_MAX_SECONDS=3540` | issue-driver | `timeout-minutes: 60` より前に自己終了するための予算 |
 | `OPENCODE_DISABLE_AUTOUPDATE` | issue-driver / e2e | opencode の自動更新を停止 |
-| `IGNORED_WORKFLOWS` | owner-approved-auto-merge | マージ待ちチェックから除外する workflow 名（既定 `Issue auto-drive`） |
 
 ## テスト専用（本番では触らない）
 

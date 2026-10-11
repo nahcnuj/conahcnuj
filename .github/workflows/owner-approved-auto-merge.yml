@@ -45,9 +45,9 @@ jobs:
       github.event.review.state == 'approved' &&
       github.event.review.author_association == 'OWNER'
     runs-on: ubuntu-latest
-    # CI の完了待ちはこのジョブのポーリング（CHECK_TIMEOUT 秒）で行うため、
-    # タイムアウトは checks の待ち時間 + マージの余裕ぶん確保する
-    timeout-minutes: 30
+    # CI の完了はこのジョブでは待たず、ネイティブ auto-merge（GitHub 側）に任せる
+    # （issue #269）。ジョブは 1 〜 2 回の API 呼び出しで終わる。
+    timeout-minutes: 10
     steps:
       - name: Merge and dispatch
         env:
@@ -76,133 +76,29 @@ jobs:
             echo "approved commit $HEAD_SHA is not the current head $current_head; skipping"
             exit 0
           fi
+          if [ "$(printf '%s' "$pull_request" | jq -r .state)" = "closed" ] &&
+             [ "$(printf '%s' "$pull_request" | jq -r .merged)" = "true" ]; then
+            echo "PR $REPOSITORY#$PR_NUMBER is already merged; skipping"
+            exit 0
+          fi
 
-          # ネイティブ auto-merge は integration token では有効化できない
-          # （"Resource not accessible by integration"）ため、checks を待って自前で
-          # マージする。GITHUB_TOKEN のマージは push イベントを発生させない
-          # ので、呼び出し側が post-merge-dispatch でデプロイを起動する。
+          # 承認された head に一致するときだけ即時マージを試す。CI がまだ green で
+          # ない・head が base より遅れているなどの場合は GitHub が即時マージを
+          # 拒否する。ここで CI の完了を待つことはしない（issue #269）: そのまま
+          # ネイティブ auto-merge を有効化してジョブを終え、条件達成後のマージは
+          # GitHub 側に任せる。「merge if it's mergeable, or enable auto-merge」。
           #
-          # gh pr checks --watch で待つと、このジョブ自身の check run（承認された
-          # head SHA に紐付いたまま pending）が永久に終わらないため自己デッドロック
-          # する。checks を API で直接読み、この run のものだけを除いて待つ。
-          #
-          # このリポジトリのドライバ（Issue auto-drive）も、動いている間だけ head
-          # commit に check run を残す。だから ここでその check を待つと両者が
-          # 互いを受け待ちになる（issue #115: ドライバはこのジョブの check を制約
-          # として待ち、このジョブはドライバの check を待たれて CHECK_TIMEOUT で
-          # 失敗する）。ドライバ側も CONAHCNUJ_OWN_WORKFLOWS で同じ workflow 名を
-          # 除外しているので（lib/gh-api.sh）、ここでも workflow 名で除外して
-          # CI だけを待つ。
-          CHECK_INTERVAL=30
-          CHECK_TIMEOUT=1500
-          SELF_RUN_ID="$GITHUB_RUN_ID"
-          IGNORED_WORKFLOWS="${IGNORED_WORKFLOWS:-Issue auto-drive}"
-          OWNER="${REPOSITORY%%/*}"
-          REPO_NAME="${REPOSITORY#*/}"
-
-          # 残っている check / commit status を 1 行ずつ "pending|failed<TAB>check|
-          # status<TAB>名前<TAB>状態" で出す。出力が空なら待てるものは全部 green。
-          # workflow 名は REST の check-runs には付かないので GraphQL の
-          # statusCheckRollup から取る（commit status も同じ扱いで混ざる）。context を
-          # 列挙できないページ / checks の無いコミットは「保留」として待つ（勝手に
-          # 「全部 green」と合計すると、そのまま merge してしまう）。
-          outstanding_checks() {
-            gh api graphql \
-              -F owner="$OWNER" \
-              -F name="$REPO_NAME" \
-              -F sha="$HEAD_SHA" \
-              -f query='
-                query($owner: String!, $name: String!, $sha: GitObjectID!) {
-                  repository(owner: $owner, name: $name) {
-                    object(oid: $sha) {
-                      ... on Commit {
-                        statusCheckRollup {
-                          contexts(first: 100) {
-                            pageInfo { hasNextPage }
-                            nodes {
-                              __typename
-                              ... on CheckRun {
-                                name status conclusion
-                                checkSuite {
-                                  workflowRun { databaseId workflow { name } }
-                                }
-                              }
-                              ... on StatusContext { context state }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }' \
-              | jq -r \
-                  --arg owner "$OWNER" \
-                  --arg name "$REPO_NAME" \
-                  --arg sha "$HEAD_SHA" \
-                  --arg self_run "$SELF_RUN_ID" \
-                  --arg ignore "$IGNORED_WORKFLOWS" '
-                    .data.repository.object as $object
-                    | if $object == null then
-                        error("no commit " + $sha + " in " + ($owner + "/" + $name)
-                              + "; refusing to merge blind")
-                      else $object end
-                    | (.statusCheckRollup // null) as $rollup
-                    | (
-                        if ($rollup == null or ($rollup.contexts.pageInfo.hasNextPage // false))
-                        then "pending\tcheck\t(no enumerable check list)\tpending"
-                        else empty end,
-                        (($rollup.contexts.nodes // [])[]
-                          # この run 自身の check は、承認 head に紐付いたまま pending。
-                          | select(((.checkSuite.workflowRun.databaseId | tostring) != $self_run))
-                          # 除外 workflow の check（このリポジトリのドライバ）も待たない。
-                          | select((.checkSuite.workflowRun.workflow.name // "") as $wf
-                                   | (($ignore | split(",") | index($wf)) == null))
-                          | (if .__typename == "CheckRun"
-                             then (if .status != "COMPLETED" then "pending"
-                                   elif ((.conclusion // "") | IN("SUCCESS", "NEUTRAL", "SKIPPED")) then ""
-                                   else "failed" end)
-                             elif .__typename == "StatusContext"
-                             then (if .state == "SUCCESS" then ""
-                                   elif ((.state // "") | IN("PENDING", "EXPECTED", "")) then "pending"
-                                   else "failed" end)
-                             # 読み方を知らない context は「保留」扱い（勝手に合計しない）。
-                             else "pending" end) as $state
-                          | select($state != "")
-                          | "\($state)\t\(if .__typename == "CheckRun" then "check" else "status" end)\t\(.name // .context // "unknown context")\t\(.conclusion // .status // .state // "unknown")"
-                        )
-                      )'
-          }
-
-          deadline=$(( $(date +%s) + CHECK_TIMEOUT ))
-          while true; do
-            outstanding="$(outstanding_checks)"
-            if [ -z "$outstanding" ]; then
-              echo "all checks passed for $REPOSITORY#$PR_NUMBER at $HEAD_SHA"
-              break
-            fi
-            if printf '%s\n' "$outstanding" | grep -q '^failed'; then
-              printf '%s\n' "$outstanding" >&2
-              echo "checks did not pass for $REPOSITORY#$PR_NUMBER at $HEAD_SHA" >&2
-              exit 1
-            fi
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              printf '%s\n' "$outstanding" >&2
-              echo "timed out after ${CHECK_TIMEOUT}s waiting for checks at $HEAD_SHA" >&2
-              exit 1
-            fi
-            echo "waiting for $(printf '%s\n' "$outstanding" | grep -c .) check(s) at $HEAD_SHA"
-            printf '%s\n' "$outstanding"
-            sleep "$CHECK_INTERVAL"
-          done
-
+          # GITHUB_TOKEN のマージは push イベントを発生させない（#131）ので、実際に
+          # マージされたと確認できたときだけ post-merge-dispatch でデプロイを起動
+          # する。auto-merge を有効化しただけ（まだマージされていない）場合は起動
+          # しない。
           if ! merge_output="$(gh pr merge "$PR_NUMBER" \
             --repo "$REPOSITORY" \
             "$MERGE_FLAG" \
             --match-head-commit "$HEAD_SHA" 2>&1)"; then
-            # An immediate merge is refused while the head branch is behind the
-            # base (another PR merged first). That is not this run failing, so
-            # queue the merge instead: GitHub lands it as soon as the branch is
-            # up to date again, without anyone re-approving the same head.
+            # 即時マージの拒否はこの run の失敗ではない。ネイティブ auto-merge を
+            # 有効化してジョブを終える。有効化もできない場合（リポジトリ設定の
+            # Allow auto-merge が無効など）のみ失敗として報告する。
             printf '%s\n' "$merge_output" >&2
             if auto_output="$(gh pr merge "$PR_NUMBER" \
               --repo "$REPOSITORY" \
@@ -222,6 +118,11 @@ jobs:
           printf '%s\n' "$merge_output"
 
           if [ -n "$POST_MERGE_DISPATCH" ]; then
-            echo "dispatching $POST_MERGE_DISPATCH on $REPOSITORY"
-            gh workflow run "$POST_MERGE_DISPATCH" --repo "$REPOSITORY"
+            state="$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state --jq .state)"
+            if [ "$state" = "MERGED" ]; then
+              echo "dispatching $POST_MERGE_DISPATCH on $REPOSITORY"
+              gh workflow run "$POST_MERGE_DISPATCH" --repo "$REPOSITORY"
+            else
+              echo "$REPOSITORY#$PR_NUMBER is not merged yet; skipping post-merge dispatch" >&2
+            fi
           fi
