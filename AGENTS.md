@@ -16,10 +16,21 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 - ドライバの整形ログ（`lib/opencode-render.sh`）は truncate しない。行数・桁数で省略せず、モデルが書いた行もコマンドが出力した行も全文が出る（`CONAHCNUJ_RENDER_MAX_LINES` / `CONAHCNUJ_RENDER_MAX_COLS` に相当する省略は行わない。両変数は廃止済み）。このログは run の唯一の記録で、異常終了時はその一部がバグ報告に載るため、省略は「モデルがそう言わなかったこと」と区別できない穴になる。
 - コーディングエージェントへのプロンプトに指示を積み増さない。`opencode_agent_contract` が伝えるのは「この issue／PR を owner の Approve まで導く・エージェントの担当は作業ツリーの変更、ブランチ・コミット・push・PR・レビュー依頼はドライバ」だけにする（禁止コマンドの一覧や「これは成果物ではない」「やっても no work」といった注意は書かない）。実際に禁止と注意を並べた長い contract を入れたとき、エージェントがそれを任務と誤解してコミットメッセージだけ出して終わるので、_owner のレビューで「エージェントの仕事を邪魔している」と弾かれる_（`driver-tests/opencode.sh` がプロンプトに禁止コマンド列と「counts as no work」が現れないことを検証する）。決定論的に収集できる情報（issue／PR の本文・未解決レビュースレッド・`README.md` / `AGENTS.md` 等）は指示ではなく**材料**なので、契約とは別に `Collected context:` というデータのブロックとして同梱する。例外はレビュースレッドへの返信で、これだけはエージェント自身が行う（ドライバは投稿しない）。契約には足さず、フィードバック対応ラウンドの追加コンテキストで「各スレッドへ返信し、必要なら修正する」と comment id・返信エンドポイントを添える。
 
+## 進捗の管理・共有（TODO.md）
+
+- リポジトリルートの **`TODO.md`** で、いま取り組んでいる issue の進捗を管理・共有する。**書式は問わない**。
+- 生存期間は **issue 毎**:
+  - issue の着手で `TODO.md` を作成する。
+  - 作業中は随時、進捗に応じて `TODO.md` を更新する。
+  - 対応が完了し PR を ready to merge するときには `TODO.md` を**削除**する。
+- `TODO.md` がある状態では、ドライバは PR を **draft** として作成し、レビュー依頼をしない。`TODO.md` を削除するとドライバが draft を解除してレビュー依頼する。つまり **`TODO.md` がある限り、エージェント自身で draft を解除できない（draft でない PR を作成できない）**。逆に、削除し忘れると PR が draft のままレビュアーへ渡らず、ドライバはラウンドを重ねて削除を促す（時間予算まで）。
+- `TODO.md` はドライバが working tree（ブランチ先端）のファイルの有無で判定する。コミットに乗るので、削除も他の変更と同じくエージェントの作業ツリー変更として扱われる。
+
 ## ファイルガイド
 
 | パス | 役割 | 注意 |
 | ---- | ---- | ---- |
+| `TODO.md` | issue ごとの進捗ファイル（リポジトリルート）。着手で作成・作業中に更新・完了で削除する。ドライバはこれの有無で PR の draft を切り替える | 生存期間は issue 毎。issue が終わったら必ず削除する（残すと PR が draft のままレビュアーへ渡らない） |
 | `gh-app/get-token.sh` | JWT署名 → インストールトークン取得（`token.cache` キャッシュ付き） | `app.env` → 無ければ `app.env.example` を fallback |
 | `gh-app/git-credential-helper.sh` | git credential helper（stdin を読み捨て stdout に username/password 出力） | |
 | `gh-app/setup-git.sh` | リポジトリへ bot 向け git config を適用 | 設定は `app.env` から取得 |

@@ -646,12 +646,20 @@ gh_api_create_branch() {
   gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/git/refs" "${body}"
 }
 
-# Create a PR. Output: PR number. Args: owner repo title body head base
+# Create a PR. Output: PR number. Args: owner repo title body head base [draft]
+# draft=true opens the PR as a draft, which is how the driver keeps an
+# unfinished issue from being presented as ready: while the coding agent's
+# per-issue TODO.md is still in the tree, the PR is created as a draft and only
+# marked ready once the file is gone (see bin/conahcnuj.sh).
 # The createPullRequest mutation requires the repository node id (it rejects
 # repositoryNameWithOwner), so this first resolves the id with one extra
 # GraphQL query. In test mode that consumes one extra mock line.
 gh_api_create_pr() {
-  local owner="${1}" repo="${2}" title="${3}" body="${4}" head="${5}" base="${6}"
+  local owner="${1}" repo="${2}" title="${3}" body="${4}" head="${5}" base="${6}" draft="${7:-false}"
+  local draft_field=""
+  if [[ "${draft}" == "true" ]]; then
+    draft_field=", draft: true"
+  fi
 
   local id_query="query(\$owner: String!, \$repo: String!) { repository(owner: \$owner, name: \$repo) { id } }"
   local id_json
@@ -668,7 +676,7 @@ gh_api_create_pr() {
   fi
 
   local query
-  query="mutation { createPullRequest(input: { repositoryId: \"${repo_id}\", headRefName: \"$(gh_api_escape "${head}")\", baseRefName: \"$(gh_api_escape "${base}")\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\" }) { pullRequest { number } } }"
+  query="mutation { createPullRequest(input: { repositoryId: \"${repo_id}\", headRefName: \"$(gh_api_escape "${head}")\", baseRefName: \"$(gh_api_escape "${base}")\", title: \"$(gh_api_escape "${title}")\", body: \"$(gh_api_escape "${body}")\"${draft_field} }) { pullRequest { number } } }"
 
   local json
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
@@ -677,6 +685,37 @@ gh_api_create_pr() {
     json="$(gh_api_graphql "${query}")"
   fi
   gh_api_json_num "${json}" "number"
+}
+
+# Mark a draft PR ready for review, the undo of creating it as a draft. REST:
+# POST /repos/{owner}/{repo}/pulls/{number}/ready_for_review. Args: owner repo pr
+gh_api_ready_pr() {
+  local owner="${1}" repo="${2}" number="${3}"
+  gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/ready_for_review" >/dev/null
+}
+
+# Convert a PR back to draft. There is no REST endpoint for this, so it goes
+# through the convertPullRequestToDraft GraphQL mutation, which needs the PR
+# node id (resolved with one extra query). Args: owner repo pr
+gh_api_convert_pr_to_draft() {
+  local owner="${1}" repo="${2}" number="${3}" id_json pr_id query
+  local id_query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { id } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    id_json="$(gh_api_read_line)"
+  else
+    id_json="$(gh_api_graphql "${id_query}")"
+  fi
+  pr_id="$(gh_api_json_str "${id_json}" "id")"
+  if [[ -z "${pr_id}" ]]; then
+    echo "ERROR: could not resolve the node id of PR #${number} to convert it to a draft." >&2
+    return 1
+  fi
+  query="mutation { convertPullRequestToDraft(input: {pullRequestId: \"${pr_id}\"}) { pullRequest { isDraft } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    gh_api_read_line >/dev/null
+  else
+    gh_api_graphql "${query}" >/dev/null
+  fi
 }
 
 # Update a PR's body so it stays in sync with the linked issue. Args: owner repo pr body
