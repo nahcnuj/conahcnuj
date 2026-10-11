@@ -105,7 +105,7 @@ owner が open 中の draft でない PR を approve すると auto-merge を有
 | `pr-number` | ○ | - | PR 番号 |
 | `head-sha` | ○ | - | approve された head コミット |
 | `merge-method` | - | `merge` | `merge` / `squash` / `rebase` |
-| `post-merge-dispatch` | - | `''` | マージ成功後に `gh workflow run` する workflow 名 |
+| `post-merge-dispatch` | - | `''` | **即時マージが成功したとき**だけ `gh workflow run` する workflow 名 |
 
 呼び出し側は `pull_request_review` を購読し、`contents: write` /
 `pull-requests: write`（`post-merge-dispatch` を使うなら `actions: write`）を
@@ -123,12 +123,16 @@ jobs:
 
 振る舞い:
 
-- 承認からマージまでのあいだに base へ別の PR が入ると即時マージが拒否される
-  ため、`gh pr merge --auto` でキューイングしてから成功させる
-- 自 workflow・ドライバ（`IGNORED_WORKFLOWS`、既定 `Issue auto-drive`）の
-  check は待たない（互いの check を待ち合ってデッドロックするため）
+- 承認された head に一致するときだけ **即時マージ**を試す（`--match-head-commit`）。
+  CI が既に green ならその場でマージされる
+- 即時マージが拒否された場合（CI がまだ green でない・head が base より
+  遅れているなど）は `gh pr merge --auto` で **ネイティブ auto-merge** を有効化して
+  ジョブを終える。CI の完了待ちは GitHub 側で行われるため、ジョブは CI を待たない
+  （issue #269）。リポジトリ設定で **Allow auto-merge** が必要
 - マージ自体は `GITHUB_TOKEN` で行う。`GITHUB_TOKEN` のマージは push イベントを
   発生させないので、デプロイが必要なリポジトリは `post-merge-dispatch` で起動する
+  （実際にマージされたと確認できたときだけ起動。auto-merge を有効化しただけの
+  場合はまだマージされていないため起動しない）
 
 ## GitHub Pages（`docs/` の配信）
 
