@@ -91,8 +91,12 @@ bash gh-app/api-commit.sh -m "<メッセージ>" -a             # tracked 変更
 bash gh-app/api-commit.sh -m "<メッセージ>" -a --delete path/to/removed
 bash gh-app/api-commit.sh <owner>/<repo> <branch> -m "<メッセージ>" -a
 bash gh-app/api-commit.sh <branch> -m "<メッセージ>"       # owner/repo は origin から自動検出
-bash gh-app/api-commit.sh -m "<メッセージ>" --create-branch --dry-run
+bash gh-app/api-commit.sh --dry-run                       # API を呼ばず収集結果のみ表示
 ```
+
+リモートに無いブランチは**デフォルトブランチ起点で自動作成**されます（`git push -u` の
+初回と同じ）。`git switch -c <branch>` でブランチを作り、そのまま
+`git vc -m "<メッセージ>"` する普通のフローでコミットできます。
 
 ### オプション
 
@@ -101,7 +105,6 @@ bash gh-app/api-commit.sh -m "<メッセージ>" --create-branch --dry-run
 | `-m`, `--message <text>` | **必須**。1 行目が headline、続く行が body |
 | `-a` | tracked な作業ツリー変更を収集（修正・削除・リネーム含む。**untracked は除外**） |
 | `-d`, `--delete <path>` | ブランチからパスを削除（複数回指定可） |
-| `--create-branch` | ブランチが無いとき、デフォルトブランチ起点で ref を作成（unsigned コミットを経由しない） |
 | `--dry-run` | API を呼ばず収集結果のみ表示（トークン・ネットワーク不要） |
 
 位置引数は先頭から `[<owner>/<repo>] [<branch>]`。省略時は `git remote origin` と
@@ -133,16 +136,16 @@ trailer としてコミット本文末尾に追加します（本文に既に `C
   ローカル同期（`git pull origin <branch>`）の出力が入るため、**最後の行**を読む
 - `--dry-run` の stdout: `Owner/Repo:` / `Branch:` / `Message:` / `Additions:` /
   `Deletions:` のレポート
-- stderr: `Created branch <branch> from <default>`（`--create-branch` で ref を作った
-  とき）、エラー理由
+- stderr: `Created branch <branch> from <default>`（リモートに無いブランチを
+  自動作成したとき）、エラー理由
 - 作者（author）は App の bot、committer は GitHub
 
 ### 前提
 
 - ネットワーク + 有効なトークン（`--dry-run` は不要）
 - 収集内容が 0 件なら `ERROR: nothing to commit ...` で exit 1
-- ブランチが無く `--create-branch` も無い場合:
-  `ERROR: branch <branch> not found ...` で exit 1
+- リモートに無いブランチはデフォルトブランチ起点で自動作成され、
+  その上にコミットが 1 件乗ります（unsigned コミットを経由しない）
 
 ## 関連ページ
 
