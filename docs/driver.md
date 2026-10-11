@@ -30,7 +30,7 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 
 1. issue を読み、最新のデフォルトブランチからフィーチャーブランチを作って
    opencode で実装。最初のモデルが失敗（rate limit 等）したら、同じ
-   `sessionID` と作業ツリーを次のモデルへ引き継えて完了まで継続する
+   `sessionID` と作業ツリーを次のモデルへ引き継げて完了まで継続する
    （環境エラーで落ちた provider は切り分けられる）。モデル自体が
    deprecated / 削除 / 利用不可で落ちた場合は provider ではなくそのモデルだけを
    `gh-app/missing-models` に記録し、以後のラウンドと次回実行ではラウンドを
@@ -63,6 +63,11 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 
 ポーリングは GitHub のレートリミット（`Retry-After` / `X-RateLimit-Reset`）と
 ジッター付きスリープで調整されます。
+
+provider の rate limit（`Rate limit exceeded. Please try again later.`）でモデルが
+止まった場合は、opencode が自前の再試行バックオフで数分待つのを待たず、ドライバが
+検知した時点でラウンドを打ち切って次モデルへ移ります（rate limit は provider の
+障害ではなくクォータ枯渇なので provider は落としません。#155）。
 
 ## エージェントとの契約
 
@@ -128,6 +133,7 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止） |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | プロンプトへ同梱する作業ツリーファイル（スペース区切り。空で無効） |
 | `CONAHCNUJ_MISSING_MODELS_FILE` | `<gh-app>/missing-models` | 永久に使えないモデルの記録先（ラウンド前に読み、判明したモデルを追記） |
+| `CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS` | `1` | provider の rate limit を検知してラウンドを打ち切る監視間隔（秒） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード（モック API テープ + モック opencode） |
 
 全量は [environment.md](environment.md) を参照。
