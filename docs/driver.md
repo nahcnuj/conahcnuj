@@ -30,11 +30,14 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
 
 1. issue を読み、最新のデフォルトブランチからフィーチャーブランチを作って
    opencode で実装。最初のモデルが失敗（rate limit 等）したら、同じ
-   `sessionID` と作業ツリーを次のモデルへ引き継えて完了まで継続する
-   （環境エラーで落ちた provider は切り分けられる）。モデル自体が
-   deprecated / 削除 / 利用不可で落ちた場合は provider ではなくそのモデルだけを
-   `gh-app/missing-models` に記録し、以後のラウンドと次回実行ではラウンドを
-   消費せずスキップする（#209）
+   `sessionID` と作業ツリーを次のモデルへ引き継いで完了まで継続する
+   （環境エラーで落ちた provider は切り分けられる）。rate limit
+   （`Rate limit exceeded. Please try again later.`）は opencode が自前の
+   再試行バックオフで数分待つため、ドライバが検知した時点でラウンドを打ち切り、
+   再試行を待たずに次モデルへ移る（rate limit は環境エラーではないので provider
+   は落とさない。#155）。モデル自体が deprecated / 削除 / 利用不可で落ちた場合は
+   provider ではなくそのモデルだけを `gh-app/missing-models` に記録し、以後の
+   ラウンドと次回実行ではラウンドを消費せずスキップする（#209）
 2. エージェントが書いた `.commit-msg` で Verified コミットを作成し、PR を開く
 3. 新規 PR は **リポジトリ owner を reviewer にアサイン**して先にレビュー依頼する
    （レビュアーは CI が green になるのを待たずにレビューを始められる。#233）。
@@ -121,6 +124,7 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止） |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | プロンプトへ同梱する作業ツリーファイル（スペース区切り。空で無効） |
 | `CONAHCNUJ_MISSING_MODELS_FILE` | `<gh-app>/missing-models` | 永久に使えないモデルの記録先（ラウンド前に読み、判明したモデルを追記） |
+| `CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS` | `1` | provider の rate limit を検知してラウンドを打ち切る監視間隔（秒） |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード（モック API テープ + モック opencode） |
 
 全量は [environment.md](environment.md) を参照。
