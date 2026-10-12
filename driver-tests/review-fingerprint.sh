@@ -31,6 +31,21 @@ echo "empty reviews / no decision -> empty: passed"
 [[ -z "$(gh_api_review_fingerprint "${CONTINUATION_ONLY}")" ]] || fail "continuation comment must not be treated as review feedback"
 echo "continuation comment -> empty: passed"
 
+# An approval short of the required count leaves reviewDecision at
+# REVIEW_REQUIRED. The approval is not feedback, so it must fingerprint empty;
+# otherwise the owner's approval fires a spurious implementation round on a PR
+# that is only waiting for another reviewer.
+APPROVED_STILL_REQUIRED='{"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}'
+[[ -z "$(gh_api_review_fingerprint "${APPROVED_STILL_REQUIRED}")" ]] || fail "an approval short of the required count must not fingerprint as feedback"
+echo "APPROVED review / REVIEW_REQUIRED -> empty: passed"
+
+# An approval must not mask a change request that is still pending: the
+# CHANGES_REQUESTED review is the feedback and has to keep the fingerprint
+# non-empty.
+APPROVED_AND_CHANGES='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}},{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}'
+[[ -n "$(gh_api_review_fingerprint "${APPROVED_AND_CHANGES}")" ]] || fail "an approval must not hide a pending change request"
+echo "APPROVED + CHANGES_REQUESTED -> non-empty: passed"
+
 [[ -n "$(gh_api_review_fingerprint "${CHANGES_EMPTY_BODY}")" ]] || fail "CHANGES_REQUESTED with empty body must fingerprint non-empty"
 echo "CHANGES_REQUESTED with empty body -> non-empty: passed"
 

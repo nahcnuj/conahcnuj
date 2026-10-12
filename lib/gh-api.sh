@@ -593,9 +593,14 @@ gh_api_format_unresolved_threads() {
 # Comments carry their author, so the bot's own replies are dropped before the
 # hash: they are review comments too, and counting them would let a reply look
 # like fresh reviewer feedback (the driver would answer its own answer forever).
+# Approvals are dropped too: an APPROVED review means the reviewer is done, not
+# that there is work to do. When approval is still short of the required count
+# (reviewDecision stays REVIEW_REQUIRED), counting the approval would fire a
+# spurious implementation round on a PR that is only waiting for another
+# reviewer. A pending approval is not feedback, so it must not move the hash.
 gh_api_review_fingerprint() {
   local raw="${1}" matches="" decision=""
-  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '\[bot\]' | grep -v '"body":"<!-- conahcnuj-continuation -->' || true)"
+  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '\[bot\]' | grep -v '"body":"<!-- conahcnuj-continuation -->' | grep -v '"state":"APPROVED"' || true)"
   if [[ -z "${matches}" ]]; then
     # Only a decision that means "do work now" counts as feedback on its own;
     # REVIEW_REQUIRED / empty just mean "waiting for reviewers".

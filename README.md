@@ -169,9 +169,11 @@ conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再�
    先に待つと時間予算を無駄にするだけ。#219）。レビュースレッド
    への返信はエージェント自身が行い（ドライバは「Addressed the review
    feedback」のような代行コメントを投稿しない）、返信は bot 著者として
-   レビュー fingerprint から除外されるので、自分の返信を新規意見と誤認して
-   ループしない。対応ラウンドの追加コンテキストには各スレッドの comment id と
-   返信エンドポイントを添える。
+    レビュー fingerprint から除外されるので、自分の返信を新規意見と誤認して
+    ループしない。承認（Approve）も fingerprint から除外するので、必要承認数に
+    届かず reviewDecision が REVIEW_REQUIRED のままでも承認だけで実装ラウンドを
+    起こさない。対応ラウンドの追加コンテキストには各スレッドの comment id と
+    返信エンドポイントを添える。
 3. owner の Approve と merge は `auto-merge.yml` /
    `owner-approved-auto-merge.yml` の担当で、ドライバ自身は自動マージしない。
 4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・CLOSED PR の再開・
