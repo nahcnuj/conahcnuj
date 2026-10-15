@@ -736,7 +736,8 @@ ensure_issue_branch() {
   # This function's stdout is captured by the caller to obtain the branch
   # name, so every git command must keep its own output off stdout (checkout_branch_head
   # sends git's output to stderr).
-  if git rev-parse --verify -q "origin/${branch}" >/dev/null 2>&1; then
+    if git rev-parse --verify -q "origin/${branch}" >/dev/null 2>&1; then
+
     # `|| return 1` rather than relying on errexit: this function runs inside a
     # command substitution, where bash does not honour it, and every command
     # after the checkout would otherwise run on the stale head.
@@ -750,13 +751,23 @@ ensure_issue_branch() {
     # nothing (the #115 stale-head trap only applies to a branch that already
     # existed). If the creation itself failed, the branch may exist on the
     # remote under a head we cannot safely assume, so the run stops.
-    local created=0
-    if gh_api_create_branch "${owner}" "${repo}" "${branch}" "${default_oid}" >/dev/null 2>&1; then
-      created=1
-    else
-      echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
-    fi
-    if fetch_new_branch_ref "${branch}"; then
+    local created=0 fetched=0
+    # The remote ref may not be advertised immediately after creation,
+    # so retry before treating the branch as uncreatable/stale.
+    for attempt in 1 2; do
+      if [[ "${created}" == "0" ]]; then
+        if gh_api_create_branch "${owner}" "${repo}" "${branch}" "${default_oid}" >/dev/null 2>&1; then
+          created=1
+        elif [[ "${attempt}" == "1" ]]; then
+          echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
+        fi
+      fi
+      if fetch_new_branch_ref "${branch}"; then
+        fetched=1
+        break
+      fi
+    done
+    if [[ "${fetched}" == "1" ]]; then
       git checkout -B "${branch}" "origin/${branch}" 1>&2 || return 1
     elif [[ "${created}" == "1" ]]; then
       echo "WARNING: ${branch} is not fetchable right after creation; starting it from ${default_branch}." >&2
