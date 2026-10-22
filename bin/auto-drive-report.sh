@@ -114,51 +114,75 @@ extract_events() {
       line = $0
       sub(/\r$/, "", line)
 
-      if (index(line, "opencode: trying model ") > 0) {
-        print "model_try\t" trimmed(after(line, "opencode: trying model "))
+      # Strip an Actions log prefix (everything up to and including a
+      # timestamp) so markers are matched in the actual message rather than in
+      # source code that happens to contain them. Drop any line whose message
+      # carries a double quote: real driver output never contains one, while
+      # echoed source / test assertions always do, so those cannot be mistaken
+      # for runtime events.
+      msg = line
+      if (match(msg, /[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+Z[ \t]*/)) {
+        msg = substr(msg, RSTART + RLENGTH)
+      }
+      gsub(/^[ \t]+/, "", msg)
+      # Real driver output never contains a double quote, a shell redirection,
+      # or a leading echo/printf: those only appear in echoed source or test
+      # assertions, which must not be mistaken for runtime events.
+      if (index(msg, "\"") > 0) next
+      if (index(msg, ">&2") > 0 || index(msg, ">&1") > 0) next
+      if (msg ~ /^echo[ \t]/ || msg ~ /^printf[ \t]/) next
+
+      if (index(msg, "opencode: trying model ") > 0) {
+        _m = trimmed(after(msg, "opencode: trying model "))
+        if (_m ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) print "model_try\t" _m
         next
       }
-      if (index(line, "Model ") > 0) {
-        rest = after(line, "Model ")
+      if (index(msg, "Model ") > 0) {
+        rest = after(msg, "Model ")
         if (index(rest, " completed the work.") > 0) {
-          print "model_done\t" trimmed(before(rest, " completed the work."))
+          _m = trimmed(before(rest, " completed the work."))
+          if (_m ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) print "model_done\t" _m
           next
         }
         if (index(rest, " failed before completing the work: environment error") > 0) {
-          print "model_env\t" trimmed(before(rest, " failed before completing the work: environment error"))
+          _m = trimmed(before(rest, " failed before completing the work: environment error"))
+          if (_m ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) print "model_env\t" _m
           next
         }
         if (index(rest, " failed before completing the work; handing off") > 0) {
-          print "model_fail\t" trimmed(before(rest, " failed before completing the work; handing off"))
+          _m = trimmed(before(rest, " failed before completing the work; handing off"))
+          if (_m ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) print "model_fail\t" _m
           next
         }
         if (index(rest, " left the working tree unchanged and only wrote .commit-msg") > 0) {
-          print "model_nowork\t" trimmed(before(rest, " left the working tree unchanged and only wrote .commit-msg"))
+          _m = trimmed(before(rest, " left the working tree unchanged and only wrote .commit-msg"))
+          if (_m ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) print "model_nowork\t" _m
           next
         }
         if (index(rest, " produced no complete work; handing off") > 0) {
-          print "model_incomplete\t" trimmed(before(rest, " produced no complete work; handing off"))
+          _m = trimmed(before(rest, " produced no complete work; handing off"))
+          if (_m ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) print "model_incomplete\t" _m
           next
         }
       }
 
-      if (index(line, "Handing off session ") > 0) print "session_handoff"
-      if (index(line, "Created PR #") > 0) print "pr_created"
+      if (index(msg, "Handing off session ") > 0) print "session_handoff"
+      if (index(msg, "Created PR #") > 0) print "pr_created"
       # "Review requested on PR #" and "Review already requested on PR #".
-      if (index(line, "requested on PR #") > 0) print "handoff"
-      if (index(line, "is ready for a human reviewer:") > 0) print "handoff"
-      if (index(line, "Ready to merge:") > 0) print "ready_merge"
-      if (index(line, "is merged while waiting") > 0 || index(line, "is already merged. Nothing to do.") > 0) print "merged"
-      if (index(line, "is closed without merge") > 0) print "closed"
-      if (index(line, "the PR could not be read back either") > 0) print "handoff_unconfirmed"
-      if (index(line, "every model round died on an environment error") > 0) print "env_down"
-      if (index(line, "ERROR: no available model completed the work") > 0) print "no_model"
-      if (index(line, "exhausted while waiting. Exiting.") > 0) print "budget_exhausted"
-      if (index(line, "opencode exceeded the remaining driver time budget") > 0) print "budget_stop"
-      if (index(line, "Driver exited abnormally") > 0) print "abnormal"
-      if (index(line, "Bug report issue ") > 0) print "bug"
+      if (index(msg, "requested on PR #") > 0) print "handoff"
+      if (index(msg, "is ready for a human reviewer:") > 0) print "handoff"
+      if (index(msg, "Ready to merge:") > 0) print "ready_merge"
+      if (index(msg, "is merged while waiting") > 0 || index(msg, "is already merged. Nothing to do.") > 0) print "merged"
+      if (index(msg, "is closed without merge") > 0) print "closed"
+      if (index(msg, "the PR could not be read back either") > 0) print "handoff_unconfirmed"
+      if (index(msg, "every model round died on an environment error") > 0) print "env_down"
+      if (index(msg, "ERROR: no available model completed the work") > 0) print "no_model"
+      if (index(msg, "exhausted while waiting. Exiting.") > 0) print "budget_exhausted"
+      if (index(msg, "opencode exceeded the remaining driver time budget") > 0) print "budget_stop"
+      if (index(msg, "Driver exited abnormally") > 0) print "abnormal"
+      if (index(msg, "Bug report issue ") > 0) print "bug"
 
-      if (excerpts < '"${EXCERPT_MAX}"' && (index(line, "ERROR:") > 0 || index(line, "WARNING:") > 0 || index(line, "Driver exited abnormally") > 0 || index(line, "Bug report issue ") > 0 || index(line, "exhausted while waiting") > 0)) {
+      if (excerpts < '"${EXCERPT_MAX}"' && (index(msg, "ERROR:") > 0 || index(msg, "WARNING:") > 0 || index(msg, "Driver exited abnormally") > 0 || index(msg, "Bug report issue ") > 0 || index(msg, "exhausted while waiting") > 0)) {
         excerpts++
         print "excerpt\t" line
       }
