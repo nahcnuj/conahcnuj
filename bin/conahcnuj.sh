@@ -1493,7 +1493,7 @@ drive() {
     # verdict instead of stopping. An approval ends the run (the merge workflow
     # chains off it); new feedback loops back into this phase to be addressed;
     # while nothing changes it waits, below, without re-asking.
-    local rv decision payload raw summary sig actionable
+    local rv decision payload raw summary sig actionable approved_now="false"
     rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
     decision="$(printf '%s' "${rv}" | cut -d'|' -f1)"
     payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
@@ -1503,9 +1503,14 @@ drive() {
     echo "reviewDecision: ${decision:-NONE}" >&2
 
     if [[ "${decision}" == "APPROVED" ]]; then
-      echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
-      exit 0
+      approved_now="true"
     fi
+
+    # An approval is only "ready to merge" once the non-reviewer constraints
+    # (mergeable + CI) actually pass: an approved PR whose branch has since
+    # become conflicting (or whose checks are red) is not ready, and must be
+    # fixed instead of being reported as done. Do not exit here; let the
+    # constraints phase below verify (and repair) before declaring ready.
 
     actionable="false"
     case "${decision}" in
@@ -1560,7 +1565,7 @@ ${summary}" "${base}"; then
     # issue to the owner's approval instead of stopping at the request. A
     # resumed run that finds the PR already requested and untouched comes here
     # too, which is what lets it stay with the reviewer across restarts.
-    if [[ "${handed_off}" == "true" ]]; then
+    if [[ "${handed_off}" == "true" && "${approved_now}" != "true" ]]; then
       echo "PR #${pr}: waiting for the reviewer's decision." >&2
       rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
       continue
@@ -1604,6 +1609,13 @@ ${summary}" "${base}"; then
     fi
 
     echo "PR #${pr}: non-reviewer constraints satisfied." >&2
+    if [[ "${approved_now}" == "true" ]]; then
+      # The reviewer has already approved and the constraints now pass, so the
+      # PR is actually ready to merge. (An approval received while the branch
+      # was still conflicting is only honored once the conflict is resolved.)
+      echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
+      exit 0
+    fi
     # The constraints pass, so the PR is ready for a human: hand it over. The
     # run does not end here; the next loop iteration waits for the verdict.
     request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1

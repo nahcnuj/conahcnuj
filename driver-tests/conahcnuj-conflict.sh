@@ -64,7 +64,8 @@ git -C "${ROOT}/other" push -q origin main
 #   continuation comment), fetch_reviews (REVIEW_REQUIRED, no feedback),
 #   conditions (CONFLICTING/DIRTY -> the conflict fix round), fetch_reviews
 #   (still REVIEW_REQUIRED), conditions (MERGEABLE/CLEAN -> passes),
-#   request_review, fetch_reviews (APPROVED -> the run ends on the approval).
+#   request_review, fetch_reviews (APPROVED), conditions (MERGEABLE/CLEAN,
+#   re-verified after the approval before the run reports ready to merge).
 # The tape and log live OUTSIDE the repo (the driver's test-mode commit path
 # runs `git add -A`).
 TAPE="${ROOT}/tape.txt"
@@ -80,6 +81,7 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
+{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
