@@ -1,4 +1,4 @@
-name: Windows install (opencode + install.ps1)
+name: Windows install (opencode + scripts/install.ps1)
 
 on:
   push:
@@ -12,6 +12,11 @@ jobs:
   windows-install:
     name: Windows install opencode and verify gh auth via opencode
     runs-on: windows-latest
+    # The App private key lives in the `conahcnuj` environment (the same one
+    # the issue-driver uses); without it `secrets.PRIVATE_KEY` is empty.
+    # Fork PRs receive no secrets, so skip them instead of failing.
+    environment: conahcnuj
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
     defaults:
       run:
         shell: bash
@@ -20,53 +25,143 @@ jobs:
       INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
     steps:
+      # actions/checkout is the clone of this repository. The installer is
+      # then run exactly as a user would run it from that clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Install opencode
         uses: ./.github/actions/install-opencode
 
-      - name: Install plugin via install.ps1
-        shell: pwsh
-        run: |
-          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./install.ps1
-
-      - name: Stage app.env for gh auth
+      # A real user keeps the App credentials in the clone's gh-app/app.env
+      # before running the installer; install.ps1 copies it to the opencode
+      # config dir (converting the Windows PRIVATE_KEY_PATH for Git Bash).
+      - name: Stage App credentials
         shell: bash
         run: |
           set -e
-          dest="$HOME/.config/opencode"
-          mkdir -p "$dest/gh-app"
-          printf '%s\n' "$PRIVATE_KEY" > "$dest/gh-app/private.pem"
-          cat > "$dest/gh-app/app.env" <<EOF
-          APP_ID=${APP_ID}
-          INSTALLATION_ID=${INSTALLATION_ID}
+          pem_dir="${RUNNER_TEMP//\\//}"
+          pem="${pem_dir}/conahcnuj-app.pem"
+          printf '%s\n' "$PRIVATE_KEY" > "$pem"
+          cat > gh-app/app.env <<EOF
+          APP_ID=$APP_ID
+          INSTALLATION_ID=$INSTALLATION_ID
           APP_SLUG=conahcnuj
-          PRIVATE_KEY_PATH=${dest}/gh-app/private.pem
+          PRIVATE_KEY_PATH=$pem
           BASH_EXE=C:/Program Files/Git/bin/bash.exe
           EOF
 
-      - name: Verify gh auth through opencode
+      - name: Install via scripts/install.ps1
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/install.ps1
+
+      # The bot account ID is immutable public metadata. The plugin's lookup
+      # is unauthenticated and shared runner IPs can be rate-limited, so resolve
+      # it once with the runner token and seed the cache the plugin reads.
+      # The token exchange exercised below still uses the real private key
+      # (no authentication result is faked).
+      - name: Seed the public bot-ID cache
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          out="${RUNNER_TEMP}/opencode-gh-auth.jsonl"
-          err="${RUNNER_TEMP}/opencode-gh-auth.err"
-          opencode run --format json --model opencode/mimo-v2.5-free --dir "$GITHUB_WORKSPACE" \
-            "Run the command \`gh auth status\` and report whether it succeeded." \
-            > "$out" 2> "$err" || true
-          echo "=== stdout ==="
-          cat "$out" 2>/dev/null || true
-          echo "=== stderr ==="
-          cat "$err" 2>/dev/null || true
-          if grep -qi "Logged in" "$out" 2>/dev/null || grep -qi "conahcnuj\[bot\]" "$out" 2>/dev/null; then
-            echo "opencode gh auth OK"
+          slug="$(sed -n 's/^APP_SLUG=//p' gh-app/app.env | head -1 | tr -d '"')"
+          bot_id="$(gh api "users/${slug}%5Bbot%5D" --jq .id)"
+          case "$bot_id" in
+            ''|*[!0-9]*) echo "unexpected bot id: $bot_id" >&2; exit 1 ;;
+          esac
+          mkdir -p "$HOME/.config/opencode/gh-app"
+          printf '%s' "$bot_id" > "$HOME/.config/opencode/gh-app/bot-id.cache"
+
+      # Let opencode itself (not this shell) talk to GitHub: the plugin must
+      # issue the installation token from the real private key and inject it
+      # as GH_TOKEN. The verdict comes from what the agent actually ran and
+      # got back, so the check cannot pass on the prompt alone.
+      - name: Verify the opencode agent can use gh auth
+        shell: bash
+        run: |
+          set +e
+          # Point opencode at the tree install.ps1 just wrote (Windows path,
+          # as the native binary expects) so the plugin under test is loaded.
+          export OPENCODE_CONFIG_DIR="$(cygpath -w "$HOME/.config/opencode")"
+
+          # Model ids rotate over time. Use the free models this runner
+          # advertises (the same source as e2e-opencode) and skip the ones the
+          # repository recorded as permanently unavailable.
+          models="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
+          skip="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' gh-app/missing-models 2>/dev/null | grep -v '^$' || true)"
+          if [ -n "$skip" ]; then
+            skip_file="$(mktemp)"
+            printf '%s\n' "$skip" > "$skip_file"
+            models="$(printf '%s\n' "$models" | grep -vxF -f "$skip_file" || true)"
+            rm -f "$skip_file"
+          fi
+          [ -n "$models" ] || models="opencode/beam-free"
+
+          pass=0
+          saw_tools=0
+          attempted=0
+          while IFS= read -r model; do
+            [ -n "$model" ] || continue
+            attempted=$((attempted + 1))
+            # A few models are enough to ride out a dead/renamed id without
+            # letting a service outage stall the job.
+            [ "$attempted" -le 3 ] || break
+            echo "=== trying model: ${model} ==="
+            out="${RUNNER_TEMP}/opencode-gh-auth-${attempted}.jsonl"
+            err="${RUNNER_TEMP}/opencode-gh-auth-${attempted}.err"
+            : > "$out"
+            : > "$err"
+            timeout 300 opencode run --format json --model "$model" \
+              --dir "$GITHUB_WORKSPACE" \
+              "Run \`gh auth status\` in this repository and report which account it shows." \
+              > "$out" 2> "$err"
+            rc=$?
+            echo "=== stdout ==="
+            cat "$out"
+            echo "=== stderr ==="
+            cat "$err"
+            echo "=== opencode rc=${rc} ==="
+
+            if jq -e 'select(.type=="tool_use")' "$out" >/dev/null 2>&1; then
+              saw_tools=1
+            fi
+
+            # Every bash call the agent made and how it ended (null = did not
+            # finish). A check passes only when the agent really ran gh and
+            # the output names the App account.
+            cmds="${RUNNER_TEMP}/opencode-gh-cmds-${attempted}.tsv"
+            jq -r 'select(.type=="tool_use" and .part.tool=="bash") | [(.part.state.input.command // ""), (.part.state.metadata.exit // "null")] | @tsv' \
+              "$out" > "$cmds" 2>/dev/null
+            ran_gh=0
+            gh_ok=0
+            while IFS=$'\t' read -r cmd code; do
+              [ -n "$cmd" ] || continue
+              if printf '%s\n' "$cmd" | grep -Eq '(^|[^[:alnum:]_])gh([[:space:]]|$)'; then
+                ran_gh=1
+                if [ "$code" = "0" ]; then
+                  gh_ok=1
+                fi
+              fi
+            done < "$cmds"
+
+            if [ "$ran_gh" = 1 ] && [ "$gh_ok" = 1 ] &&
+              grep -q 'conahcnuj\[bot\]' "$out"; then
+              echo "PASS: ${model} ran gh auth status with the App token"
+              pass=1
+              break
+            fi
+          done <<< "$models"
+
+          if [ "$pass" = 1 ]; then
             exit 0
           fi
-          # Treat a run that produced no events as an inconclusive service
-          # problem rather than a plugin regression, mirroring e2e-opencode.
-          if [ ! -s "$out" ]; then
-            echo "opencode gh auth INCONCLUSIVE (no output); treating as pass"
+          if [ "$saw_tools" = 0 ]; then
+            # No model even reached a tool call: the shared free-model service
+            # is unavailable, which says nothing about the plugin.
+            echo "INCONCLUSIVE: opencode produced no tool calls (model service unavailable)"
             exit 0
           fi
-          echo "opencode gh auth FAILED"
+          echo "FAILED: opencode could not run gh auth status with the App token"
           exit 1

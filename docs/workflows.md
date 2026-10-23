@@ -6,6 +6,7 @@
 | ファイル | 名前 | 触発 | 役割 |
 | --- | --- | --- | --- |
 | `ci.yml` | CI | push to main / PR | lint・offline テスト・型チェック・smoke・e2e・docs ビルド |
+| `windows-install-opencode.yml` | Windows install (opencode + scripts/install.ps1) | push to main / 同リポジトリ PR | `scripts/install.ps1` で配置した opencode が App 名義の `gh` 認証を使えることを実走で検証 |
 | `issue-driver.yml` | Issue auto-drive | issue open/reopen、非 approve の review、required checks（CI）失敗、手動、`workflow_call` | ドライバを Actions 上で実行 |
 | `weekly-self-improvement.yml` | Weekly auto-drive self-improvement | schedule（月曜） | 直近の auto-drive 実行ログを解析し、findings を Project とドライバへ引き渡す |
 | `auto-merge.yml` | Owner-approved auto-merge | owner が approve | 再利用 workflow を呼び出してマージ |
@@ -40,6 +41,17 @@
 
 `mock-test` は秘密鍵・ネットワーク不要の offline 検証のみで、実トークンの検証は
 CI では行いません。
+
+## Windows 配置と gh 認証（`windows-install-opencode.yml`）
+
+Windows ランナーで opencode を導入し、clone したこのリポジトリの
+`scripts/install.ps1` を実行してから、**opencode 自身**に `gh` の認証状態を
+確認させます。`PRIVATE_KEY` は environment `conahcnuj` の秘密鍵からステージし、
+プラグインが実際にインストールトークンを発行して `GH_TOKEN` を注入できるかを
+検証します（トークンを手で export したり、ダミー鍵で代用したりはしません）。
+アカウント名 `conahcnuj[bot]` を含む `gh` の成功が確認できたときだけ通り、
+ツール呼び出しが無い（無料モデルが一時的に使えない）場合だけ inconclusive と
+して扱います。fork の PR は secrets を受け取れないためスキップします。
 
 ## Issue auto-drive（`issue-driver.yml`）
 
