@@ -1503,8 +1503,32 @@ drive() {
     echo "reviewDecision: ${decision:-NONE}" >&2
 
     if [[ "${decision}" == "APPROVED" ]]; then
-      echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
-      exit 0
+      # An approval is only meaningful once the branch still merges and CI is
+      # green: an approved PR whose branch conflicts with its base is not ready
+      # to merge, so verify the non-reviewer constraints before declaring it
+      # ready. On a conflict (or any other failure) fix it instead of exiting.
+      if poll_conditions "${owner}" "${repo}" "${pr}"; then
+        echo "Ready to merge: https://github.com/${owner}/${repo}/pull/${pr}" >&2
+        exit 0
+      fi
+      local produced_change="false" fix_context
+      if [[ "${CONSTRAINT_FAILURE}" == "conflict" ]]; then
+        refresh_base_branch "${base}"
+      fi
+      fix_context="$(constraint_fix_context "${branch}" "${base}")"
+      echo "PR #${pr}: approved but constraints failing (${CONSTRAINT_FAILURE:-unknown}); fixing with a new implementation round." >&2
+      if implement "${title}" "${body}" "${fix_context}"; then
+        produced_change="true"
+      fi
+      if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
+        commit_changes
+        produced_change="true"
+      fi
+      if [[ "${produced_change}" != "true" ]]; then
+        echo "No model completed work for the failing constraints; backing off before re-checking." >&2
+        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
+      fi
+      continue
     fi
 
     actionable="false"

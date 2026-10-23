@@ -53,7 +53,9 @@ bash bin/conahcnuj.sh <番号>   # インストールせずリポジトリ内か
    レビュアーには「マージできる・CI が green の PR」だけを渡す。依頼したら
    終わりではなく、そのまま **owner が Approve するまでポーリングする**。待っている
    間に新しいレビュー意見が来れば次段のループで対応して再依頼し、Approve されたら
-   「ready to merge」で正常終了する。再開した PR も同じく、制約を確認してから依頼し、
+   制約（mergeable・status checks）を再確認してから「ready to merge」で正常終了する
+   （承認後に base が進んで `mergeable=CONFLICTING` になった PR は、解消してから
+   ready にする）。再開した PR も同じく、制約を確認してから依頼し、
    承認までポーリングする。PR が merge 済みの場合は終了処理へ移る。承認待ちのまま
    時間予算が尽きた場合は、人間待ちとしてバグ報告せず正常終了する（次の
    `pull_request_review` 起動が続きを引き継ぐ）
