@@ -40,8 +40,7 @@ out="$(ensure_pr "nahcnuj" "conahcnuj" "15" "feature/fix-10" "main" "Fix somethi
 
 more" "10")"
 [[ "${out}" == "15" ]] || { echo "FAIL: ensure_pr output was '${out}' (expected 15)"; exit 1; }
-[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "1" ]] || { echo "FAIL: linked-issue body sync must issue exactly one PATCH"; exit 1; }
-grep -q "^UPDATE|15|Closes #10" "${REPORT}" || { echo "FAIL: linked-issue body was not derived"; exit 1; }
+[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: linked-issue path must not PATCH the PR body"; exit 1; }
 echo "ensure_pr links issue -> Closes #n body: passed"
 
 # Reuse path over an existing PR also derives the body.
@@ -51,8 +50,7 @@ reset_body_marker
 gh_api_find_pr_by_head() { printf '%s\n' "42"; }
 out="$(ensure_pr "nahcnuj" "conahcnuj" "" "conahcnuj/10-x" "main" "Fix something" "issue body" "10")"
 [[ "${out}" == "42" ]] || { echo "FAIL: reuse output was '${out}' (expected 42)"; exit 1; }
-[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "1" ]] || { echo "FAIL: reuse path must sync the body exactly once"; exit 1; }
-grep -q "^UPDATE|42|Closes #10" "${REPORT}" || { echo "FAIL: reuse path did not derive the Closes #n body"; exit 1; }
+[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: reuse path must not PATCH the PR body"; exit 1; }
 echo "ensure_pr reuses existing PR and syncs body: passed"
 
 # Regression test for #143: closing-reference lines already present in the issue
@@ -70,7 +68,7 @@ Resolves #8
 
 trailing text" "10")"
 [[ "${out}" == "15" ]] || { echo "FAIL: ensure_pr output was '${out}' (expected 15)"; exit 1; }
-[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "1" ]] || { echo "FAIL: dedup body sync must issue exactly one PATCH"; exit 1; }
+[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: dedup path must not PATCH the PR body"; exit 1; }
 echo "ensure_pr keeps exactly one Closes #n even when the issue body has more: passed"
 
 # No linked issue: body must stay verbatim and NO PATCH may be issued.
