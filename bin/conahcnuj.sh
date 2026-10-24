@@ -405,6 +405,67 @@ apply_driver_commit_model() {
   fi
 }
 
+# Replay the working tree's uncommitted changes onto the current remote tip of
+# the checked-out branch when that tip has advanced past local HEAD. The
+# Verified commit api-commit.sh creates is built against the remote tip it reads
+# (expectedHeadOid), but the file changes are collected from the local index and
+# work tree, which sit on local HEAD. When the two bases differ - a concurrent
+# run pushed to the branch, a maintainer pushed by hand, or a commit this
+# checkout never pulled - the collected changeset is stale: a file the local
+# base still has may already be gone (or differently edited) at the tip, and
+# GitHub rejects the commit with a confusing "A path was requested for deletion
+# which does not exist as of commit oid ..." NOT_FOUND, crashing the run (#428).
+#
+# Stashing the changes, hard-resetting to the tip, and popping them back is a
+# rebase of the uncommitted work onto the new base: a clean pop means the
+# changes carry over unchanged and the commit now matches expectedHeadOid, a
+# conflicting pop is reported and the tree is restored so nothing is lost
+# silently. With no divergence (the normal case) this is a no-op.
+reconcile_with_remote_tip() {
+  local branch remote_oid local_oid
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  # Detached HEAD has no branch to reconcile against; nothing to do.
+  [[ -n "${branch}" && "${branch}" != "HEAD" ]] || return 0
+  # A failed fetch just means the tip is unknown here; carry on against the
+  # local base exactly as before (checkout_branch_head already refuses a stale
+  # fetch at run start, and this is a best-effort pre-commit guard).
+  git fetch origin "${branch}" >/dev/null 2>&1 || return 0
+  remote_oid="$(git rev-parse "origin/${branch}" 2>/dev/null || true)"
+  local_oid="$(git rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "${remote_oid}" && -n "${local_oid}" ]] || return 0
+  [[ "${remote_oid}" != "${local_oid}" ]] || return 0
+  # Only a strictly-behind checkout is safe to replay onto the tip. A truly
+  # diverged local (commits the remote does not have) must not be hard-reset
+  # away; the driver never leaves those behind (api-commit creates commits
+  # server-side), so this is a defensive guard against data loss.
+  if ! git merge-base --is-ancestor "${local_oid}" "${remote_oid}" 2>/dev/null; then
+    echo "WARNING: local ${local_oid} and remote ${remote_oid} on ${branch} have diverged; not rebasing the working-tree changes." >&2
+    return 0
+  fi
+  echo "Remote branch ${branch} advanced to ${remote_oid} (local ${local_oid}); rebasing the working-tree changes onto it." >&2
+  if ! git stash push --include-untracked -q -m "conahcnuj-reconcile" 2>/dev/null; then
+    echo "WARNING: could not stash the working-tree changes to rebase them onto ${remote_oid}; committing against the local base ${local_oid}." >&2
+    return 0
+  fi
+  if ! git reset --hard -q "${remote_oid}" 2>/dev/null; then
+    echo "WARNING: could not reset to the remote tip ${remote_oid}; restoring the stashed changes." >&2
+    git stash pop -q >/dev/null 2>&1 || true
+    return 0
+  fi
+  if ! git stash pop -q; then
+    echo "ERROR: the working-tree changes conflict with the advanced ${branch} (now ${remote_oid}); they cannot be rebased cleanly." >&2
+    # The pop left the tree mid-application with conflict markers. Rewind to the
+    # original base and re-apply the agent's changes there, so the run fails with
+    # the tree exactly as the agent left it (nothing silently lost) and the bug
+    # report can show the clashing work.
+    git reset --hard -q "${local_oid}" >/dev/null 2>&1 || true
+    git stash pop -q >/dev/null 2>&1 || true
+    return 1
+  fi
+  echo "Rebased the working-tree changes onto ${branch} ${remote_oid}." >&2
+  return 0
+}
+
 # Commit every working-tree change as a Verified commit, then sync the local
 # branch to the remote head api-commit.sh created. The commit message always
 # comes from the coding agent (.commit-msg); the driver never invents a fixed
@@ -428,6 +489,10 @@ commit_changes() {
     return 1
   fi
   echo "Using coding agent's commit message: ${message}" >&2
+  # The Verified commit is created on the remote tip, so the changeset must be
+  # collected against that same base; replay any uncommitted changes onto an
+  # advanced tip first (a no-op when the checkout is already current, #428).
+  reconcile_with_remote_tip || return 1
   git add -A
   apply_driver_commit_model
   if [[ "${TEST_MODE}" == "1" ]]; then
