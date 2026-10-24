@@ -94,13 +94,6 @@ if [[ "${TEST_MODE}" == "1" ]]; then
   rate_limit_poll_sleep() { :; }
 fi
 
-# Marker file so the PR body sync below runs at most once per driver process.
-# A file (not a shell variable) because ensure_pr runs in a command-substitution
-# subshell whose variable assignments would not survive back to the caller.
-# Lazy existence is not enough (mktemp creates an empty file), so the marker is
-# a "1" written into the file. Lives outside the work tree so it is never picked
-# up by `git add -A`.
-PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
 PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
 
 # Whether the last request_review_from_owner call could confirm the reviewer
@@ -135,13 +128,6 @@ MISSING_MODELS_FILE="${CONAHCNUJ_MISSING_MODELS_FILE:-${HERE}/../gh-app/missing-
 # MISSING_MODELS_FILE and extended at runtime). Consulted before every round.
 OPENCODE_DEAD_MODELS=""
 
-# True once the per-process PR body sync has already run.
-pr_body_synced() {
-  [[ "$(cat "${PR_BODY_SYNCED_FILE}" 2>/dev/null || true)" == "1" ]]
-}
-pr_body_mark_synced() {
-  printf '1\n' > "${PR_BODY_SYNCED_FILE}"
-}
 pr_continuation_commented() {
   [[ "$(cat "${PR_CONTINUATION_COMMENTED_FILE}" 2>/dev/null || true)" == "1" ]]
 }
@@ -1110,14 +1096,6 @@ PR #${pr} の処理を継続するには、Issue auto-drive を手動実行し�
   fi
   echo "WARNING: could not post the continuation comment for PR #${pr}." >&2
   return 1
-}
-
-# Remove standalone closing-reference lines ("Closes #<n>", "Fixes #<n>",
-# "Resolves #<n>", also comma-separated lists) from a body and collapse the
-# blank lines the removal leaves behind, so the driver's own single
-# "Closes #<n>" prefix is the only closing reference in the PR body (#143).
-strip_closing_references() {
-  printf '%s\n' "${1}" | sed -E '/^[[:space:]]*([Cc]lose[sd]?|[Ff]ix(e[sd])?|[Rr]esolve[sd]?)[[:space:]]+#[0-9]+([[:space:]]*,[[:space:]]*#[0-9]+)*[[:space:]]*$/d' | awk '/^$/{blank++; if(blank>1) next; print; next} {blank=0; print}'
 }
 
 # Reuse the open PR for this head branch, else create one. A PR that closes an

@@ -27,14 +27,13 @@ gh_api_update_pr() {
   printf 'UPDATE|%s|%s\n' "${3}" "${4}" >> "${REPORT}"
 }
 
-# ensure_pr syncs the body at most once per driver process (PR_BODY_SYNCED_FILE)
-# and the report file accumulates otherwise, so reset both between scenarios.
+# ensure_pr never patches the PR body, so only the report file needs resetting
+# between scenarios.
 reset_body_marker() {
-  rm -f "${PR_BODY_SYNCED_FILE}"
   : > "${REPORT}"
 }
 
-# With a linked issue, the body is derived and synced once.
+# With a linked issue, the body is not copied or patched.
 reset_body_marker
 out="$(ensure_pr "nahcnuj" "conahcnuj" "15" "feature/fix-10" "main" "Fix something" "real issue body
 
@@ -43,7 +42,7 @@ more" "10")"
 [[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: linked-issue path must not PATCH the PR body"; exit 1; }
 echo "ensure_pr links issue -> Closes #n body: passed"
 
-# Reuse path over an existing PR also derives the body.
+# Reuse path over an existing PR also keeps the body untouched.
 reset_body_marker
 # shellcheck disable=SC2329
 # shellcheck disable=SC2317
@@ -51,7 +50,7 @@ gh_api_find_pr_by_head() { printf '%s\n' "42"; }
 out="$(ensure_pr "nahcnuj" "conahcnuj" "" "conahcnuj/10-x" "main" "Fix something" "issue body" "10")"
 [[ "${out}" == "42" ]] || { echo "FAIL: reuse output was '${out}' (expected 42)"; exit 1; }
 [[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: reuse path must not PATCH the PR body"; exit 1; }
-echo "ensure_pr reuses existing PR and syncs body: passed"
+echo "ensure_pr reuses existing PR without touching its body: passed"
 
 # Regression test for #143: closing-reference lines already present in the issue
 # body are dropped so the PR body has exactly one "Closes #<n>".

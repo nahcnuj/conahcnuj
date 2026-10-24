@@ -106,7 +106,7 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 `CONAHCNUJ_RUN_TIMEOUT_SECONDS`（単発ラウンドのタイムアウト）/
 `OPENCODE_LIB_DIR` / `OPENCODE_RENDER_SH`（ライブラリの場所）/
 `GH_API_LAST_HTTP_CODE`（最後の HTTP ステータス）/
-`PR_BODY_SYNCED_FILE` / `PR_CONTINUATION_COMMENTED_FILE`（プロセス内マーカー）/
+`PR_CONTINUATION_COMMENTED_FILE`（プロセス内マーカー）/
 `OPENCODE_ARGS_FILE`（テスト用モックが引数を受け取る経路）。
 
 ## 関連ページ
