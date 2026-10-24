@@ -989,7 +989,7 @@ persist_missing_model() {
 # base, so a message-only round there stays no work and still falls through to
 # the other models.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider run_timed_out run_rc
   local dead_providers="" quota_providers="" failed_rounds=0 env_failed_rounds=0 quota_failed_rounds=0 ran_without_failure=0
   local model_list known_skipped=""
   local base_branch="${4:-}"
@@ -1033,15 +1033,25 @@ implement() {
       echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
     fi
     run_failed="false"
-    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
+    run_timed_out="false"
+    run_rc=0
+    OPENCODE_ROUND_MODEL_GONE="false"
+    OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
+    OPENCODE_ROUND_ENVIRONMENT="false"
+    OPENCODE_ROUND_RATE_LIMITED="false"
+    CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}" || run_rc=$?
+    if [[ "${run_rc}" -ne 0 ]]; then
       run_failed="true"
+      if [[ "${run_rc}" -eq 124 ]]; then
+        run_timed_out="true"
+      fi
     fi
     OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
     wrote_message="false"
     if [[ -s "${workdir}/.commit-msg" ]]; then
       wrote_message="true"
     fi
-    if workdir_changed "${workdir}" && [[ "${wrote_message}" == "true" ]]; then
+    if workdir_changed "${workdir}" && [[ "${wrote_message}" == "true" ]] && [[ "${run_timed_out}" != "true" ]]; then
       echo "Model ${model} completed the work." >&2
       OPENCODE_LAST_MODEL="${model}"
       return 0
@@ -1055,7 +1065,7 @@ implement() {
     # through models and let a weaker one commit junk onto the branch, which is
     # what issue #273 reported. The .commit-msg is metadata, never committed, so
     # it is cleaned up here.
-    if [[ "${wrote_message}" == "true" ]] && branch_has_commits "" "${base_branch}"; then
+    if [[ "${wrote_message}" == "true" ]] && [[ "${run_timed_out}" != "true" ]] && branch_has_commits "" "${base_branch}"; then
       rm -f "${workdir}/.commit-msg"
       echo "Model ${model} wrote .commit-msg and left the tree as it was; the branch already carries the implementation, so the round is complete." >&2
       OPENCODE_LAST_MODEL="${model}"
@@ -1076,6 +1086,8 @@ implement() {
         env_failed_rounds=$((env_failed_rounds + 1))
         dead_providers="${dead_providers} ${provider}"
         echo "Model ${model} failed before completing the work: environment error (provider unreachable or credentials rejected); giving up on provider ${provider} for the rest of this run." >&2
+      elif [[ "${run_timed_out}" == "true" ]]; then
+        echo "Model ${model} timed out before completing the work; handing off to the next model." >&2
       elif [[ "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]; then
         echo "Model ${model} hit a rate limit; trying the next model without waiting for the retry." >&2
       else

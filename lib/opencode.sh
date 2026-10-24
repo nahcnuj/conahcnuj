@@ -267,6 +267,18 @@ opencode_run() {
     if [[ " ${MOCK_OPENCODE_RATE_LIMIT:-} " == *" ${model} "* ]]; then
       OPENCODE_ROUND_RATE_LIMITED="true"
     fi
+    # MOCK_OPENCODE_TIMEOUT lists the models whose round is cut short by the
+    # driver time budget, as `timeout` does in real mode. It leaves a partial
+    # change plus a .commit-msg behind so that a driver that trusted a timed-out
+    # round would wrongly accept it as complete (timeout is not a success).
+    if [[ " ${MOCK_OPENCODE_TIMEOUT:-} " == *" ${model} "* ]]; then
+      if [[ -d "${workdir}" && -w "${workdir}" ]]; then
+        printf 'mock change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
+        printf 'mock commit from %s\n' "${model}" > "${workdir}/.commit-msg"
+      fi
+      echo "opencode: mock timeout for ${model} (round stops before completion)" >&2
+      return 124
+    fi
     if [[ "${MOCK_OPENCODE_ERROR:-}" == "${model}" || "${OPENCODE_ROUND_ENVIRONMENT}" == "true" || "${OPENCODE_ROUND_MODEL_GONE}" == "true" || "${OPENCODE_ROUND_QUOTA_EXHAUSTED}" == "true" || "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]; then
       if [[ -d "${workdir}" && -w "${workdir}" ]]; then
         printf 'partial change from %s\n' "${model}" >> "${workdir}/conahcnuj.mock"
