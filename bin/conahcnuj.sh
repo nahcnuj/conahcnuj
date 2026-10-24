@@ -1120,34 +1120,22 @@ strip_closing_references() {
   printf '%s\n' "${1}" | sed -E '/^[[:space:]]*([Cc]lose[sd]?|[Ff]ix(e[sd])?|[Rr]esolve[sd]?)[[:space:]]+#[0-9]+([[:space:]]*,[[:space:]]*#[0-9]+)*[[:space:]]*$/d' | awk '/^$/{blank++; if(blank>1) next; print; next} {blank=0; print}'
 }
 
-# Reuse the open PR for this head branch, else create one. Both reuse paths keep
-# the PR body derived from the linked issue ("Closes #<n>\n\n<issue body>"), so a
-# PR that was created without a written body (or with a stale one) gets it set.
-# The update runs at most once per driver process (PR_BODY_SYNCED_FILE) to avoid
-# a PATCH on every poll iteration. Outputs PR number.
+# Reuse the open PR for this head branch, else create one. A PR that closes an
+# issue carries only the closing reference ("Closes #<n>"); the issue body is
+# not copied into the PR description, so the PR keeps its own (agent-written or
+# hand-written) body. Outputs PR number.
 ensure_pr() {
   local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}" draft="${9:-false}"
   local pr_body
-  # A resumed PR that is not linked to any issue must keep its body verbatim;
-  # prefixing it with a bare "Closes #" would produce a malformed description.
+  # A PR linked to an issue closes it via the reference; do not copy the issue
+  # body into the PR description (that just duplicates the issue). A PR with no
+  # linked issue keeps its body verbatim.
   if [[ -n "${closes}" ]]; then
-    # Trim trailing whitespace from issue body to avoid extra blank lines
-    body="$(printf '%s' "${body}" | sed 's/[[:space:]]*$//')"
-    # Drop closing-reference lines the issue body may already carry so the PR
-    # body has exactly one "Closes #<n>" (#143).
-    body="$(strip_closing_references "${body}")"
-    pr_body="Closes #${closes}
-
-${body}"
+    pr_body="Closes #${closes}"
   else
     pr_body="${body}"
   fi
   if [[ -n "${pr}" ]]; then
-    if [[ -n "${closes}" ]] && ! pr_body_synced; then
-      echo "Syncing body of PR #${pr} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}"
-      pr_body_mark_synced
-    fi
     printf '%s\n' "${pr}"
     return 0
   fi
@@ -1155,11 +1143,6 @@ ${body}"
   existing="$(gh_api_find_pr_by_head "${owner}" "${repo}" "${branch}")"
   if [[ -n "${existing}" ]]; then
     echo "Reusing open PR #${existing} for ${branch}." >&2
-    if [[ -n "${closes}" ]] && ! pr_body_synced; then
-      echo "Syncing body of PR #${existing} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}"
-      pr_body_mark_synced
-    fi
     printf '%s\n' "${existing}"
     return 0
   fi
@@ -1698,19 +1681,6 @@ resume_pr() {
   title="$(gh_api_unb64 "${title_b64}")"
   body="$(gh_api_unescape "$(gh_api_unb64 "${body_b64}")")"
   echo "PR #${pr}: state=${state} head=${head} base=${base}" >&2
-
-  # When the PR body is still just the auto-generated "Closes #<n>" stub, derive
-  # a real description from the linked issue so the resumed PR gets a written body.
-  if [[ -n "${closes}" ]] && [[ "${body}" == "Closes #${closes}" || "${body}" == "Closes #${closes}"$'\n' ]]; then
-    local iss iss_body
-    iss="$(gh_api_fetch_issue "${owner}" "${repo}" "${closes}")"
-    iss_body="$(gh_api_unescape "$(printf '%s' "${iss}" | cut -d'|' -f2 | gh_api_unb64)")"
-    if [[ -n "${iss_body}" ]]; then
-      iss_body="$(strip_closing_references "${iss_body}")"
-      echo "PR body is just the closing stub; reusing issue #${closes} as the PR body." >&2
-      body="${iss_body}"
-    fi
-  fi
 
   case "${state}" in
     MERGED)
