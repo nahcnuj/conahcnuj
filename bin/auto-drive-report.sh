@@ -136,8 +136,8 @@ extract_events() {
           print "model_nowork\t" trimmed(before(rest, " left the working tree unchanged and only wrote .commit-msg"))
           next
         }
-        if (index(rest, " produced no complete work; handing off") > 0) {
-          print "model_incomplete\t" trimmed(before(rest, " produced no complete work; handing off"))
+        if (index(rest, " produced no complete work") > 0) {
+          print "model_incomplete\t" trimmed(before(rest, " produced no complete work"))
           next
         }
       }

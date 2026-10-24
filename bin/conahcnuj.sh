@@ -1041,7 +1041,11 @@ implement() {
     if [[ -s "${workdir}/.commit-msg" ]]; then
       wrote_message="true"
     fi
-    if workdir_changed "${workdir}" && [[ "${wrote_message}" == "true" ]]; then
+    tree_changed="false"
+    if workdir_changed "${workdir}"; then
+      tree_changed="true"
+    fi
+    if [[ "${tree_changed}" == "true" && "${wrote_message}" == "true" ]]; then
       echo "Model ${model} completed the work." >&2
       OPENCODE_LAST_MODEL="${model}"
       return 0
@@ -1085,6 +1089,9 @@ implement() {
       ran_without_failure=$((ran_without_failure + 1))
       if [[ "${wrote_message}" == "true" ]]; then
         echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
+      elif [[ "${tree_changed}" == "false" ]]; then
+        echo "Model ${model} produced no complete work." >&2
+        break
       else
         echo "Model ${model} produced no complete work; handing off to the next model." >&2
       fi
