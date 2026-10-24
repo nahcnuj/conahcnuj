@@ -66,6 +66,9 @@ gh_api_escape() {
     sed 's/\\/\\\\/g; s/"/\\"/g' |
     awk '
       BEGIN {
+        # NUL (0) is included too: an embedded null byte must never reach a
+        # JSON string raw, even when the value survived into a variable.
+        ctl[""] = 0
         for (i = 1; i < 32; i++) ctl[sprintf("%c", i)] = i
         ctl[sprintf("%c", 127)] = 127
       }
