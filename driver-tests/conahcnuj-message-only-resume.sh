@@ -13,7 +13,7 @@
 #   PR #15 state read -> implemented head branch checked out -> collected
 #   context -> constraints pending -> CHANGES_REQUESTED feedback detected ->
 #   the agent answers with only a .commit-msg (nothing to change) -> accepted
-#   as complete -> no hand-off -> owner assigned as reviewer again -> exit 0
+#   as complete -> owner assigned as reviewer again -> owner approves -> exit 0
 #
 # No secrets, no network.
 set -euo pipefail
@@ -48,7 +48,10 @@ git -C "${WORK}" commit -qm "mock commit from opencode/original"
 #   body -> real issue body), fetch_reviews (collection: one open thread),
 #   update_pr (body sync on the reuse path), post_comment (the PR continuation
 #   comment), fetch_reviews (CHANGES_REQUESTED with an open thread),
-#   request_review, conditions.
+#   conditions (the first read is incomplete, so it is polled again), the
+#   second conditions read, request_review, then an APPROVED fetch_reviews that
+#   ends the run. The approval is explicit: the test must end on a real
+#   outcome, not on the time budget timing out (a timeout is not a success).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"title":"Fix something","body":"stub","labels":[],"pull_request":{}}
@@ -60,6 +63,8 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":12345,"body":"What is Input?","author":{"login":"reviewer"}}]}}]}}}}}
 {}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
+{}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1
@@ -95,8 +100,10 @@ grep -q "left the working tree unchanged and only wrote .commit-msg" "${LOG}" &&
 grep -q "Handing off session" "${LOG}" && { echo "FAIL: the session was handed to another model although the branch was already implemented"; exit 1; }
 grep -q "produced no complete work" "${LOG}" && { echo "FAIL: the round was reported as an ordinary empty round"; exit 1; }
 
-# The PR is still handed back to the reviewer.
+# The PR is still handed back to the reviewer, and the run ends on the
+# owner's approval (not on the time budget expiring).
 grep -q "Review requested on PR #15 (reviewer: nahcnuj): https://github.com/nahcnuj/conahcnuj/pull/15" "${LOG}" || { echo "FAIL: the PR was not handed back to the owner as reviewer"; exit 1; }
+grep -q "Ready to merge: https://github.com/nahcnuj/conahcnuj/pull/15" "${LOG}" || { echo "FAIL: the run did not end on the owner's approval"; exit 1; }
 grep -q "filing a bug report issue" "${LOG}" && { echo "FAIL: an accepted message-only round must not file a bug report"; exit 1; }
 
 # The implemented branch is left as it was: init + implementation, no new
