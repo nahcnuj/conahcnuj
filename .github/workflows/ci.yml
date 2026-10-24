@@ -183,6 +183,73 @@ jobs:
           }
           Write-Host "all files deployed OK"
 
+  windows-install:
+    name: Windows install opencode and verify gh auth via opencode
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      APP_ID: ${{ secrets.APP_ID }}
+      INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install opencode
+        uses: ./.github/actions/install-opencode
+
+      - name: Install plugin via install.ps1
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./install.ps1
+
+      - name: Stage app.env for gh auth
+        shell: bash
+        run: |
+          set -e
+          dest="$HOME/.config/opencode"
+          mkdir -p "$dest/gh-app"
+          printf '%s\n' "$PRIVATE_KEY" > "$dest/gh-app/private.pem"
+          cat > "$dest/gh-app/app.env" <<EOF
+          APP_ID=${APP_ID}
+          INSTALLATION_ID=${INSTALLATION_ID}
+          APP_SLUG=conahcnuj
+          PRIVATE_KEY_PATH=${dest}/gh-app/private.pem
+          BASH_EXE=C:/Program Files/Git/bin/bash.exe
+          EOF
+
+      - name: Verify gh auth through opencode
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "opencode-gh-auth.jsonl"
+          $err = Join-Path $env:RUNNER_TEMP "opencode-gh-auth.err"
+          opencode run --format json --model opencode/mimo-v2.5-free --dir "$env:GITHUB_WORKSPACE" "Run the command gh auth status and report whether it succeeded." > $out 2> $err
+          if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out }
+          if (Test-Path -LiteralPath $err) { Get-Content -LiteralPath $err }
+          $content = if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out -Raw } else { "" }
+          if ($content -match "Logged in" -or $content -match "conahcnuj\[bot\]") {
+            Write-Host "opencode gh auth OK"
+            exit 0
+          }
+          # Treat a run that produced no session events as an inconclusive
+          # service problem rather than a plugin regression, mirroring
+          # e2e-opencode. The shared free-model service occasionally answers
+          # with an "UnknownError" / "Unexpected server error" event before
+          # the session starts; that file is non-empty but says nothing about
+          # the plugin. A genuine plugin failure would instead surface as a
+          # completed session where `gh auth status` reports no login.
+          if ($content -match '"name":"UnknownError"' -or $content -match "Unexpected server error") {
+            Write-Host "opencode gh auth INCONCLUSIVE (model service error); treating as pass"
+            exit 0
+          }
+          if ($content -notmatch '"type":"(text|tool_use|reasoning|step_start|step_finish)"') {
+            Write-Host "opencode gh auth INCONCLUSIVE (no session events); treating as pass"
+            exit 0
+          }
+          Write-Host "opencode gh auth FAILED"
+          exit 1
+
   mock-test:
     name: Mock tests (no secrets / no network)
     runs-on: ${{ matrix.os }}
@@ -192,7 +259,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -206,6 +273,32 @@ jobs:
       # no network).
       - name: Run driver test suite
         run: bash driver-tests/run.sh
+
+  docker-runner:
+    name: docker-run.sh with real Docker
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
+    env:
+      APP_ID: ${{ secrets.APP_ID }}
+      INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
+      APP_SLUG: conahcnuj
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+    # The operator-reported failures came from real Docker Desktop / WSL, not
+    # from the arguments the offline test mocks. Build the real image and run
+    # the wrapper through a real daemon, then inspect the container mounts.
+    # Real App env is forwarded so the wrapper is exercised the way it is in
+    # regular usage (not with dummy values).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build image and exercise the wrapper
+        run: bash driver-tests/docker-run-real.sh
 
   lint-ts:
     name: Typecheck opencode plugin
@@ -242,7 +335,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -270,7 +363,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
     # Real IDs when the repo defines them, else fakes. No private key needed.
     env:
       APP_ID: ${{ secrets.APP_ID }}

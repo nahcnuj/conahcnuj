@@ -62,7 +62,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 | `driver-tests/conahcnuj-message-only-resume.sh` | レビュー指摘対応ラウンドで既に実装コミットを持つブランチ（再開した PR）に `.commit-msg` だけ書いたモデルを「完了」として受け入れ、次モデルへ引き継がずレビュアーへ渡すことを検証（#273） | 秘密鍵・ネットワーク不要（`MOCK_OPENCODE_MESSAGE_ONLY` で再現可） |
 | `install.ps1` | `~/.config/opencode`（または `-Destination`）へ配置。加えて `conahcnuj` バイナリ（既定 `~/.local/bin`）と bin 側 `gh-app/`・`lib/` を配置 | gh-app は**2 箇所**へ配備（opencode 設定用とドライバ用）。実 `app.env` があればそれを、無ければ example から作成 |
 | `plugin-tests/install-agents-md.ps1` | `Install-GlobalAgentsMd`（グローバル AGENTS.md への管理ブロック merge）のテスト。実物の `install.ps1` を一時 Destination＋InstallPath で実行し、新規作成・個人ルール保持・再実行の冪等性・未終端ブロックの書換・end マーカー後の個人ルール生存を検証 | pwsh のみ。CI の `install-test` が実行 |
-| `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
+| `Dockerfile` | conahcnuj 実行用の隔離イメージ（opencode・git・gh・curl・openssl とドライバを同梱） | 秘密鍵・`app.env` は焼き込まない。`ENTRYPOINT` はドライバ |
 | `docker-run.sh` | 上記イメージでドライバを実行するラッパー（対象リポジトリを `/work` へマウント、コンテナ用 `app.env` を生成し秘密鍵を読み取り専用マウント） | テストではなく**実走行**用（実キー・ネットワーク・opencode 設定が必要） |
 | `docs/` | AI 向けリファレンス（設定・CLI・ドライバ・プラグイン・環境変数・ワークフロー・導入）。GitHub Pages で配信される | `.md` がソース。`docs/build.py` がリンク・index 目次・`llms.txt` 収録を検証して `_site/` へ HTML を生成（`--check` は検証のみ）。標準ライブラリだけで動く（サードパーティ依存なし）。インストール状態やリポジトリのホスト存在を前提にしない記述にする |
 | `.github/dependabot.yml` | ピン留めした GitHub Actions（ワークフローと `.github/actions/` の composite action）の更新 PR を自動生成 | 週次。`github-actions` ecosystem。更新は regular な PR として入る |

@@ -270,7 +270,7 @@ Pull Requests** で **Allow auto-merge** を有効にしてください。
 ## 隔離環境で実行する（Docker）
 
 自律実行（opencode が作業ツリーを自由に編集する）をホストから隔離したい場合は、
-`Dockerfile` でビルドしたイメージ内でドライバを動かせます。opencode・git・
+`Dockerfile` でビルドしたイメージ内でドライバを動かせます。opencode・git・gh・
 curl・openssl・ドライバ本体はイメージに同梱し、**秘密鍵と `app.env` は
 イメージへ焼き込まず**実行時に読み取り専用でマウントします。
 

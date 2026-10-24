@@ -62,7 +62,7 @@ cd <対象リポジトリ>
 bash <このリポジトリ>/docker-run.sh <issue-or-PR番号>
 ```
 
-- `Dockerfile` は opencode・git・curl・openssl・ドライバを同梱。
+- `Dockerfile` は opencode・git・gh・curl・openssl・ドライバを同梱。
   **秘密鍵と `app.env` は焼き込まない**
 - 対象リポジトリは `/work` にバインドマウント（ホストのツリーは汚さない）
 - ホストの `gh-app/app.env` から `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /

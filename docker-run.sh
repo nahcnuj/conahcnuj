@@ -9,6 +9,13 @@
 # Usage:
 #   cd <target-repo>
 #   bash <path-to>/docker-run.sh <issue-or-pr-number>
+#   "C:/Program Files/Git/bin/bash.exe" <path-to>/docker-run.sh <issue-or-pr-number>   # Windows
+#
+# On Windows a bare `bash` from PowerShell can resolve to WSL bash, where
+# `docker` only knows unix:///var/run/docker.sock and cannot reach Docker
+# Desktop, even though `docker ps` works in PowerShell. The wrapper detects
+# that case and re-launches itself under the configured Git Bash (BASH_EXE),
+# the same way the driver does for the GitHub App paths.
 #
 # By default the container runs in the foreground and stops as soon as the
 # driver exits. Set CONAHCNUJ_DAEMON=1 (with an optional CONAHCNUJ_NAME) to
@@ -22,6 +29,9 @@
 #   CONAHCNUJ_BUILD=1      force a rebuild of the image
 #   CONAHCNUJ_DAEMON=1     run detached (container name below), poll via `docker logs`
 #   CONAHCNUJ_NAME         container name to use in daemon mode (default: conahcnuj-<epoch>)
+#   CONAHCNUJ_ENTRYPOINT   override the image ENTRYPOINT (default: the driver). Used
+#                          by the real-Docker test to inspect the container without
+#                          contacting GitHub; container args follow it as usual.
 #   OPENCODE_CONFIG_DIR    host opencode config dir (default: ~/.config/opencode)
 #   OPENCODE_DATA_DIR      host opencode data/auth dir (default: ~/.local/share/opencode)
 #   CONAHCNUJ_REPO, CONAHCNUJ_MAX_SECONDS, CONAHCNUJ_POLL_* are passed through.
@@ -42,8 +52,141 @@ else
 fi
 docker_() { MSYS_NO_PATHCONV=1 docker "$@"; }
 
+# --- Windows / WSL relaunch -------------------------------------------------
+
+# The configured Git Bash: environment override > app.env > the committed
+# app.env.example. A placeholder means "not configured", so fall back to the
+# standard Git for Windows location (issue #417: PowerShell's `bash` is WSL
+# bash, whose docker cannot reach Docker Desktop).
+docker_bash_exe() {
+  local env_file line
+  if [[ -n "${BASH_EXE:-}" ]]; then
+    printf '%s\n' "${BASH_EXE}"
+    return 0
+  fi
+  env_file="${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}"
+  if [[ ! -f "${env_file}" ]]; then
+    env_file="${HERE}/gh-app/app.env.example"
+  fi
+  if [[ -f "${env_file}" ]]; then
+    line="$(sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${env_file}" | head -1)"
+    if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
+      printf '%s\n' "${line}"
+      return 0
+    fi
+  fi
+  printf '%s\n' "C:/Program Files/Git/bin/bash.exe"
+}
+
+# True when the wrapper must re-launch itself under Git Bash. Only under WSL
+# (a bare Windows `bash`) and only when the configured Git Bash is reachable.
+docker_needs_relaunch() {
+  # WSL sets WSL_DISTRO_NAME; Git Bash (MSYS) does not. Do not also require
+  # MSYSTEM to be empty: on Windows, Git Bash forces MSYSTEM into the
+  # environment and it cannot reliably be unset (issue #417), which made the
+  # WSL simulation in the tests (and real invocations under a WSL bash that
+  # inherited MSYSTEM) skip the relaunch.
+  [[ -n "${WSL_DISTRO_NAME:-}" ]] || return 1
+  command -v wslpath >/dev/null 2>&1 || return 1
+  local bash_exe bash_mnt
+  bash_exe="$(docker_bash_exe)"
+  bash_mnt="$(wslpath -u "${bash_exe}" 2>/dev/null || true)"
+  if [[ -z "${bash_mnt}" || ! -x "${bash_mnt}" ]]; then
+    echo "WARNING: BASH_EXE ${bash_exe} is not reachable from WSL; continuing (docker may not reach Docker Desktop)." >&2
+    return 1
+  fi
+  return 0
+}
+
+# Convert a WSL path to the Windows form Git Bash understands. Windows paths
+# and relative paths are passed through untouched.
+wsl_win_path() {
+  local path="${1}"
+  if [[ "${path}" == /* ]]; then
+    wslpath -m "${path}" 2>/dev/null || printf '%s\n' "${path}"
+  else
+    printf '%s\n' "${path}"
+  fi
+}
+
+# Re-run the wrapper under the configured Git Bash, preserving the target repo,
+# app.env location and CONAHCNUJ_* / OPENCODE_* / DOCKER_* overrides (WSL
+# interop only forwards variables listed in WSLENV). Git Bash runs as a child
+# and an interrupt is forwarded as TERM, matching bin/conahcnuj.sh.
+docker_relaunch() {
+  local bash_exe bash_mnt self self_win child rc
+  bash_exe="$(docker_bash_exe)"
+  bash_mnt="$(wslpath -u "${bash_exe}")"
+  # Resolve the wrapper to an absolute path first. Invoking it as
+  # `bash ../conahcnuj/docker-run.sh` (the reported PowerShell case) leaves a
+  # relative BASH_SOURCE[0], and wslpath cannot turn that into a Windows path.
+  self="${BASH_SOURCE[0]}"
+  if [[ "${self}" != */* ]]; then
+    self="$(command -v "${self}" 2>/dev/null || true)"
+  fi
+  if [[ -n "${self}" && "${self}" != /* ]]; then
+    self="$(cd "$(dirname "${self}")" 2>/dev/null && pwd)/$(basename "${self}")"
+  fi
+  if [[ -z "${self}" ]]; then
+    echo "WARNING: could not resolve ${BASH_SOURCE[0]} to relaunch; continuing under WSL." >&2
+    return 1
+  fi
+  self_win="$(wslpath -m "${self}" 2>/dev/null || true)"
+  if [[ -z "${self_win}" ]]; then
+    echo "WARNING: could not convert ${self} to a Windows path; continuing under WSL." >&2
+    return 1
+  fi
+
+  CONAHCNUJ_TARGET="$(wsl_win_path "${TARGET}")"
+  export CONAHCNUJ_TARGET
+  if [[ -n "${CONAHCNUJ_APP_ENV:-}" ]]; then
+    CONAHCNUJ_APP_ENV="$(wsl_win_path "${CONAHCNUJ_APP_ENV}")"
+    export CONAHCNUJ_APP_ENV
+  fi
+
+  local wslenv_add="" name
+  for name in $(compgen -v); do
+    case "${name}" in
+      CONAHCNUJ_*|OPENCODE_*|DOCKER_*|BASH_EXE)
+        if [[ -n "${!name:-}" ]]; then
+          wslenv_add="${wslenv_add:+${wslenv_add}:}${name}"
+        fi
+        ;;
+    esac
+  done
+  if [[ -n "${wslenv_add}" ]]; then
+    export WSLENV="${WSLENV:+${WSLENV}:}${wslenv_add}"
+  fi
+
+  echo "Re-launching under ${bash_exe} so Docker Desktop is reachable." >&2
+  "${bash_mnt}" "${self_win}" "$@" &
+  child=$!
+  trap 'kill -TERM "${child}" 2>/dev/null || true' INT TERM
+  rc=0
+  wait "${child}" || rc=$?
+  wait "${child}" 2>/dev/null || true
+  trap - INT TERM
+  exit "${rc}"
+}
+
+if docker_needs_relaunch; then
+  docker_relaunch "$@"
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker is not installed or not on PATH." >&2
+  exit 1
+fi
+
+# Fail with the daemon's own message (and a Windows hint) instead of letting
+# `docker build` surface a raw "failed to connect" error. The WSL case is the
+# common one: PowerShell's docker works but the WSL one has no daemon.
+if ! docker_ info >/dev/null 2>&1; then
+  echo "ERROR: cannot reach the Docker daemon with $(command -v docker)." >&2
+  docker_ info >&2 || true
+  if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+    echo "HINT: run this script with Git Bash (BASH_EXE), not WSL bash, so it uses Docker Desktop." >&2
+  fi
   exit 1
 fi
 
@@ -137,11 +280,21 @@ run_args=(
   -v "$(host_path "${TARGET}"):/work"
   -v "$(host_path "${RUN_DIR}/app.env"):/opt/conahcnuj/gh-app/app.env:ro"
   -v "$(host_path "${PEM_HOST}"):/run/secrets/app.pem:ro"
-  "${oc_args[@]}"
-  "${env_args[@]}"
-  -w /work
-  "${IMAGE}" "$@"
 )
+
+if (( ${#oc_args[@]} > 0 )); then
+  run_args+=("${oc_args[@]}")
+fi
+if (( ${#env_args[@]} > 0 )); then
+  run_args+=("${env_args[@]}")
+fi
+
+# Optional entrypoint override (the real-Docker test supplies /bin/bash to
+# exercise the mounts without running the driver against GitHub).
+if [[ -n "${CONAHCNUJ_ENTRYPOINT:-}" ]]; then
+  run_args+=(--entrypoint "${CONAHCNUJ_ENTRYPOINT}")
+fi
+run_args+=(-w /work "${IMAGE}" "$@")
 
 # Daemon mode: run detached with a stable name so the caller (or an agent) can
 # follow progress with `docker logs -f <name>`. The container is intentionally
@@ -162,6 +315,13 @@ if [[ "${CONAHCNUJ_DAEMON:-0}" == "1" ]]; then
   exit 0
 fi
 
-exec env MSYS_NO_PATHCONV=1 docker run --rm \
-  "${tty_args[@]}" \
-  "${run_args[@]}"
+# Foreground (attached) run. NOT exec: the EXIT trap must still fire to remove
+# RUN_DIR, whose container app.env would otherwise leak on every run. A failing
+# docker still propagates its status through set -e, and signals reach both the
+# wrapper and docker, which shares this foreground process group.
+docker_args=(env MSYS_NO_PATHCONV=1 docker run --rm)
+if (( ${#tty_args[@]} > 0 )); then
+  docker_args+=("${tty_args[@]}")
+fi
+docker_args+=("${run_args[@]}")
+"${docker_args[@]}"
