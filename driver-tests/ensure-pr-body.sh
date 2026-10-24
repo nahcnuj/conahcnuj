@@ -27,33 +27,30 @@ gh_api_update_pr() {
   printf 'UPDATE|%s|%s\n' "${3}" "${4}" >> "${REPORT}"
 }
 
-# ensure_pr syncs the body at most once per driver process (PR_BODY_SYNCED_FILE)
-# and the report file accumulates otherwise, so reset both between scenarios.
+# ensure_pr never patches the PR body, so only the report file needs resetting
+# between scenarios.
 reset_body_marker() {
-  rm -f "${PR_BODY_SYNCED_FILE}"
   : > "${REPORT}"
 }
 
-# With a linked issue, the body is derived and synced once.
+# With a linked issue, the body is not copied or patched.
 reset_body_marker
 out="$(ensure_pr "nahcnuj" "conahcnuj" "15" "feature/fix-10" "main" "Fix something" "real issue body
 
 more" "10")"
 [[ "${out}" == "15" ]] || { echo "FAIL: ensure_pr output was '${out}' (expected 15)"; exit 1; }
-[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "1" ]] || { echo "FAIL: linked-issue body sync must issue exactly one PATCH"; exit 1; }
-grep -q "^UPDATE|15|Closes #10" "${REPORT}" || { echo "FAIL: linked-issue body was not derived"; exit 1; }
+[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: linked-issue path must not PATCH the PR body"; exit 1; }
 echo "ensure_pr links issue -> Closes #n body: passed"
 
-# Reuse path over an existing PR also derives the body.
+# Reuse path over an existing PR also keeps the body untouched.
 reset_body_marker
 # shellcheck disable=SC2329
 # shellcheck disable=SC2317
 gh_api_find_pr_by_head() { printf '%s\n' "42"; }
 out="$(ensure_pr "nahcnuj" "conahcnuj" "" "conahcnuj/10-x" "main" "Fix something" "issue body" "10")"
 [[ "${out}" == "42" ]] || { echo "FAIL: reuse output was '${out}' (expected 42)"; exit 1; }
-[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "1" ]] || { echo "FAIL: reuse path must sync the body exactly once"; exit 1; }
-grep -q "^UPDATE|42|Closes #10" "${REPORT}" || { echo "FAIL: reuse path did not derive the Closes #n body"; exit 1; }
-echo "ensure_pr reuses existing PR and syncs body: passed"
+[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: reuse path must not PATCH the PR body"; exit 1; }
+echo "ensure_pr reuses existing PR without touching its body: passed"
 
 # Regression test for #143: closing-reference lines already present in the issue
 # body are dropped so the PR body has exactly one "Closes #<n>".
@@ -70,15 +67,7 @@ Resolves #8
 
 trailing text" "10")"
 [[ "${out}" == "15" ]] || { echo "FAIL: ensure_pr output was '${out}' (expected 15)"; exit 1; }
-[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "1" ]] || { echo "FAIL: dedup body sync must issue exactly one PATCH"; exit 1; }
-# The body spans multiple lines, so take everything from the UPDATE line on.
-updated="$(awk '/^UPDATE\|/{flag=1} flag{print}' "${REPORT}")"
-[[ "${updated}" == "UPDATE|15|Closes #10
-
-real issue body
-
-trailing text" ]] || { echo "FAIL: closing references were not deduplicated, got: '${updated}'"; exit 1; }
-[[ "$(printf '%s' "${updated}" | grep -c 'Closes #')" == "1" ]] || { echo "FAIL: PR body must contain exactly one 'Closes #' line"; exit 1; }
+[[ "$(grep -c '^UPDATE|' "${REPORT}")" == "0" ]] || { echo "FAIL: dedup path must not PATCH the PR body"; exit 1; }
 echo "ensure_pr keeps exactly one Closes #n even when the issue body has more: passed"
 
 # No linked issue: body must stay verbatim and NO PATCH may be issued.
