@@ -409,15 +409,15 @@ CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approv
 gh_api_rollup_state() {
   local skip="${1:-}" json contexts node type state status conclusion workflow result="" pending="false"
 
-  json="$(gh_api_read_line)"
+  json="$(cat)"
   if [[ "${json}" != *'"contexts"'* ]]; then
-    gh_api_json_str "${json}" "state"
+    printf '%s' "${json}" | sed -n 's/.*"statusCheckRollup"[[:space:]]*:[[:space:]]*{[[:space:]]*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
     return 0
   fi
   # More contexts than one page holds: the aggregate would be computed from an
   # incomplete list, so trust the rollup's own state instead of guessing.
   if printf '%s' "${json}" | grep -q '"contexts":{"nodes":\[.*\],"pageInfo":{"hasNextPage":true}'; then
-    gh_api_json_str "${json}" "state"
+    printf '%s' "${json}" | sed -n 's/.*"statusCheckRollup"[[:space:]]*:[[:space:]]*{[[:space:]]*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
     return 0
   fi
   # Every context is a flat object, so the only "},{" inside the array separates
