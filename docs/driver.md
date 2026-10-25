@@ -151,7 +151,8 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 | `CONAHCNUJ_POLL_CONDITIONS_MIN` / `_MAX` | `15` / `300` | 制約ポーリングの間隔幅（秒・ジッター付き） |
 | `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer（`Co-Authored-By: <値>`。プラグインが `provider (model/effort)` を設定する） |
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level`（デバッグは `DEBUG`） |
-| `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止） |
+| `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow（デッドロック防止）。issue driver の job 名 `Attempt to resolve issue` も除外し、cross-repo で workflow 名が呼び出し側になっても自分待ちにしない |
+| `CONAHCNUJ_OWN_RUN_ID` | `GITHUB_RUN_ID` | 制約チェックから除外する自分の run id（job 名が変わっても `workflowRun.databaseId` で自分を除外） |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | プロンプトへ同梱する作業ツリーファイル（スペース区切り。空で無効） |
 | `CONAHCNUJ_MISSING_MODELS_FILE` | `<gh-app>/missing-models` | 永久に使えないモデルの記録先（ラウンド前に読み、判明したモデルを追記） |
 | `CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS` | `1` | provider の rate limit を検知してラウンドを打ち切る監視間隔（秒） |

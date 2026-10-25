@@ -82,6 +82,12 @@ organization / enterprise 内なら `secrets: inherit`、それ以外は名前�
 `environment` は run の所属リポジトリ（＝呼び出し側）で解決されるため、
 呼び出し側はその environment に App の secrets を持たせる。
 
+呼び出し側ではドライバの check が呼び出し側 workflow 名（例 `Auto-drive`）で
+付くため、名前だけの除外では自分の run を待ってしまう。ドライバは再利用
+workflow の job 名 `Attempt to resolve issue`（check 名は呼び出し側 job 名が
+前置される）と `GITHUB_RUN_ID` / `workflowRun.databaseId` の両方で自分の run を
+制約から外す（#492 / #497）。
+
 ```yaml
 jobs:
   drive:

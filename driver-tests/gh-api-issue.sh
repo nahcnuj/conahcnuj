@@ -31,6 +31,13 @@ MOCK_CONDITIONS_NOCHECKS='{"data":{"repository":{"pullRequest":{"mergeable":"MER
 # workflow it belongs to through checkSuite.workflowRun.workflow.
 MOCK_CONDITIONS_CONTEXTS='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"COMPLETED","conclusion":"SKIPPED","checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
 
+# A reusable workflow run (the driver called from another repository, or via
+# workflow_call): the check run name is prefixed with the caller's job name and
+# the workflow attribution is the caller's workflow, so the workflow-name filter
+# alone cannot see that this is the driver's own run. The called job name
+# ("Attempt to resolve issue") is stable, so it must still be excluded.
+MOCK_CONDITIONS_CROSS_REPO='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"drive / Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Caller auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
 # The driver's own run failed (a maintainer cancelled it, or it timed
 # out): no code change can ever fix that, so it must not count as a
 # constraint the driver tries to "fix" in a loop.
@@ -74,6 +81,16 @@ MOCK_CONDITIONS_REAL='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEAB
 # auto-merge check nor the driver's own run may become a constraint, or the
 # driver waits for the merge that only it can unblock.
 MOCK_CONDITIONS_DEADLOCK='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"enable / enable","status":"COMPLETED","conclusion":"FAILURE","checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}},{"__typename":"CheckRun","name":"CodeQL","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":null},{"__typename":"CheckRun","name":"Lint shell scripts (windows-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Check install.ps1 syntax","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Mock tests (no secrets / no network) (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Plugin runtime smoke test (windows-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"E2E opencode run (opencode free model)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Typecheck opencode plugin","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Plugin runtime smoke test (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Mock tests (no secrets / no network) (windows-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"install.ps1 deployment test","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Analyze (actions)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CodeQL"}}}},{"__typename":"CheckRun","name":"Analyze (javascript-typescript)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CodeQL"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# A cross-repository caller supplies the check's workflow name (here
+# "Auto-drive" wraps the reusable "Issue auto-drive"). Matching names alone
+# missed the driver's own IN_PROGRESS check there and the run waited for
+# itself until the time budget was gone (issue #497). The run id in
+# checkSuite.workflowRun.databaseId identifies it exactly.
+MOCK_CONDITIONS_CROSS_REPO_OWN='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"databaseId":987654321,"workflow":{"name":"Auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"databaseId":111111111,"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
+# In the same caller, real CI that is still running is still waited for.
+MOCK_CONDITIONS_CROSS_REPO_CI_PENDING='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"databaseId":987654321,"workflow":{"name":"Auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"databaseId":111111111,"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
 
 MOCK_REVIEWS='{"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please fix the typo","author":{"login":"reviewer"}}]},"comments":{"nodes":[{"body":"Nice work so far!","author":{"login":"reviewer"}}]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"Inline note on line 10"}]}},{"isResolved":true,"comments":{"nodes":[{"body":"Resolved thread"}]}}]}}}}}'
 
@@ -163,6 +180,21 @@ test_fetch_pr_conditions() {
   out="$(printf '%s\n' "${MOCK_CONDITIONS_CONTEXTS}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
   state="$(printf '%s' "${out}" | cut -d'|' -f1)"
   [[ "${state}" == "SUCCESS" ]]
+
+  # A reusable workflow reports the check under the caller's workflow name and
+  # prefixes the job name with the caller's job. The driver's own run must not
+  # become a constraint in that case either (#492 / #497).
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_CROSS_REPO}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "SUCCESS" ]]
+
+  # Turning the exclusion off also turns off the job-name exclusion.
+  out="$(
+    export CONAHCNUJ_OWN_WORKFLOWS=""
+    printf '%s\n' "${MOCK_CONDITIONS_CROSS_REPO}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "PENDING" ]]
 
   out="$(printf '%s\n' "${MOCK_CONDITIONS_OWN_FAILED}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
   state="$(printf '%s' "${out}" | cut -d'|' -f1)"
@@ -254,6 +286,33 @@ test_fetch_pr_conditions() {
   )"
   state="$(printf '%s' "${out}" | cut -d'|' -f1)"
   [[ "${state}" == "FAILURE" ]]
+
+  # A cross-repository caller names the check after its own workflow
+  # ("Auto-drive"), so the name filter cannot see that it is the driver's own
+  # run. Its id (GITHUB_RUN_ID) still identifies it: without that, the run
+  # waits for itself until the time budget is gone (issue #497).
+  out="$(
+    CONAHCNUJ_OWN_RUN_ID=987654321
+    printf '%s\n' "${MOCK_CONDITIONS_CROSS_REPO_OWN}" | gh_api_fetch_pr_conditions "nahcnuj" "makamujo" 1311
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "SUCCESS" ]]
+
+  # Another run id is not this run: its check stays a real constraint.
+  out="$(
+    CONAHCNUJ_OWN_RUN_ID=123456789
+    printf '%s\n' "${MOCK_CONDITIONS_CROSS_REPO_OWN}" | gh_api_fetch_pr_conditions "nahcnuj" "makamujo" 1311
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "PENDING" ]]
+
+  # Real CI from another run is still waited for under the same caller.
+  out="$(
+    CONAHCNUJ_OWN_RUN_ID=987654321
+    printf '%s\n' "${MOCK_CONDITIONS_CROSS_REPO_CI_PENDING}" | gh_api_fetch_pr_conditions "nahcnuj" "makamujo" 1311
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "PENDING" ]]
 
   echo "gh_api_fetch_pr_conditions passed"
 }

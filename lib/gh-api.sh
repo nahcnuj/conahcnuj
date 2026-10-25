@@ -342,8 +342,15 @@ gh_api_fetch_pr_state() {
 # Workflows whose checks the driver must not treat as a constraint. Both of
 # them attach a check run to the PR head commit while they are still running,
 # and neither can finish while this driver run is alive:
-#   - "Issue auto-drive" is the driver's own run: counting it makes the driver
-#     wait for itself before it can do anything.
+#   - The driver's own run: counting it makes the driver wait for itself
+#     before it can do anything. It is skipped two ways, because a
+#     cross-repository caller supplies its own workflow name (e.g. "Auto-drive"
+#     while the reusable workflow is "Issue auto-drive"): by run id
+#     (GITHUB_RUN_ID) whatever the job is called, and by the reusable job name
+#     "Attempt to resolve issue" (the check name is prefixed with the caller's
+#     job name, e.g. "Auto-drive issue / Attempt to resolve issue"). Matching on
+#     the workflow name alone missed the driver's own pending check there and
+#     burned the whole time budget in poll_conditions (#492 / #497).
 #   - "Owner-approved auto-merge" merges the PR only once every other check on
 #     the approved head commit is green - this driver's run included - so
 #     counting it here deadlocks the two against each other. Neither check can
@@ -353,13 +360,20 @@ gh_api_fetch_pr_state() {
 #     same way the driver skips the merge job here.
 # A run a maintainer cancelled (or that timed out) also stays on the head commit
 # as a failure no code change can ever fix, so both are left out of the
-# aggregate entirely. Comma separated; empty disables the filter.
+# aggregate entirely. Comma separated; empty disables the name filter.
 # `-` (not `:-`) so an explicitly empty value really disables the filter: the
 # caller has to be able to turn it off from the environment alone.
 CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approved auto-merge}"
 
+# The id of the workflow run doing the polling (GITHUB_RUN_ID in Actions). Its
+# check is skipped by id, so the driver never waits for itself even when a
+# cross-repository caller changes the workflow name the check reports. `-` (not
+# `:-`) lets a caller explicitly clear it.
+CONAHCNUJ_OWN_RUN_ID="${CONAHCNUJ_OWN_RUN_ID-${GITHUB_RUN_ID:-}}"
+
 # Aggregate a statusCheckRollup payload (stdin) into SUCCESS / PENDING /
-# FAILURE, leaving out the checks that belong to the workflows named in $1.
+# FAILURE, leaving out the checks that belong to the workflows named in $1 and
+# to the workflow run whose id is $2 (the driver's own run).
 # Precedence follows GitHub's own rollup: a failing check beats a pending one,
 # and NEUTRAL / SKIPPED count as success.
 # A payload that carries no context list (an older response, or one that could
@@ -367,7 +381,7 @@ CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approv
 # as-is; an empty result means "no checks at all", which the caller reads as
 # SUCCESS.
 gh_api_rollup_state() {
-  local skip="${1:-}" json contexts node type state status conclusion workflow result="" pending="false"
+  local skip="${1:-}" own_run_id="${2:-}" json contexts node type state status conclusion workflow check_name run_id result="" pending="false"
 
   json="$(gh_api_read_line)"
   if [[ "${json}" != *'"contexts"'* ]]; then
@@ -397,10 +411,30 @@ gh_api_rollup_state() {
         esac
         ;;
       CheckRun)
+        # The check of the run doing the polling never counts, whatever the
+        # caller workflow is named: the driver must not wait for itself.
+        run_id="$(gh_api_json_num "${node}" "databaseId")"
+        if [[ -n "${run_id}" && -n "${own_run_id}" && "${run_id}" == "${own_run_id}" ]]; then
+          continue
+        fi
         # A check run that belongs to one of the skipped workflows is left out of
         # the aggregate entirely: neither its pending nor its failed state may
         # gate the run that is doing the polling.
         workflow="$(printf '%s' "${node}" | sed -n 's/.*"workflow":{"name":"\([^"]*\)".*/\1/p')"
+        # The issue driver keeps the same job name ("Attempt to resolve issue")
+        # whether it runs in this repository or as a reusable workflow called by
+        # another repository. A reusable workflow's check run is reported under
+        # the caller's workflow name, though, so the workflow-name filter below
+        # misses it. Exclude it by job name too so a cross-repo run does not wait
+        # for itself. Only the fields before checkSuite hold the check's own
+        # name; the nested workflow name comes later. Gated on a non-empty skip
+        # list so an explicitly disabled filter stays disabled.
+        if [[ -n "${skip}" ]]; then
+          check_name="$(gh_api_json_str "${node%%\"checkSuite\"*}" "name")"
+          case "${check_name}" in
+            *"Attempt to resolve issue"*) continue ;;
+          esac
+        fi
         if [[ -n "${workflow}" && ",${skip}," == *",${workflow},"* ]]; then
           continue
         fi
@@ -435,16 +469,18 @@ gh_api_rollup_state() {
 
 # Non-reviewer merge constraints. Output: checks_state|mergeable|mergeStateStatus|state
 # checks_state is SUCCESS when there is no status check on the head commit, and
-# the checks of the workflows in CONAHCNUJ_OWN_WORKFLOWS (the driver's own run
-# and the merge job that waits for it) never count against the run that is
-# polling. state is the PR state, so the caller can tell "still open" from
+# the check of the current workflow run (GITHUB_RUN_ID) plus the checks of the
+# workflows in CONAHCNUJ_OWN_WORKFLOWS (the merge job that waits for it) never
+# count against the run that is polling. The run id is what keeps the driver
+# from waiting for itself when a cross-repository caller supplies the workflow
+# name. state is the PR state, so the caller can tell "still open" from
 # "merged/closed while we waited"; it is empty when the payload does not carry
 # it, which the caller reads as unknown (keep polling).
 # Exits non-zero when the conditions could not be read at all, so the caller
 # retries instead of mistaking a failed call for an empty (passing) PR.
 gh_api_fetch_pr_conditions() {
   local owner="${1}" repo="${2}" number="${3}" json
-  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, state, commits(last: 1) { nodes { commit { statusCheckRollup { state, contexts(first: 100) { nodes { __typename, ... on CheckRun { name, status, conclusion, checkSuite { workflowRun { workflow { name } } } }, ... on StatusContext { context, state } }, pageInfo { hasNextPage } } } } } } } } }"
+  local query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { mergeable, mergeStateStatus, state, commits(last: 1) { nodes { commit { statusCheckRollup { state, contexts(first: 100) { nodes { __typename, ... on CheckRun { name, status, conclusion, checkSuite { workflowRun { databaseId, workflow { name } } } }, ... on StatusContext { context, state } }, pageInfo { hasNextPage } } } } } } } } }"
   if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
     json="$(gh_api_read_line)"
     # An exhausted/empty mock line stands for a failed read the same way an
@@ -464,7 +500,7 @@ gh_api_fetch_pr_conditions() {
   fi
 
   local state mergeable mss pr_state
-  state="$(printf '%s' "${json}" | gh_api_rollup_state "${CONAHCNUJ_OWN_WORKFLOWS}")"
+  state="$(printf '%s' "${json}" | gh_api_rollup_state "${CONAHCNUJ_OWN_WORKFLOWS}" "${CONAHCNUJ_OWN_RUN_ID}")"
   if [[ -z "${state}" ]]; then
     state="SUCCESS"
   fi
