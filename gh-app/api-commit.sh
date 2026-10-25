@@ -365,13 +365,16 @@ if [[ ${#DELETE_PATHS[@]} -gt 0 ]]; then
       if printf '%s' "${TREE_PATHS}" | grep -qF "\"path\":\"$(json_escape "${dp}")\""; then
         FILTERED_DELETE_PATHS+=( "${dp}" )
       else
-        echo "WARNING: skipping deletion of ${dp}: not present at ${HEAD_SHA:0:7}" >&2
+        : # deletion already satisfied on the remote head; skip silently
       fi
     done
     DELETE_PATHS=("${FILTERED_DELETE_PATHS[@]+"${FILTERED_DELETE_PATHS[@]}"}")
     if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-      echo "ERROR: nothing to commit (every requested deletion was already absent from the branch)" >&2
-      exit 1
+      # Every requested deletion was already absent from the remote head, so
+      # there is nothing left to commit. Treat as success rather than failure.
+      git fetch origin "${BRANCH}" >/dev/null 2>&1 || true
+      git reset --hard "origin/${BRANCH}" >/dev/null 2>&1 || true
+      exit 0
     fi
   fi
 fi
