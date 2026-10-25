@@ -452,10 +452,10 @@ commit_changes() {
     return 1
   fi
   echo "Using coding agent's commit message: ${message}" >&2
-  git add -A
+  git add -A || true
   apply_driver_commit_model
   if [[ "${TEST_MODE}" == "1" ]]; then
-    git config commit.gpgsign false
+    git config commit.gpgsign false || true
     if [[ -n "${CONAHCNUJ_COMMIT_MODEL:-}" ]] && ! printf '%s\n' "${message}" | grep -qiE '^[[:space:]]*co-authored-by:'; then
       git commit -q -m "${message}" -m "Co-Authored-By: ${CONAHCNUJ_COMMIT_MODEL}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
     else
@@ -463,7 +463,10 @@ commit_changes() {
     fi
     return 0
   fi
-  bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
+  if ! bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"; then
+    echo "WARNING: verified commit could not be created; changes remain in the working tree." >&2
+    return 1
+  fi
   local branch
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git fetch origin "${branch}" >/dev/null 2>&1 || true
@@ -717,7 +720,7 @@ checkout_branch_head() {
     echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
     return 1
   fi
-  git checkout -B "${branch}" "origin/${branch}" 1>&2
+  git checkout -B "${branch}" "origin/${branch}" 1>&2 || return 1
 }
 
 # Fetch a just-created feature branch, tolerating the short window between the
@@ -767,7 +770,7 @@ checkout_new_branch_from_base() {
     echo "ERROR: no base commit to start ${branch} from." >&2
     return 1
   fi
-  git checkout -B "${branch}" "${base}" 1>&2
+  git checkout -B "${branch}" "${base}" 1>&2 || return 1
 }
 
 # Create (or reuse) the feature branch off the default branch and check it out.
@@ -873,7 +876,11 @@ resolve_agent_branch_name() {
     # The ref may not be fetchable the instant it was created; the branch is
     # brand-new, so starting it from the base loses no committed work.
     if fetch_new_branch_ref "${want}"; then
-      git checkout -B "${want}" "origin/${want}" 1>&2
+      if ! git checkout -B "${want}" "origin/${want}" 1>&2; then
+        echo "WARNING: could not check out ${want}; keeping ${current}." >&2
+        printf '%s\n' "${current}"
+        return 0
+      fi
     else
       echo "WARNING: ${want} is not fetchable right after creation; starting it from the base." >&2
       checkout_new_branch_from_base "${want}" "" "${default_oid}" || {

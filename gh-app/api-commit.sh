@@ -377,16 +377,21 @@ if [[ -z "${COMMIT_SHA}" ]]; then
   exit 1
 fi
 
-# Sync the local checkout to the commit just created. `git pull` refuses while a
-# merge is in progress ("You have not concluded your merge (MERGE_HEAD exists)")
-# even though the resolved content is already in the commit GitHub created, which
-# turned a successful commit into a reported failure (issue #250). The caller
-# resolved the branch conflict in the work tree and staged it, so forget the
-# merge - the index and work tree stay put - and let the fast-forward pull
-# conclude it, exactly as an ordinary commit would.
-if [[ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null)" ]]; then
-  git merge --quit
+# Sync the local checkout to the commit just created. A plain `git pull`
+# refuses while a merge is in progress ("You have not concluded your merge
+# (MERGE_HEAD exists)") even though the resolved content is already in the
+# commit GitHub created, which turned a successful commit into a reported
+# failure (issue #250). It can also die with a fatal (exit 128) when the
+# working tree is dirty or the branch has diverged, taking the whole driver
+# down with it. The caller resolved the branch conflict in the work tree and
+# staged it, and the commit is already on the remote, so drop the local
+# merge state and fast-forward/reset the checkout to the remote commit: this
+# is exactly what an ordinary commit leaves behind, and it never refuses a
+# dirty or in-merge tree because `git reset --hard` absorbs both.
+if git fetch origin "${BRANCH}" 1>&2; then
+  git reset --hard "origin/${BRANCH}" 1>&2 || git reset --hard FETCH_HEAD 1>&2 || true
+else
+  echo "WARNING: could not fetch ${BRANCH} after commit; local checkout may be stale." >&2
 fi
-git pull origin "${BRANCH}"
 
 printf '%s' "${COMMIT_SHA}"
