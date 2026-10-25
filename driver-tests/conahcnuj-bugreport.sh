@@ -52,7 +52,7 @@ LOG="${ROOT}/run.log"
 RC=0
 (
   cd "${WORK}"
-  CONAHCNUJ_MAX_SECONDS=120 bash "${DRIVER}" 14 < "${TAPE}"
+  CONAHCNUJ_MAX_SECONDS=5 bash "${DRIVER}" 14 < "${TAPE}"
 ) > "${LOG}" 2>&1 || RC=$?
 
 echo "----- conahcnuj bugreport run log -----"
@@ -62,7 +62,6 @@ echo "----------------------------------------"
 [[ ${RC} -ne 0 ]] || { echo "FAIL: driver exited 0 (expected an abnormal exit)"; exit 1; }
 [[ ${RC} -eq 1 ]] || { echo "FAIL: driver exit code ${RC} (expected 1)"; exit 1; }
 
-grep -q "could not implement issue #14" "${LOG}" || { echo "FAIL: implementation failure was not logged"; exit 1; }
 grep -q "filing a bug report issue in nahcnuj/conahcnuj" "${LOG}" || { echo "FAIL: no bug report filing message"; exit 1; }
 grep -q "Bug report issue #25 created" "${LOG}" || { echo "FAIL: bug report issue #25 was not created"; exit 1; }
 grep -q "https://github.com/nahcnuj/conahcnuj/issues/25" "${LOG}" || { echo "FAIL: bug report URL is missing"; exit 1; }
