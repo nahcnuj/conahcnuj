@@ -132,8 +132,7 @@ trailer としてコミット本文末尾に追加します（本文に既に `C
 
 ### 入出力
 
-- **stdout**: 成功時、作成したコミットの SHA（**末尾に改行なし**）。ローカル同期は
-  静かに行われるため、stdout の最後の行が SHA になる
+- **stdout**: 成功時は何も出力しない。ローカル同期も静かに行われる
 - `--dry-run` の stdout: `Owner/Repo:` / `Branch:` / `Message:` / `Additions:` /
   `Deletions:` のレポート
 - stderr: `Created branch <branch> from <default>`（リモートに無いブランチを
