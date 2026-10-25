@@ -897,14 +897,19 @@ collect_initial_context() {
   local owner="${1}" repo="${2}" pr="${3:-}"
   local out="" labels="" rv payload raw threads
   if [[ -n "${pr}" ]]; then
-    rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
-    payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
-    raw="$(gh_api_unb64 "${payload}")"
-    threads="$(printf '%s' "${raw}" | gh_api_unresolved_threads)"
-    if [[ -n "${threads}" ]]; then
-      out="Unresolved review threads on PR #${pr}:
+    # Collecting context is best-effort: a transient API failure here must not
+    # abort the whole run, so a missing or malformed reviews payload degrades
+    # to "no threads" instead of killing the driver (issue #1264).
+    rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}" 2>/dev/null || true)"
+    if [[ -n "${rv}" ]]; then
+      payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
+      raw="$(gh_api_unb64 "${payload}")"
+      threads="$(printf '%s' "${raw}" | gh_api_unresolved_threads 2>/dev/null || true)"
+      if [[ -n "${threads}" ]]; then
+        out="Unresolved review threads on PR #${pr}:
 ${threads}"
-      labels="unresolved review threads of PR #${pr}"
+        labels="unresolved review threads of PR #${pr}"
+      fi
     fi
   fi
 
@@ -914,7 +919,7 @@ ${threads}"
   file_list="${CONAHCNUJ_CONTEXT_FILES-README.md AGENTS.md}"
   while IFS= read -r file; do
     [[ -f "${file}" ]] || continue
-    content="$(cat -- "${file}")"
+    content="$(cat -- "${file}" 2>/dev/null || true)"
     [[ -n "${content}" ]] || continue
     if [[ -n "${out}" ]]; then
       out="${out}
