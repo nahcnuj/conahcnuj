@@ -429,14 +429,17 @@ gh_api_rollup_state() {
         # for itself. Only the fields before checkSuite hold the check's own
         # name; the nested workflow name comes later. Gated on a non-empty skip
         # list so an explicitly disabled filter stays disabled.
-        # This name-based fallback only applies when the run id cannot settle the
-        # question (no databaseId on the check, or no own_run_id supplied): when
-        # both ids are present and differ, the check belongs to a different run
-        # and must stay a real constraint (issue #497).
-        if [[ -n "${skip}" && ( -z "${run_id}" || -z "${own_run_id}" ) ]]; then
+        if [[ -n "${skip}" ]]; then
           check_name="$(gh_api_json_str "${node%%\"checkSuite\"*}" "name")"
           case "${check_name}" in
-            *"Attempt to resolve issue"*) continue ;;
+            *"Attempt to resolve issue"*)
+              # Fall back to the job name only when the run id cannot settle
+              # it: a check that carries a different run id is a different
+              # (real) run and must stay a constraint.
+              if [[ -z "${run_id}" || -z "${own_run_id}" || "${run_id}" == "${own_run_id}" ]]; then
+                continue
+              fi
+              ;;
           esac
         fi
         if [[ -n "${workflow}" && ",${skip}," == *",${workflow},"* ]]; then
