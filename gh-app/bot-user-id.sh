@@ -45,12 +45,22 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
 fi
 
 # Prefer an authenticated request (higher rate limit, avoids the shared-IP
-# throttling that the unauthenticated endpoint hits in CI). GH_TOKEN and
-# GITHUB_TOKEN win when present; otherwise mint an installation token from
-# app.env, the same source the rest of the toolchain uses.
-TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-if [[ -z "${TOKEN}" ]]; then
-  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+# throttling that the unauthenticated endpoint hits in CI). Try every token we
+# can get hold of - an explicit GH_TOKEN / GITHUB_TOKEN first, then an
+# installation token minted from app.env (the same source the rest of the
+# toolchain uses) - before falling back to the unauthenticated endpoint.
+# A token that is present but lacks access to this endpoint (e.g. the
+# runner's default GITHUB_TOKEN) must not block the later, working tokens.
+TOKENS=()
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  TOKENS+=("${GH_TOKEN}")
+fi
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  TOKENS+=("${GITHUB_TOKEN}")
+fi
+INSTALLED_TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+if [[ -n "${INSTALLED_TOKEN}" ]]; then
+  TOKENS+=("${INSTALLED_TOKEN}")
 fi
 
 fetch_lookup() {
@@ -68,11 +78,14 @@ fetch_lookup() {
 }
 
 LOOKUP=""
-if [[ -n "${TOKEN}" ]]; then
-  LOOKUP="$(fetch_lookup "${TOKEN}")" || true
-fi
+for TOKEN in "${TOKENS[@]}"; do
+  LOOKUP="$(fetch_lookup "${TOKEN}" 2>/dev/null || true)"
+  if [[ -n "${LOOKUP}" ]]; then
+    break
+  fi
+done
 if [[ -z "${LOOKUP}" ]]; then
-  LOOKUP="$(fetch_lookup "")" || true
+  LOOKUP="$(fetch_lookup "" 2>/dev/null || true)"
 fi
 
 ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
