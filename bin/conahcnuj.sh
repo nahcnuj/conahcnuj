@@ -1045,7 +1045,6 @@ implement() {
       echo "Skipping ${model}: provider ${provider} already exhausted its quota/billing, and no other of its models can change that." >&2
       continue
     fi
-    model_retried=0
     while true; do
       check_timeout
       now="$(date +%s)"
@@ -1108,13 +1107,9 @@ implement() {
           echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
           break
         elif [[ "${tree_changed}" == "false" ]]; then
-          if [[ "${model_retried}" -eq 0 ]]; then
-            model_retried=1
-            echo "Model ${model} produced no complete work; retrying once with the same model." >&2
-            continue
-          fi
-          echo "Model ${model} produced no complete work." >&2
-          break 2
+          echo "Model ${model} produced no complete work; retrying with the same model." >&2
+          sleep 0.1
+          continue
         else
           echo "Model ${model} produced no complete work; handing off to the next model." >&2
           break

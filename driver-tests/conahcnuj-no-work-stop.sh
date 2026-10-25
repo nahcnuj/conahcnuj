@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# conahcnuj "no complete work stops the fall-through" test (offline).
+# conahcnuj "an empty round retries the same model" test (offline).
 #
 # A round that ends normally but leaves the working tree untouched and writes no
 # .commit-msg (e.g. the model gave up after a permission prompt was declined)
-# says nothing a different model would fix: the same prompt will be declined
-# again. The driver must stop the model fall-through there instead of burning
-# the rest of the model list, and end with a bug report like any other
-# unimplemented issue.
+# says nothing a different model would fix. The driver must not move on to the
+# next model for such a non-rate-limit reason: it retries the SAME model. Only
+# when the run's time budget is exhausted does the run end (with a bug report
+# like any other unimplemented issue).
 #
-#   issue read -> branch -> implement (first: no change, no message) -> STOP
-#   (second model is never tried) -> exit 1 -> bug report
+#   issue read -> branch -> implement (no change, no message) -> retry the same
+#   model (second model is never tried) -> time budget exhausted -> exit 1 ->
+#   bug report
+#
+# The budget is 5s so the retry loop is exercised without a long wait.
 #
 # No secrets, no network.
 set -euo pipefail
@@ -36,7 +39,7 @@ git -C "${WORK}" commit -qm init
 # test proves it is not.
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
-{"number": 14, "title": "test issue that stops after no work", "body": "dummy body", "labels": [], "state": "open"}
+{"number": 14, "title": "test issue that retries the same model", "body": "dummy body", "labels": [], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"number": 25}
@@ -55,20 +58,22 @@ LOG="${ROOT}/run.log"
 RC=0
 (
   cd "${WORK}"
-  CONAHCNUJ_MAX_SECONDS=120 bash "${DRIVER}" 14 < "${TAPE}"
+  CONAHCNUJ_MAX_SECONDS=5 bash "${DRIVER}" 14 < "${TAPE}"
 ) > "${LOG}" 2>&1 || RC=$?
 
-echo "----- conahcnuj no-work-stop run log -----"
+echo "----- conahcnuj no-work retry run log -----"
 cat "${LOG}"
-echo "------------------------------------------"
+echo "-------------------------------------------"
 
 [[ ${RC} -eq 1 ]] || { echo "FAIL: driver exit code ${RC} (expected 1)"; exit 1; }
 
-grep -q "Model opencode/first produced no complete work." "${LOG}" || { echo "FAIL: the empty round was not reported"; exit 1; }
-grep -q "produced no complete work; handing off" "${LOG}" && { echo "FAIL: an empty round still claimed a handoff"; exit 1; }
+grep -q "Model opencode/first produced no complete work; retrying with the same model." "${LOG}" || { echo "FAIL: the empty round was not retried with the same model"; exit 1; }
+grep -q "produced no complete work; handing off" "${LOG}" && { echo "FAIL: an empty round still handed off to another model"; exit 1; }
+# The same model was tried more than once, so it was retried rather than skipped.
+[[ "$(grep -c "opencode: trying model opencode/first" "${LOG}")" -ge 2 ]] || { echo "FAIL: the same model was not retried"; exit 1; }
 grep -q "opencode: trying model opencode/second" "${LOG}" && { echo "FAIL: the next model was tried after an empty round"; exit 1; }
 grep -q "Model opencode/second" "${LOG}" && { echo "FAIL: the next model ran after an empty round"; exit 1; }
-grep -q "could not implement issue #14" "${LOG}" || { echo "FAIL: implementation failure was not logged"; exit 1; }
+grep -q "time budget" "${LOG}" || { echo "FAIL: the run did not end on the time budget"; exit 1; }
 grep -q "Bug report issue #25 created" "${LOG}" || { echo "FAIL: bug report issue #25 was not created"; exit 1; }
 
-echo "conahcnuj no-work stop passed"
+echo "conahcnuj no-work retry passed"

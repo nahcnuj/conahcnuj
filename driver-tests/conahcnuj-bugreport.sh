@@ -30,9 +30,9 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), create_issue (25).
-# The mocked opencode is a no-op for every model, so implement produces no
-# changes, start_issue exits 1, and the EXIT trap files the bug report (one
-# extra API call reading the created issue's number).
+# The mocked opencode fails every model, so implement produces no complete
+# work, start_issue exits 1, and the EXIT trap files the bug report (one extra
+# API call reading the created issue's number).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"number": 14, "title": "test issue that cannot be implemented", "body": "dummy body", "labels": [], "state": "open"}
@@ -45,7 +45,7 @@ export CONAHCNUJ_TEST_MODE=1
 export GH_API_TEST_MODE=1
 export OPENCODE_TEST_MODE=1
 export MOCK_OPENCODE_MODELS="opencode/first"
-export MOCK_OPENCODE_NOOP="opencode/first"
+export MOCK_OPENCODE_ERROR="opencode/first"
 export CONAHCNUJ_REPO="nahcnuj/conahcnuj"
 
 LOG="${ROOT}/run.log"

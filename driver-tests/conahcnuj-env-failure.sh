@@ -92,7 +92,7 @@ RC2=0
   CONAHCNUJ_MAX_SECONDS=120 \
     MOCK_OPENCODE_MODELS="$(printf '%s\n' plain/one plain/two)" \
     MOCK_OPENCODE_ERROR="plain/one" \
-    MOCK_OPENCODE_NOOP="plain/two" \
+    MOCK_OPENCODE_MESSAGE_ONLY="plain/two" \
     bash "${DRIVER}" 14 < "${TAPE}"
 ) > "${LOG2}" 2>&1 || RC2=$?
 
@@ -105,7 +105,7 @@ echo "---------------------------------------------------------------------"
 # A non-environment failure says nothing about the provider, so its next model
 # is still tried and nothing is diagnosed as an environment problem.
 grep -q "Model plain/one failed before completing the work; handing off to the next model" "${LOG2}" || { echo "FAIL: plain/one did not hand off"; exit 1; }
-grep -q "opencode: mock no-op for plain/two" "${LOG2}" || { echo "FAIL: plain/two did not run after a non-environment failure"; exit 1; }
+grep -q "opencode: mock message-only round for plain/two" "${LOG2}" || { echo "FAIL: plain/two did not run after a non-environment failure"; exit 1; }
 grep -q "Skipping" "${LOG2}" && { echo "FAIL: a provider was skipped on a non-environment failure"; exit 1; }
 grep -q "every model round died on an environment error" "${LOG2}" && { echo "FAIL: environment diagnosis printed although a round failed non-environmentally"; exit 1; }
 
