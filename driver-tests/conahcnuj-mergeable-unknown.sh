@@ -35,8 +35,8 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_reviews
-#   (collection: nothing open), update_pr (body sync), post_comment (the
-#   continuation comment), fetch_reviews (REVIEW_REQUIRED, no feedback),
+#   (collection: nothing open), update_pr (body sync), fetch_reviews
+#   (REVIEW_REQUIRED, no feedback),
 #   conditions (empty line -> the read failed, must be retried, never read as
 #   "no checks, mergeable"), conditions (checks SUCCESS, mergeable MERGEABLE
 #   -> passes), request_review, fetch_reviews (APPROVED -> the run ends on the
@@ -49,7 +49,6 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"A written description","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"REVIEW_REQUIRED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {}
-{"id":889}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","state":"OPEN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}

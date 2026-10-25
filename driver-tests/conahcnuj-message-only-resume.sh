@@ -46,8 +46,8 @@ git -C "${WORK}" commit -qm "mock commit from opencode/original"
 # Mocked response tape, in call order:
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (stub
 #   body -> real issue body), fetch_reviews (collection: one open thread),
-#   update_pr (body sync on the reuse path), post_comment (the PR continuation
-#   comment), fetch_reviews (CHANGES_REQUESTED with an open thread),
+#   update_pr (body sync on the reuse path), fetch_reviews
+#   (CHANGES_REQUESTED with an open thread),
 #   request_review, conditions.
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
@@ -56,7 +56,6 @@ cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":101,"body":"Please document the collected context","author":{"login":"reviewer"}}]}}]}}}}}
 {}
-{"id":889}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":12345,"body":"What is Input?","author":{"login":"reviewer"}}]}}]}}}}}
 {}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}

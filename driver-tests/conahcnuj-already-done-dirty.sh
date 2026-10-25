@@ -62,7 +62,6 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":124}}}}
-{"id":776}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF

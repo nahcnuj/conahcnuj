@@ -40,7 +40,7 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order (same shape as the resume fixture):
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (real body),
-#   fetch_reviews (collection), update_pr, post_comment, fetch_reviews
+#   fetch_reviews (collection), update_pr, fetch_reviews
 #   (CHANGES_REQUESTED with an open thread), conditions, request_review,
 #   fetch_reviews (APPROVED -> ready to merge). The run does not stop at the
 #   review request; it keeps polling and ends on the approval.
@@ -51,7 +51,6 @@ cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "Fix something", "body": "# 背景\nフィードバック対応の修正。", "labels": [{"name": "enhancement"}], "state": "open"}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":101,"body":"Please document the collected context","author":{"login":"reviewer"}}]}}]}}}}}
 {}
-{"id":889}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":12345,"body":"What is Input?","author":{"login":"reviewer"}}]}}]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}

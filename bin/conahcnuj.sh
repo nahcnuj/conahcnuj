@@ -101,7 +101,6 @@ fi
 # a "1" written into the file. Lives outside the work tree so it is never picked
 # up by `git add -A`.
 PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
-PR_CONTINUATION_COMMENTED_FILE="${PR_CONTINUATION_COMMENTED_FILE:-$(mktemp)}"
 
 # Whether the last request_review_from_owner call could confirm the reviewer
 # assignment. log_review_handoff words its final line after it, so the run log
@@ -141,12 +140,6 @@ pr_body_synced() {
 }
 pr_body_mark_synced() {
   printf '1\n' > "${PR_BODY_SYNCED_FILE}"
-}
-pr_continuation_commented() {
-  [[ "$(cat "${PR_CONTINUATION_COMMENTED_FILE}" 2>/dev/null || true)" == "1" ]]
-}
-pr_continuation_mark_commented() {
-  printf '1\n' > "${PR_CONTINUATION_COMMENTED_FILE}"
 }
 
 # --- Windows relaunch -------------------------------------------------------
@@ -1132,18 +1125,6 @@ implement() {
 
 # --- PR lifecycle -----------------------------------------------------------
 
-post_pr_continuation_comment() {
-  local owner="${1}" repo="${2}" pr="${3}"
-  if gh_api_post_comment "${owner}" "${repo}" "${pr}" "<!-- conahcnuj-continuation -->
-PR #${pr} の処理を継続するには、Issue auto-drive を手動実行してください。
-
-[継続するにはこちらをクリック](https://github.com/${owner}/${repo}/actions/workflows/issue-driver.yml/dispatch?inputs%5Bnumber%5D=${pr})" >/dev/null; then
-    return 0
-  fi
-  echo "WARNING: could not post the continuation comment for PR #${pr}." >&2
-  return 1
-}
-
 # Remove standalone closing-reference lines ("Closes #<n>", "Fixes #<n>",
 # "Resolves #<n>", also comma-separated lists) from a body and collapse the
 # blank lines the removal leaves behind, so the driver's own single
@@ -1485,12 +1466,6 @@ drive() {
     # want_draft); a reused one keeps whatever state it already had.
     if [[ "${creating}" == "true" ]]; then
       pr_draft="${want_draft}"
-    fi
-
-    if ! pr_continuation_commented; then
-      if post_pr_continuation_comment "${owner}" "${repo}" "${pr}"; then
-        pr_continuation_mark_commented
-      fi
     fi
 
     # --- TODO.md gate ---

@@ -78,7 +78,7 @@ git -C "${WORK}" commit -qm init
 
 # One JSON document per GitHub API call, in call order:
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
-#   create_pr repo-id lookup, create_pr (123) as a draft, continuation comment,
+#   create_pr repo-id lookup, create_pr (123) as a draft,
 #   body sync PATCH (second loop), ready_for_review (TODO.md gone),
 #   fetch_reviews (nothing to act on), conditions (SUCCESS), request_review,
 #   fetch_reviews (APPROVED -> the run ends on the approval, not the request).
@@ -90,7 +90,6 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":123}}}}
-{"id":776}
 {}
 {}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}

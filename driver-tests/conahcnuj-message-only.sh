@@ -32,7 +32,7 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
-#   repo id, create_pr (126), continuation comment, fetch_reviews
+#   repo id, create_pr (126), fetch_reviews
 #   (REVIEW_REQUIRED, nothing to act on), conditions (SUCCESS|MERGEABLE),
 #   request_review, body sync PATCH, fetch_reviews (APPROVED -> ready to
 #   merge). Reviews are read before the constraints poll (#219); the fresh PR
@@ -46,7 +46,6 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":126}}}}
-{"id":776}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}

@@ -522,7 +522,7 @@ gh_api_review_summary() {
   # Issue-level comments.
   local comments_part comment_matches bn
   comments_part="$(printf '%s' "${json}" | sed 's/"reviewThreads":.*//' | sed -n 's/.*"comments":{"nodes":\(\[[^]]*\]\).*/\1/p')"
-  comment_matches="$(printf '%s' "${comments_part}" | grep -oE '"body":"[^"]*"' | grep -v '"body":"<!-- conahcnuj-continuation -->' || true)"
+  comment_matches="$(printf '%s' "${comments_part}" | grep -oE '"body":"[^"]*"' || true)"
   if [[ -n "${comment_matches}" ]]; then
     echo "COMMENTS:"
   fi
@@ -598,7 +598,7 @@ gh_api_format_unresolved_threads() {
 # like fresh reviewer feedback (the driver would answer its own answer forever).
 gh_api_review_fingerprint() {
   local raw="${1}" matches="" decision=""
-  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '\[bot\]' | grep -v '"body":"<!-- conahcnuj-continuation -->' || true)"
+  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '\[bot\]' || true)"
   if [[ -z "${matches}" ]]; then
     # Only a decision that means "do work now" counts as feedback on its own;
     # REVIEW_REQUIRED / empty just mean "waiting for reviewers".
@@ -783,7 +783,7 @@ gh_api_requested_reviewers() {
   return 0
 }
 
-# Post a PR/issue comment. Args: owner repo pr body  (output: comment id)
+# Post a PR/issue comment. Args: owner repo number body  (output: comment id)
 gh_api_post_comment() {
   local owner="${1}" repo="${2}" number="${3}" body="${4}"
   local payload

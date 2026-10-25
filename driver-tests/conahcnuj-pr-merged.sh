@@ -8,7 +8,7 @@
 # instead of polling until its time budget runs out and it files a bug report.
 #
 #   PR #15 state read -> head branch checked out -> collected context
-#   (nothing open) -> PR body sync -> continuation comment -> conditions
+#   (nothing open) -> PR body sync -> conditions
 #   (PR already merged) -> stop, exit 0
 #
 # No secrets, no network.
@@ -33,8 +33,8 @@ git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_reviews
-#   (collection: nothing open), update_pr (body sync), continuation comment,
-#   fetch_reviews (nothing actionable), conditions (PR merged). Reviews are read
+#   (collection: nothing open), update_pr (body sync), fetch_reviews
+#   (nothing actionable), conditions (PR merged). Reviews are read
 #   before the constraints poll (#219), so the review phase sees no feedback and
 #   falls through to the poll that recognises the merge.
 TAPE="${ROOT}/tape.txt"
@@ -43,7 +43,6 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"number":15,"state":"OPEN","title":"Fix something","body":"# 背景\nPR が merge されたあとにもドライバがループしないこと。","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"APPROVED","headRefName":"feature/fix-10","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","closingIssuesReferences":{"nodes":[{"number":10}]}}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {}
-{"id":889}
 {"data":{"repository":{"pullRequest":{"reviewDecision":null,"reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","state":"MERGED","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF

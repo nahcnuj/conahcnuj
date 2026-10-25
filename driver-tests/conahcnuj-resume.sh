@@ -44,8 +44,8 @@ git -C "${WORK}" commit -qm init
 # Mocked response tape, in call order:
 #   fetch_issue (auto-detect: PR input), fetch_pr_state, fetch_issue (stub
 #   body -> real issue body), fetch_reviews (collection: one open thread, one
-#   resolved), update_pr (body sync on the reuse path), post_comment (the PR
-#   continuation comment), fetch_reviews (CHANGES_REQUESTED with an open
+#   resolved), update_pr (body sync on the reuse path), fetch_reviews
+#   (CHANGES_REQUESTED with an open
 #   thread), conditions, request_review, fetch_reviews (APPROVED -> the run
 #   ends on the approval, not the request). The feedback is read (and
 #   addressed) before the constraints poll: known feedback must not wait on CI
@@ -62,7 +62,6 @@ cat > "${TAPE}" <<'EOF'
 {"number": 10, "title": "Fix something", "body": "# 背景\nPR を引き継いで再開できるようにする。", "labels": [{"name": "enhancement"}], "state": "open"}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":101,"body":"Please document the collected context","author":{"login":"reviewer"}}]}},{"isResolved":true,"comments":{"nodes":[{"databaseId":102,"body":"Already settled thread","author":{"login":"reviewer"}}]}}]}}}}}
 {}
-{"id":889}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":12345,"body":"What is Input?","author":{"login":"reviewer"}}]}}]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}
