@@ -356,8 +356,8 @@ if [[ ${#DELETE_PATHS[@]} -gt 0 ]]; then
     done
     DELETE_PATHS=("${FILTERED_DELETE_PATHS[@]+"${FILTERED_DELETE_PATHS[@]}"}")
     if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-      git fetch origin "${BRANCH}" >/dev/null
-      git reset --hard "origin/${BRANCH}" >/dev/null
+      git fetch -q origin "${BRANCH}" >/dev/null
+      git reset -q --hard "origin/${BRANCH}" >/dev/null
       exit 0
     fi
   fi
@@ -408,5 +408,5 @@ fi
 if [[ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null)" ]]; then
   git merge --quit
 fi
-git fetch origin "${BRANCH}" >/dev/null 2>&1
-git reset --hard "origin/${BRANCH}" >/dev/null 2>&1
+git fetch -q origin "${BRANCH}" >/dev/null
+git reset -q --hard "origin/${BRANCH}" >/dev/null

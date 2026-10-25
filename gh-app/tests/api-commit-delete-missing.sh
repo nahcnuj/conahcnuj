@@ -76,10 +76,11 @@ RC=0
     bash "${PRIV}/gh-app/api-commit.sh" o/r feature -m "remove gone, add added"
 ) > "${OUT}" 2>&1 || RC=$?
 
-
 [[ ${RC} -eq 0 ]] || { echo "FAIL: api-commit.sh exited ${RC} (expected 0) for an already-absent deletion" >&2; exit 1; }
-if grep -qE 'WARNING|skipping deletion' "${OUT}"; then
-  echo "FAIL: an already-absent deletion was reported (silence is golden)" >&2; exit 1
+if [[ -s "${OUT}" ]]; then
+  echo "FAIL: api-commit.sh was not silent on success:" >&2
+  cat "${OUT}" >&2
+  exit 1
 fi
 if grep -q 'gone\.txt' "${CAPTURE}"; then
   echo "FAIL: the already-absent deletion was still sent to createCommitOnBranch" >&2; exit 1
