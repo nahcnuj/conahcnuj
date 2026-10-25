@@ -83,8 +83,9 @@ tracked の作業ツリー変更をまとめるなら `git vc -m "<message>" -a`
 （`git commit` / `git commit -a` と収集内容は同じ）。`api-commit.sh` の直接実行は
 プラグインの `tool.execute.before` がブロックし、`git vc` へ誘導する。
 リモートに無いブランチ（`git switch -c <branch>` で作った直後など）は
-デフォルトブランチ起点で自動作成されるので、`git vc` に `--create-branch` のような
-`git commit` には無いオプションを足す必要はない。
+自動作成される（ローカル HEAD がリモートにあればその HEAD を起点にしてローカルの
+コミットを保持し、無ければデフォルトブランチ起点）ので、`git vc` に
+`--create-branch` のような `git commit` には無いオプションを足す必要はない。
 
 `gh-app/api-commit.sh` は GitHub GraphQL の `createCommitOnBranch` を使い、ブランチに
 **Verified 署名のついたコミット**を 1 件作成する。コミットは GitHub 側が作成するため、

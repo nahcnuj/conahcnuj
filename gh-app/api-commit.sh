@@ -316,30 +316,75 @@ fi
 TOKEN="$(bash "${DIR}/get-token.sh")"
 API="${API_BASE}/repos/${REPO}"
 
-# 2) Current HEAD sha of the branch (|| true: a missing branch must fall
-#    through to the branch-creation handling instead of tripping set -e).
-HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
-HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
+# Read the current head SHA of BRANCH, or print nothing when it does not exist.
+# The `|| true` keeps a 404 (missing branch) from tripping set -e.
+branch_head_sha() {
+  curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" \
+    "${API}/git/refs/heads/${BRANCH}" 2>/dev/null |
+    tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p' || true
+}
+
+# 2) Current HEAD sha of the branch.
+HEAD_SHA="$(branch_head_sha)"
 if [[ -z "${HEAD_SHA}" ]]; then
-  # 2b) The remote does not have the branch yet. Create the ref from the default
-  #     branch head (no commits pushed), the same thing a first
-  #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
-  #     followed by a commit needs no extra option.
+  # 2b) The remote does not have the branch yet. Create the ref. Prefer basing
+  #     it on the local HEAD when that commit already exists on the remote, so
+  #     commits already present locally (a resumed, renamed, or agent-created
+  #     branch) are preserved instead of being discarded by the sync below.
+  #     Fall back to the default branch tip otherwise (the ordinary
+  #     `git switch -c <branch>` + commit workflow, where local HEAD is the
+  #     default tip and no commits exist yet).
+  LOCAL_HEAD="$(git rev-parse HEAD 2>/dev/null || true)"
   DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
     exit 1
   fi
-  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
-  BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
-  if [[ -z "${BASE_SHA}" ]]; then
+  DEFAULT_TIP_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
+  DEFAULT_TIP="$(printf '%s' "${DEFAULT_TIP_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
+  if [[ -z "${DEFAULT_TIP}" ]]; then
     echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
     exit 1
   fi
-  BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
-  echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
-  HEAD_SHA="${BASE_SHA}"
+  # Candidate base SHAs, in preference order. The local HEAD is only a separate
+  # candidate when it differs from the default tip; otherwise it is the same
+  # commit and must be reported as the default-branch case.
+  CANDIDATE_BASES=()
+  if [[ -n "${LOCAL_HEAD}" && "${LOCAL_HEAD}" != "${DEFAULT_TIP}" ]]; then
+    CANDIDATE_BASES+=( "${LOCAL_HEAD}" )
+  fi
+  CANDIDATE_BASES+=( "${DEFAULT_TIP}" )
+  CREATED_BASE=""
+  USED_LOCAL_HEAD=false
+  for BASE_SHA in "${CANDIDATE_BASES[@]}"; do
+    BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
+    if curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null 2>&1; then
+      CREATED_BASE="${BASE_SHA}"
+      if [[ -n "${LOCAL_HEAD}" && "${LOCAL_HEAD}" != "${DEFAULT_TIP}" && "${BASE_SHA}" == "${LOCAL_HEAD}" ]]; then
+        USED_LOCAL_HEAD=true
+      fi
+      break
+    fi
+  done
+  if [[ -z "${CREATED_BASE}" ]]; then
+    # The ref may have appeared between the read and the create (another writer,
+    # or a branch the driver just created that the read did not see yet). Re-read
+    # before failing so a transient race does not abort a successful run.
+    HEAD_SHA="$(branch_head_sha)"
+    if [[ -z "${HEAD_SHA}" ]]; then
+      echo "ERROR: cannot create branch ${BRANCH}" >&2
+      exit 1
+    fi
+    echo "Branch ${BRANCH} already exists; using it." >&2
+  else
+    BASE_SHA="${CREATED_BASE}"
+    if [[ "${USED_LOCAL_HEAD}" == true ]]; then
+      echo "Created branch ${BRANCH} from local HEAD" >&2
+    else
+      echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
+    fi
+    HEAD_SHA="${BASE_SHA}"
+  fi
 fi
 
 ADD_LIST="$(IFS=,; echo "${ADDITIONS[*]}")"

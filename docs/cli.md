@@ -94,8 +94,11 @@ bash gh-app/api-commit.sh <branch> -m "<メッセージ>"       # owner/repo は
 bash gh-app/api-commit.sh --dry-run                       # API を呼ばず収集結果のみ表示
 ```
 
-リモートに無いブランチは**デフォルトブランチ起点で自動作成**されます（`git push -u` の
-初回と同じ）。`git switch -c <branch>` でブランチを作り、そのまま
+リモートに無いブランチは自動作成されます。ローカルの HEAD がリモートに既にある
+コミット（再開・改名したブランチや、エージェントがローカルで作ったブランチなど）なら
+**その HEAD を起点**にしてローカルのコミットを保持します。無ければ
+**デフォルトブランチ起点**で作ります（`git push -u` の初回と同じ）。どちらの場合も
+`git switch -c <branch>` でブランチを作り、そのまま
 `git vc -m "<メッセージ>"` する普通のフローでコミットできます。
 
 ### オプション
@@ -137,15 +140,18 @@ trailer としてコミット本文末尾に追加します（本文に既に `C
 - `--dry-run` の stdout: `Owner/Repo:` / `Branch:` / `Message:` / `Additions:` /
   `Deletions:` のレポート
 - stderr: `Created branch <branch> from <default>`（リモートに無いブランチを
-  自動作成したとき）、エラー理由
+  デフォルトブランチ起点で自動作成したとき）または
+  `Created branch <branch> from local HEAD`（ローカル HEAD を起点にしたとき）、
+  エラー理由
 - 作者（author）は App の bot、committer は GitHub
 
 ### 前提
 
 - ネットワーク + 有効なトークン（`--dry-run` は不要）
 - 収集内容が 0 件なら `ERROR: nothing to commit ...` で exit 1
-- リモートに無いブランチはデフォルトブランチ起点で自動作成され、
-  その上にコミットが 1 件乗ります（unsigned コミットを経由しない）
+- リモートに無いブランチは、ローカル HEAD がリモートにあればそれを起点に、
+  無ければデフォルトブランチ起点で自動作成され、その上にコミットが 1 件乗ります
+  （unsigned コミットを経由しない）
 
 ## 関連ページ
 
