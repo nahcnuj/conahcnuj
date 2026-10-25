@@ -59,20 +59,20 @@ fetch_lookup() {
     curl -fsSL \
       -H "Authorization: Bearer ${auth}" \
       -H "Accept: application/vnd.github+json" \
-      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true
+      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null
   else
     curl -fsSL \
       -H "Accept: application/vnd.github+json" \
-      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true
+      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null
   fi
 }
 
 LOOKUP=""
 if [[ -n "${TOKEN}" ]]; then
-  LOOKUP="$(fetch_lookup "${TOKEN}")"
+  LOOKUP="$(fetch_lookup "${TOKEN}")" || true
 fi
 if [[ -z "${LOOKUP}" ]]; then
-  LOOKUP="$(fetch_lookup "")"
+  LOOKUP="$(fetch_lookup "")" || true
 fi
 
 ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
