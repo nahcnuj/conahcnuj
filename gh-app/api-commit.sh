@@ -356,8 +356,8 @@ if [[ ${#DELETE_PATHS[@]} -gt 0 ]]; then
     done
     DELETE_PATHS=("${FILTERED_DELETE_PATHS[@]+"${FILTERED_DELETE_PATHS[@]}"}")
     if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-      git fetch origin "${BRANCH}" >/dev/null 2>&1 || true
-      git reset --hard "origin/${BRANCH}" >/dev/null 2>&1 || true
+      git fetch origin "${BRANCH}" >/dev/null
+      git reset --hard "origin/${BRANCH}" >/dev/null
       exit 0
     fi
   fi

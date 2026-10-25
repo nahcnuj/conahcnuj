@@ -77,13 +77,12 @@ RC=0
 ) > "${OUT}" 2>&1 || RC=$?
 
 
-[[ ${RC} -eq 0 ]] || { echo "FAIL: api-commit.sh exited ${RC} (expected 0) for an already-absent deletion"; exit 1; }
+[[ ${RC} -eq 0 ]] || { echo "FAIL: api-commit.sh exited ${RC} (expected 0) for an already-absent deletion" >&2; exit 1; }
 if grep -qE 'WARNING|skipping deletion' "${OUT}"; then
-  echo "FAIL: an already-absent deletion was reported (silence is golden)"; exit 1
+  echo "FAIL: an already-absent deletion was reported (silence is golden)" >&2; exit 1
 fi
 if grep -q 'gone\.txt' "${CAPTURE}"; then
-  echo "FAIL: the already-absent deletion was still sent to createCommitOnBranch"; exit 1
+  echo "FAIL: the already-absent deletion was still sent to createCommitOnBranch" >&2; exit 1
 fi
-grep -q 'added\.txt' "${CAPTURE}" || { echo "FAIL: the addition was dropped along with the deletion"; exit 1; }
+grep -q 'added\.txt' "${CAPTURE}" || { echo "FAIL: the addition was dropped along with the deletion" >&2; exit 1; }
 
-echo "PASS api-commit.sh skips a deletion already absent from the remote head"
