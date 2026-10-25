@@ -342,36 +342,20 @@ if [[ -z "${HEAD_SHA}" ]]; then
   HEAD_SHA="${BASE_SHA}"
 fi
 
-# Drop deletion paths that the remote HEAD does not contain. createCommitOnBranch
-# rejects a deletion of a path that is absent from the base commit, which used
-# to abort the whole commit and kill the run: the local checkout can be stale
-# (the branch advanced after it was checked out) so a file that still exists
-# locally is already gone from the remote head. Such a deletion is already
-# satisfied, so skip it instead of failing. The tree is read from the same
-# HEAD_SHA the commit is based on. If the tree cannot be read (or is truncated
-# for a very large repository), keep every path and let the API report a real
-# mistake.
 if [[ ${#DELETE_PATHS[@]} -gt 0 ]]; then
   TREE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/trees/${HEAD_SHA}?recursive=1" || true)"
   if [[ -z "${TREE_JSON}" ]] || printf '%s' "${TREE_JSON}" | grep -qE '"truncated"[[:space:]]*:[[:space:]]*true'; then
     echo "WARNING: could not read a complete tree for ${HEAD_SHA}; keeping every deletion." >&2
   else
-    # Normalise the one place REST pretty-printing inserts whitespace (after
-    # the path key's colon) so a fixed-string match still works, while keeping
-    # spaces that are part of a filename.
     TREE_PATHS="$(printf '%s' "${TREE_JSON}" | sed 's/"path"[[:space:]]*:[[:space:]]*"/"path":"/g' | tr -d '\n\t')"
     FILTERED_DELETE_PATHS=()
     for dp in "${DELETE_PATHS[@]}"; do
       if printf '%s' "${TREE_PATHS}" | grep -qF "\"path\":\"$(json_escape "${dp}")\""; then
         FILTERED_DELETE_PATHS+=( "${dp}" )
-      else
-        : # deletion already satisfied on the remote head; skip silently
       fi
     done
     DELETE_PATHS=("${FILTERED_DELETE_PATHS[@]+"${FILTERED_DELETE_PATHS[@]}"}")
     if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-      # Every requested deletion was already absent from the remote head, so
-      # there is nothing left to commit. Treat as success rather than failure.
       git fetch origin "${BRANCH}" >/dev/null 2>&1 || true
       git reset --hard "origin/${BRANCH}" >/dev/null 2>&1 || true
       exit 0
