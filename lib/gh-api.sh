@@ -406,18 +406,26 @@ CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approv
 # not be enumerated) cannot be filtered, so its own aggregate "state" is trusted
 # as-is; an empty result means "no checks at all", which the caller reads as
 # SUCCESS.
+gh_api_rollup_own_state() {
+  local json="${1}" rest
+  rest="$(printf '%s' "${json}" | sed 's/.*"statusCheckRollup"[[:space:]]*:[[:space:]]*//')"
+  [[ "${rest}" != "${json}" ]] || return 0
+  [[ "${rest}" == \{* ]] || return 0
+  gh_api_json_str "${rest}" "state"
+}
+
 gh_api_rollup_state() {
   local skip="${1:-}" json contexts node type state status conclusion workflow result="" pending="false"
 
-  json="$(cat)"
+  json="$(gh_api_read_line)"
   if [[ "${json}" != *'"contexts"'* ]]; then
-    printf '%s' "${json}" | sed -n 's/.*"statusCheckRollup"[[:space:]]*:[[:space:]]*{[[:space:]]*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
+    gh_api_rollup_own_state "${json}"
     return 0
   fi
   # More contexts than one page holds: the aggregate would be computed from an
   # incomplete list, so trust the rollup's own state instead of guessing.
   if printf '%s' "${json}" | grep -q '"contexts":{"nodes":\[.*\],"pageInfo":{"hasNextPage":true}'; then
-    printf '%s' "${json}" | sed -n 's/.*"statusCheckRollup"[[:space:]]*:[[:space:]]*{[[:space:]]*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
+    gh_api_rollup_own_state "${json}"
     return 0
   fi
   # Every context is a flat object, so the only "},{" inside the array separates
