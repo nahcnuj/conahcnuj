@@ -321,10 +321,7 @@ API="${API_BASE}/repos/${REPO}"
 HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
 HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
 if [[ -z "${HEAD_SHA}" ]]; then
-  # 2b) The remote does not have the branch yet. Create the ref from the default
-  #     branch head (no commits pushed), the same thing a first
-  #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
-  #     followed by a commit needs no extra option.
+  # 2b) Remote lacks the branch: create the ref from the default branch head.
   DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
@@ -398,13 +395,8 @@ if [[ -z "${COMMIT_SHA}" ]]; then
   exit 1
 fi
 
-# Sync the local checkout to the commit just created. `git pull` refuses while a
-# merge is in progress ("You have not concluded your merge (MERGE_HEAD exists)")
-# even though the resolved content is already in the commit GitHub created, which
-# turned a successful commit into a reported failure (issue #250). The caller
-# resolved the branch conflict in the work tree and staged it, so forget the
-# merge - the index and work tree stay put - and let the fast-forward pull
-# conclude it, exactly as an ordinary commit would.
+# Sync local checkout to the commit just created. Drop an in-progress merge
+# first (issue #250); then fast-forward.
 if [[ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null)" ]]; then
   git merge --quit
 fi
