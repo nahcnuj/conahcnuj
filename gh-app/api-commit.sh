@@ -426,6 +426,3 @@ if [[ -f "$(git rev-parse --git-path MERGE_HEAD 2>/dev/null)" ]]; then
 fi
 git fetch origin "${BRANCH}" >/dev/null 2>&1 || true
 git reset --hard "origin/${BRANCH}" >/dev/null 2>&1 || true
-
-# Success is silent: callers (and `git vc`) must not see any stdout on a
-# successful commit; failures already went to stderr above.
