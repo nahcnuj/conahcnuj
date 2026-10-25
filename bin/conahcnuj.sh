@@ -1034,8 +1034,6 @@ implement() {
     [[ -z "${model}" ]] && continue
     check_timeout
     provider="${model%%/*}"
-    # A model a previous round (this run or a past one) proved gone is not even
-    # tried: no round, no error in the log.
     if is_missing_model "${model}"; then
       continue
     fi
@@ -1047,79 +1045,82 @@ implement() {
       echo "Skipping ${model}: provider ${provider} already exhausted its quota/billing, and no other of its models can change that." >&2
       continue
     fi
-    now="$(date +%s)"
-    run_timeout=$((MAX_DURATION - (now - START_TIME) - 30))
-    (( run_timeout > 0 )) || run_timeout=1
-    if [[ -n "${OPENCODE_SESSION_ID}" ]]; then
-      echo "Handing off session ${OPENCODE_SESSION_ID} from ${previous_model} to ${model}." >&2
-      OPENCODE_HANDOFFS="${OPENCODE_HANDOFFS}${previous_model}->${model} "
-    elif [[ -n "${previous_model}" ]]; then
-      echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
-    fi
-    run_failed="false"
-    if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
-      run_failed="true"
-    fi
-    OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
-    wrote_message="false"
-    if [[ -s "${workdir}/.commit-msg" ]]; then
-      wrote_message="true"
-    fi
-    tree_changed="false"
-    if workdir_changed "${workdir}"; then
-      tree_changed="true"
-    fi
-    if [[ "${tree_changed}" == "true" && "${wrote_message}" == "true" ]]; then
-      echo "Model ${model} completed the work." >&2
-      OPENCODE_LAST_MODEL="${model}"
-      return 0
-    fi
-    # In a round where a message can be the whole deliverable (the feedback
-    # round, which passes the base branch), a model can finish with just a
-    # .commit-msg because there is nothing left to change: the branch already
-    # carries the implementation (a resumed PR, or a later round on an
-    # implemented branch). Accept it and let the run move on instead of handing
-    # the finished work to the next model. Skipping such a model has churned
-    # through models and let a weaker one commit junk onto the branch, which is
-    # what issue #273 reported. The .commit-msg is metadata, never committed, so
-    # it is cleaned up here.
-    if [[ "${wrote_message}" == "true" ]] && branch_has_commits "" "${base_branch}"; then
-      rm -f "${workdir}/.commit-msg"
-      echo "Model ${model} wrote .commit-msg and left the tree as it was; the branch already carries the implementation, so the round is complete." >&2
-      OPENCODE_LAST_MODEL="${model}"
-      return 0
-    fi
-    rm -f "${workdir}/.commit-msg"
-    previous_model="${model}"
-    if [[ "${run_failed}" == "true" ]]; then
-      failed_rounds=$((failed_rounds + 1))
-      if [[ "${OPENCODE_ROUND_MODEL_GONE}" == "true" ]]; then
-        persist_missing_model "${model}"
-        echo "Model ${model} failed before completing the work: the model itself is gone (deprecated / removed / unavailable); remembering it as unavailable and skipping it from now on." >&2
-      elif [[ "${OPENCODE_ROUND_QUOTA_EXHAUSTED}" == "true" ]]; then
-        quota_failed_rounds=$((quota_failed_rounds + 1))
-        quota_providers="${quota_providers} ${provider}"
-        echo "Model ${model} failed before completing the work: provider quota/billing exhausted; giving up on provider ${provider} for the rest of this run." >&2
-      elif [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
-        env_failed_rounds=$((env_failed_rounds + 1))
-        dead_providers="${dead_providers} ${provider}"
-        echo "Model ${model} failed before completing the work: environment error (provider unreachable or credentials rejected); giving up on provider ${provider} for the rest of this run." >&2
-      elif [[ "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]; then
-        echo "Model ${model} hit a rate limit; trying the next model without waiting for the retry." >&2
-      else
-        echo "Model ${model} failed before completing the work; handing off to the next model." >&2
+    model_retried=0
+    while true; do
+      check_timeout
+      now="$(date +%s)"
+      run_timeout=$((MAX_DURATION - (now - START_TIME) - 30))
+      (( run_timeout > 0 )) || run_timeout=1
+      if [[ -n "${OPENCODE_SESSION_ID}" && "${previous_model}" != "${model}" ]]; then
+        echo "Handing off session ${OPENCODE_SESSION_ID} from ${previous_model} to ${model}." >&2
+        OPENCODE_HANDOFFS="${OPENCODE_HANDOFFS}${previous_model}->${model} "
+      elif [[ -n "${previous_model}" && "${previous_model}" != "${model}" && -z "${OPENCODE_SESSION_ID}" ]]; then
+        echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
       fi
-    else
-      ran_without_failure=$((ran_without_failure + 1))
-      if [[ "${wrote_message}" == "true" ]]; then
-        echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
-      elif [[ "${tree_changed}" == "false" ]]; then
-        echo "Model ${model} produced no complete work." >&2
+      run_failed="false"
+      if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
+        run_failed="true"
+      fi
+      OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
+      wrote_message="false"
+      if [[ -s "${workdir}/.commit-msg" ]]; then
+        wrote_message="true"
+      fi
+      tree_changed="false"
+      if workdir_changed "${workdir}"; then
+        tree_changed="true"
+      fi
+      if [[ "${tree_changed}" == "true" && "${wrote_message}" == "true" ]]; then
+        echo "Model ${model} completed the work." >&2
+        OPENCODE_LAST_MODEL="${model}"
+        return 0
+      fi
+      if [[ "${wrote_message}" == "true" ]] && branch_has_commits "" "${base_branch}"; then
+        rm -f "${workdir}/.commit-msg"
+        echo "Model ${model} wrote .commit-msg and left the tree as it was; the branch already carries the implementation, so the round is complete." >&2
+        OPENCODE_LAST_MODEL="${model}"
+        return 0
+      fi
+      rm -f "${workdir}/.commit-msg"
+      previous_model="${model}"
+      if [[ "${run_failed}" == "true" ]]; then
+        failed_rounds=$((failed_rounds + 1))
+        if [[ "${OPENCODE_ROUND_MODEL_GONE}" == "true" ]]; then
+          persist_missing_model "${model}"
+          echo "Model ${model} failed before completing the work: the model itself is gone (deprecated / removed / unavailable); remembering it as unavailable and skipping it from now on." >&2
+        elif [[ "${OPENCODE_ROUND_QUOTA_EXHAUSTED}" == "true" ]]; then
+          quota_failed_rounds=$((quota_failed_rounds + 1))
+          quota_providers="${quota_providers} ${provider}"
+          echo "Model ${model} failed before completing the work: provider quota/billing exhausted; giving up on provider ${provider} for the rest of this run." >&2
+        elif [[ "${OPENCODE_ROUND_ENVIRONMENT}" == "true" ]]; then
+          env_failed_rounds=$((env_failed_rounds + 1))
+          dead_providers="${dead_providers} ${provider}"
+          echo "Model ${model} failed before completing the work: environment error (provider unreachable or credentials rejected); giving up on provider ${provider} for the rest of this run." >&2
+        elif [[ "${OPENCODE_ROUND_RATE_LIMITED}" == "true" ]]; then
+          echo "Model ${model} hit a rate limit; trying the next model without waiting for the retry." >&2
+        else
+          echo "Model ${model} failed before completing the work; handing off to the next model." >&2
+        fi
         break
       else
-        echo "Model ${model} produced no complete work; handing off to the next model." >&2
+        ran_without_failure=$((ran_without_failure + 1))
+        if [[ "${wrote_message}" == "true" ]]; then
+          echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
+          break
+        elif [[ "${tree_changed}" == "false" ]]; then
+          if [[ "${model_retried}" -eq 0 ]]; then
+            model_retried=1
+            echo "Model ${model} produced no complete work; retrying once with the same model." >&2
+            continue
+          fi
+          echo "Model ${model} produced no complete work." >&2
+          break 2
+        else
+          echo "Model ${model} produced no complete work; handing off to the next model." >&2
+          break
+        fi
       fi
-    fi
+    done
   done
   echo "ERROR: no available model completed the work (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
   if [[ "${failed_rounds}" -gt 0 && "$((env_failed_rounds + quota_failed_rounds))" -eq "${failed_rounds}" && "${ran_without_failure}" -eq 0 ]]; then
