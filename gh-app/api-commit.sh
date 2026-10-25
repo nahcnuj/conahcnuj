@@ -136,15 +136,24 @@ fi
 # JSON/GraphQL-escape a string (backslashes first, then double quotes).
 # Newlines become \n so a multi-line commit body survives the query string.
 json_escape() {
-  printf '%s' "${1}" | awk '
-    BEGIN { ORS = "" }
-    {
-      if (NR > 1) printf "\\n"
-      gsub(/\\/, "\\\\")
-      gsub(/"/, "\\\"")
-      printf "%s", $0
-    }
-  '
+  printf '%s' "${1}" |
+    sed 's/\\/\\\\/g; s/"/\\"/g' |
+    awk '
+      BEGIN {
+        ORS = ""
+        ctl[""] = 0
+        for (i = 1; i < 32; i++) ctl[sprintf("%c", i)] = i
+        ctl[sprintf("%c", 127)] = 127
+      }
+      NR > 1 { printf "\\n" }
+      {
+        n = length($0)
+        for (i = 1; i <= n; i++) {
+          c = substr($0, i, 1)
+          if (c in ctl) printf "\\u%04x", ctl[c]
+          else printf "%s", c
+        }
+      }'
 }
 
 # Collapse CONAHCNUJ_COMMIT_MODEL into one trailer value, or empty when unset.

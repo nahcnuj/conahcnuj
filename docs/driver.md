@@ -163,7 +163,9 @@ fingerprint から除外されるため、新規の reviewer 意見と誤認さ�
 
 opencode の JSON イベントは実行中に整形して stderr へ出て、そのままドライバの
 実行ログになります（整形は省略をしない＝モデルが書いた行もコマンドが出した行も
-全文）。表示量は `CONAHCNUJ_OPENCODE_LOG_LEVEL` で調整します。バグ報告 issue には
+全文）。コマンド実行は成功を `✅`、失敗を `❌️` で示し、ツールのタイムアウトで
+打ち切られたコマンドは成功にせず `❌️ <command> (timed out)` と表示します。
+表示量は `CONAHCNUJ_OPENCODE_LOG_LEVEL` で調整します。バグ報告 issue には
 このログの末尾が添付されます。
 
 この実行ログは週次で `weekly-self-improvement.yml` が解析し、次の週の改善 issue

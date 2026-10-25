@@ -160,6 +160,61 @@ test_tool_failure_exit_code() {
   echo "render tool failure passed"
 }
 
+test_tool_timeout_is_failure() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # opencode kills a command at its timeout and reports the call as completed
+  # with no exit code; the <shell_metadata> block it appends to the output is
+  # the only tell. A timed-out command is not a success (#420).
+  out="$(cat <<'EOF' |
+{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"bash driver-tests/run.sh"},"output":"(no output)\n\n<shell_metadata>\nshell tool terminated command after exceeding timeout 120000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.\n</shell_metadata>\n","metadata":{"output":"(no output)\n\n<shell_metadata>\nshell tool terminated command after exceeding timeout 120000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.\n</shell_metadata>\n","truncated":false},"title":"bash driver-tests/run.sh"}}}
+EOF
+    bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  assert_contains "${out}" "shell tool terminated command after exceeding timeout" "timeout reason kept in the feed"
+  assert_contains "${out}" "❌️ bash driver-tests/run.sh (timed out)" "timed-out command is a failure"
+  assert_not_contains "${out}" "✅ bash driver-tests/run.sh" "timed-out command is not a success"
+  rm -rf "${tmp}"
+  echo "render tool timeout passed"
+}
+
+test_tool_no_output_sentinel_suppressed() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  out="$(printf '%s\n' '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"true"},"output":"(no output)","metadata":{"exit":0},"title":"true"}}}' |
+    bash "${RENDER}" --model "m" --dir "${tmp}/repo}")"
+  assert_not_contains "${out}" "(no output)" "sentinel is not a real no-op output"
+  assert_contains "${out}" "✅ true" "empty command still succeeds"
+  rm -rf "${tmp}"
+  echo "render tool no-output sentinel passed"
+}
+
+test_tool_no_output_real_print_kept() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  out="$(printf '%s\n' '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"echo"},"output":"(no output)\n","metadata":{"exit":0},"title":"echo"}}}' |
+    bash "${RENDER}" --model "m" --dir "${tmp}/repo}")"
+  assert_contains "${out}" "  (no output)" "real (no output) print is kept"
+  rm -rf "${tmp}"
+  echo "render tool real no-output kept"
+}
+
+test_tool_no_output_after_real_output_kept() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # "(no output)" as the final line of real multi-line output (no trailing
+  # newline) is not the sentinel: only the first line can be, so it must stay.
+  out="$(printf '%s\n' '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"printf"},"output":"one\n(no output)","metadata":{"exit":0},"title":"printf"}}}' |
+    bash "${RENDER}" --model "m" --dir "${tmp}/repo}")"
+  assert_contains "${out}" "  one" "real output before (no output) kept"
+  assert_contains "${out}" "  (no output)" "real trailing (no output) kept"
+  rm -rf "${tmp}"
+  echo "render tool no-output after real output passed"
+}
+
 test_tool_error_status() {
   local tmp out
   tmp="$(mktemp -d)"
@@ -501,6 +556,10 @@ test_model_label_file_wins
 test_text_and_reasoning
 test_tool_success
 test_tool_failure_exit_code
+test_tool_timeout_is_failure
+test_tool_no_output_sentinel_suppressed
+test_tool_no_output_real_print_kept
+test_tool_no_output_after_real_output_kept
 test_tool_error_status
 test_tool_title_fallback
 test_tool_read_reports_in_one_line

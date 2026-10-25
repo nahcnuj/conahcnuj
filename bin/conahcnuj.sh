@@ -405,6 +405,24 @@ apply_driver_commit_model() {
   fi
 }
 
+# Make an external text stream safe to hold in a bash variable and embed in a
+# JSON string. NUL bytes are dropped (bash cannot keep them and silently drops
+# them from command substitutions while corrupting the surrounding bytes), and
+# invalid UTF-8 is removed too: a UTF-16 encoded file (a BOM plus NUL-separated
+# ASCII) becomes invalid UTF-8 once the NULs are stripped, and a raw invalid
+# byte in a title/body makes GitHub answer 400 "Problems parsing JSON", losing
+# the whole API call. The same sanitizer runs for the agent's commit message
+# and for the captured run log in the bug report.
+sanitize_text() {
+  if command -v iconv >/dev/null 2>&1; then
+    iconv -c -f UTF-8 -t UTF-8 2>/dev/null || cat
+  else
+    # No iconv: keep ASCII and drop every other byte so the request still
+    # parses. Losing non-ASCII text beats losing the API call.
+    LC_ALL=C tr -d '\200-\377'
+  fi
+}
+
 # Commit every working-tree change as a Verified commit, then sync the local
 # branch to the remote head api-commit.sh created. The commit message always
 # comes from the coding agent (.commit-msg); the driver never invents a fixed
@@ -421,7 +439,13 @@ commit_changes() {
     echo "ERROR: the coding agent left no .commit-msg; refusing to commit with a fixed message." >&2
     return 1
   fi
-  message="$(head -1 .commit-msg)"
+  # Read the first line without letting an embedded NUL byte (which bash
+  # cannot hold in a variable) trigger "ignored null byte in input" and
+  # silently corrupt the surrounding UTF-8: strip NULs through a pipe, drop a
+  # leading BOM, and coerce to valid UTF-8 so the message never reaches the
+  # GitHub API as a malformed JSON string.
+  message="$(head -n 1 .commit-msg | tr -d '\000' | sed '1s/^\xEF\xBB\xBF//' | sanitize_text)"
+  message="${message%$'\r'}"
   rm -f .commit-msg
   if [[ -z "${message}" ]]; then
     echo "ERROR: .commit-msg is empty; the coding agent must write a commit message." >&2
@@ -558,7 +582,7 @@ report_bug_body() {
     opener="The conahcnuj driver terminated abnormally and could not resolve the item it was working on. This issue was filed automatically so the driver bug can be fixed (re-run: conahcnuj ${input})."
     closing="The driver exits this way only when it is unable to finish the run; a maintainer should investigate and pick this report up."
   fi
-  log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null || true)"
+  log_tail="$(tail -n 100 "${RUN_LOG_FILE}" 2>/dev/null | tr -d '\000' | sanitize_text)"
   if [[ -n "${log_tail}" ]]; then
     log_block="\`\`\`text
 ${log_tail}
@@ -824,7 +848,7 @@ resolve_agent_branch_name() {
   fi
   # Trim leading/trailing whitespace only; internal spaces stay and are then
   # rejected by git check-ref-format rather than silently altered.
-  want="$(head -1 .branch-name | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  want="$(head -n 1 .branch-name | tr -d '\000' | sanitize_text | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
   rm -f .branch-name
   if [[ -z "${want}" ]]; then
     echo "WARNING: .branch-name is empty; keeping the driver-derived branch ${current}." >&2
@@ -1555,7 +1579,7 @@ drive() {
       # "Addressed the review feedback" comment: the in-thread replies are how
       # the reviewer learns what happened. Because the fingerprint drops
       # bot-authored comments, those replies never look like fresh feedback.
-      local reply_help="Address the pull request review feedback. First make the code changes and push them with git vc, then confirm CI passes and there is no merge conflict (CI status is unreliable while the branch conflicts, so resolve any conflict before trusting it). Only after that, reply in each unresolved thread below (comment), saying what you changed or answering the question. Post the reply with the GitHub API (POST https://api.github.com/repos/${owner}/${repo}/pulls/${pr}/comments/<comment_id>/replies is the reply endpoint; \${GH_TOKEN} is set) using the comment id shown for each thread. Do not request review yourself (the driver does that after the checks pass)."
+      local reply_help="Address the pull request review feedback. First make the code changes and resolve any merge conflict (merge the base branch in, resolve every conflict, leave no conflict markers), leaving the result in the working tree and writing .commit-msg; the driver commits and pushes it and then CI runs. Only after that, reply in each unresolved thread below (comment), saying what you changed or answering the question. Post the reply with the GitHub API (POST https://api.github.com/repos/${owner}/${repo}/pulls/${pr}/comments/<comment_id>/replies is the reply endpoint; \${GH_TOKEN} is set) using the comment id shown for each thread. Do not request review yourself (the driver does that after the checks pass)."
       if ! implement "${title}" "${body}" "${reply_help}
 
 ${summary}" "${base}"; then
