@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Unit tests for the opencode plugin, driven entirely through the hooks
 // opencode calls (tool.execute.before, shell.env, the system-prompt
 // transform, chat.message / chat.params). plugin-tests/unit.sh compiles the real
@@ -24,8 +25,8 @@ const fs = require("node:fs")
 const os = require("node:os")
 const path = require("node:path")
 
-const PLUGIN_MODULE = "./.unit/out/gh-app-token.js"
-const STAGE_DIR = path.join(__dirname, ".unit")
+const PLUGIN_MODULE = "./gh-app-token.js"
+const STAGE_DIR = path.resolve(__dirname, "..")
 const GH_APP_DIR = path.join(STAGE_DIR, "gh-app")
 const APP_ENV = path.join(GH_APP_DIR, "app.env")
 const APP_ENV_EXAMPLE = path.join(GH_APP_DIR, "app.env.example")
@@ -46,7 +47,7 @@ const aliasVcTarget = () => forward(path.join(GH_APP_DIR, "api-commit.sh"))
 // handler, anything else fails here instead of reaching api.github.com.
 
 let fetchCalls = []
-let fetchHandler = null
+let fetchHandler: any = null
 
 globalThis.fetch = async (...args) => {
   fetchCalls.push(args)
@@ -149,7 +150,7 @@ async function assertAllowed(commands) {
 
 // RSA key for the token exchange: written once into the stage (which
 // plugin-tests/unit.sh removes), the public half stays in memory for verification.
-let keyPair = null
+let keyPair: any = null
 function signingKeys() {
   if (!keyPair) {
     fs.mkdirSync(STAGE_DIR, { recursive: true })
@@ -897,7 +898,7 @@ test("chat hooks: the label file path cannot escape the temp directory", async (
 // --- runner -----------------------------------------------------------------
 
 async function main() {
-  if (!fs.existsSync(path.join(STAGE_DIR, "out", "gh-app-token.js"))) {
+  if (!fs.existsSync(path.join(__dirname, "gh-app-token.js"))) {
     console.error("UNIT FAIL: plugin-tests/.unit/out is missing; run: bash plugin-tests/unit.sh")
     process.exit(1)
   }

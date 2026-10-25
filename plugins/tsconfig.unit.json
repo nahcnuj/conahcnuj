@@ -5,5 +5,5 @@
     "rootDir": ".",
     "outDir": "../plugin-tests/.unit/out"
   },
-  "include": ["gh-app-token.ts", "lib/gh-app-commit.ts", "lib/gh-app-commit.test.ts"]
+  "include": ["gh-app-token.ts", "gh-app-token.test.ts", "lib/gh-app-commit.ts", "lib/gh-app-commit.test.ts"]
 }
