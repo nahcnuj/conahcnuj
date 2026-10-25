@@ -91,18 +91,12 @@ RC=0
     bash "${PRIV}/gh-app/api-commit.sh" o/r feature -m "resolve branch conflict"
 ) > "${OUT}" 2>&1 || RC=$?
 
-echo "----- api-commit.sh merge run output -----"
-cat "${OUT}"
-echo "------------------------------------------"
-
-[[ ${RC} -eq 0 ]] || { echo "FAIL: api-commit.sh exited ${RC} (expected 0) under MERGE_HEAD"; exit 1; }
-grep -q "unfinished merge" "${OUT}" && { echo "FAIL: the sync still hit the unfinished-merge refusal"; exit 1; }
+[[ ${RC} -eq 0 ]] || { echo "FAIL: api-commit.sh exited ${RC} (expected 0) under MERGE_HEAD" >&2; exit 1; }
+grep -q "unfinished merge" "${OUT}" && { echo "FAIL: the sync still hit the unfinished-merge refusal" >&2; exit 1; }
 
 # The sync must have landed on the commit that was created.
-[[ "$(git -C "${W}" rev-parse HEAD)" == "${NEW_SHA}" ]] || { echo "FAIL: local branch was not synced to the created commit"; exit 1; }
+[[ "$(git -C "${W}" rev-parse HEAD)" == "${NEW_SHA}" ]] || { echo "FAIL: local branch was not synced to the created commit" >&2; exit 1; }
 if git -C "${W}" rev-parse --verify -q MERGE_HEAD >/dev/null; then
-  echo "FAIL: MERGE_HEAD was left behind"; exit 1
+  echo "FAIL: MERGE_HEAD was left behind" >&2; exit 1
 fi
-[[ "$(cat "${W}/f.txt")" == "resolved" ]] || { echo "FAIL: the resolved content was not preserved"; exit 1; }
-
-echo "PASS api-commit.sh commits through an in-progress merge (issue #250)"
+[[ "$(cat "${W}/f.txt")" == "resolved" ]] || { echo "FAIL: the resolved content was not preserved" >&2; exit 1; }

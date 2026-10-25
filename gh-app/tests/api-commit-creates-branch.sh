@@ -83,15 +83,9 @@ RC=0
     bash "${PRIV}/gh-app/api-commit.sh" o/r feature -m "first feature commit"
 ) > "${OUT}" 2>&1 || RC=$?
 
-echo "----- api-commit.sh branch-creation run output -----"
-cat "${OUT}"
-echo "----------------------------------------------------"
-
-[[ ${RC} -eq 0 ]] || { echo "FAIL: api-commit.sh exited ${RC} (expected 0) for a missing branch"; exit 1; }
-grep -q "Created branch feature from main" "${OUT}" || { echo "FAIL: no branch-created message in output"; exit 1; }
+[[ ${RC} -eq 0 ]] || { echo "FAIL: api-commit.sh exited ${RC} (expected 0) for a missing branch" >&2; exit 1; }
+grep -q "Created branch feature from main" "${OUT}" || { echo "FAIL: no branch-created message in output" >&2; exit 1; }
 
 # The sync must have landed on the commit that was created.
-[[ "$(git -C "${W}" rev-parse HEAD)" == "${NEW_SHA}" ]] || { echo "FAIL: local branch was not synced to the created commit"; exit 1; }
-[[ "$(cat "${W}/f.txt")" == $'base\nfeature' ]] || { echo "FAIL: the committed content was not preserved"; exit 1; }
-
-echo "PASS api-commit.sh creates a missing branch from the default branch"
+[[ "$(git -C "${W}" rev-parse HEAD)" == "${NEW_SHA}" ]] || { echo "FAIL: local branch was not synced to the created commit" >&2; exit 1; }
+[[ "$(cat "${W}/f.txt")" == $'base\nfeature' ]] || { echo "FAIL: the committed content was not preserved" >&2; exit 1; }
