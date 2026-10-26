@@ -140,6 +140,7 @@ jobs:
           repository: ${{ inputs.repository || github.repository }}
           path: target
           fetch-depth: 0
+          ref: ${{ github.head_ref || github.event.pull_request.head.ref || github.event.workflow_run.pull_requests[0].head.ref || github.ref }}
 
       # opencode is not preinstalled on runners; shared with ci.yml through the
       # install-opencode composite action (authenticated release lookup so
