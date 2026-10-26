@@ -367,7 +367,7 @@ opencode_run() {
   fi
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
-  args=(run --print-logs --thinking --format json --model "${model}" --dir "${workdir}")
+  args=(run --print-logs --thinking --format json --auto --model "${model}" --dir "${workdir}")
   # --print-logs defaults to INFO, which is ~30 lines of boot/permission
   # chatter per model and buries the rendered log. WARN keeps the diagnostics
   # that matter without the noise; override to DEBUG when hunting a problem.
