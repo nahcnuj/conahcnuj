@@ -1012,7 +1012,7 @@ persist_missing_model() {
 # base, so a message-only round there stays no work and still falls through to
 # the other models.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried
   local dead_providers="" quota_providers="" failed_rounds=0 env_failed_rounds=0 quota_failed_rounds=0 ran_without_failure=0
   local model_list known_skipped=""
   local base_branch="${4:-}"
@@ -1044,6 +1044,7 @@ implement() {
       echo "Skipping ${model}: provider ${provider} already exhausted its quota/billing, and no other of its models can change that." >&2
       continue
     fi
+    model_retried=0
     while true; do
       check_timeout
       now="$(date +%s)"
@@ -1106,9 +1107,13 @@ implement() {
           echo "Model ${model} left the working tree unchanged and only wrote .commit-msg; handing off to the next model." >&2
           break
         elif [[ "${tree_changed}" == "false" ]]; then
-          echo "Model ${model} produced no complete work; retrying with the same model." >&2
-          sleep 0.1
-          continue
+          if [[ "${model_retried}" -eq 0 ]]; then
+            model_retried=1
+            echo "Model ${model} produced no complete work; retrying once with the same model." >&2
+            continue
+          fi
+          echo "Model ${model} produced no complete work." >&2
+          break 2
         else
           echo "Model ${model} produced no complete work; handing off to the next model." >&2
           break
