@@ -136,8 +136,15 @@ async function resolveBotUserId(slug: string): Promise<string> {
   if (!/^[A-Za-z0-9-]+$/.test(slug)) {
     throw new Error(`Invalid APP_SLUG for bot lookup: ${slug}`)
   }
+  // Prefer an authenticated request when an installation token is already
+  // cached, so the lookup is not subject to the unauthenticated rate limit.
+  const token = readTokenCache(TOKEN_CACHE_FILE)
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json" }
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`
+  }
   const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, {
-    headers: { Accept: "application/vnd.github+json" },
+    headers,
   })
   if (!res.ok) {
     throw new Error(

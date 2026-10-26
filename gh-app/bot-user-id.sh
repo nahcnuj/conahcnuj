@@ -42,7 +42,25 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+# Prefer an authenticated request (installation token) so the lookup is not
+# subject to the unauthenticated rate limit / network blocks that a fresh CI
+# runner can hit; fall back to the public endpoint when no token is available.
+TOKEN=""
+if [[ -f "${DIR}/get-token.sh" ]]; then
+  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+fi
+
+LOOKUP=""
+if [[ -n "${TOKEN}" ]]; then
+  LOOKUP="$(curl -fsSL \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+fi
+if [[ -z "${LOOKUP}" ]]; then
+  LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+fi
+
 ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
