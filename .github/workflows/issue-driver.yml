@@ -125,6 +125,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
+          fetch-depth: 0
 
       # The coding agent edits the target repository, so when the target is not
       # the driver's own repository (a cross-repository call) check it out as
@@ -139,6 +140,7 @@ jobs:
         with:
           repository: ${{ inputs.repository || github.repository }}
           path: target
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
       # opencode is not preinstalled on runners; shared with ci.yml through the
