@@ -708,7 +708,6 @@ next_free_branch() {
 # #489). The fetch has already succeeded by the time this runs, so the remote
 # head is known; discarding the local conflict state loses only work that was
 # never committed, which is the same fate an interrupted round already had.
-# Untracked files are preserved; only the index / merge state is reset.
 clear_merge_state() {
   if git rev-parse --verify -q MERGE_HEAD >/dev/null 2>&1; then
     git merge --quit 2>/dev/null || git merge --abort 2>/dev/null || true
@@ -725,7 +724,6 @@ clear_merge_state() {
 # run (the stopped run files a bug report, issue #115).
 checkout_branch_head() {
   local branch="${1}"
-  clear_merge_state
   # git's own output goes to stderr: callers capture this script's stdout, and
   # `git checkout -B <b> origin/<b>` prints "branch '<b>' set up to track ..."
   # to stdout, which would be captured as part of a branch name.
