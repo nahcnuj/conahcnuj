@@ -45,5 +45,5 @@
   (PowerShell) でも Git for Windows 由来で `head` / `tail` / `grep` が使える
   ようになったので、シェルコマンドとして使ってよい）。ファイルの読み取りは
   read ツール、検索は grep/glob ツールを優先すること。シェルコマンドが
-  避けられない場合は PowerShell の同等コマンドや node/python を使うこと。
+  避けられない場合は PowerShell の同等コマンドや node を使うこと。
   コマンドが存在するか分からないときは先に確認すること。

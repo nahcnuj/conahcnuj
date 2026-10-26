@@ -287,7 +287,7 @@ def render_markdown(text):
                 code.append(lines[i])
                 i += 1
             i += 1  # closing fence
-            body = html.escape("\n".join(code))
+            body = html.escape("\n".join(code), quote=False)
             cls = f' class="language-{html.escape(lang, quote=True)}"' if lang else ""
             out.append(f"<pre><code{cls}>{body}\n</code></pre>\n")
             continue
