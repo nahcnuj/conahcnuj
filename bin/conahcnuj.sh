@@ -700,12 +700,19 @@ next_free_branch() {
   printf '%s\n' "${branch}"
 }
 
-# Discard any in-progress merge or unmerged index entries left by an
-# interrupted previous run so a subsequent `git checkout` is not blocked by
-# "you need to resolve your current index first" (issue #489). Untracked files
-# are preserved; only the index / merge state is reset.
+# Drop any in-progress merge or unmerged index entries left by an interrupted
+# round so a following `git checkout` can actually move HEAD. An unresolved
+# conflict (MERGE_HEAD present, or "needs merge" entries in the index) makes
+# `git checkout` refuse with "you need to resolve your current index first",
+# which used to abort the run at the first checkout of a resumed PR (issue
+# #489). The fetch has already succeeded by the time this runs, so the remote
+# head is known; discarding the local conflict state loses only work that was
+# never committed, which is the same fate an interrupted round already had.
+# Untracked files are preserved; only the index / merge state is reset.
 clear_merge_state() {
-  git merge --abort 2>/dev/null || git merge --quit 2>/dev/null || true
+  if git rev-parse --verify -q MERGE_HEAD >/dev/null 2>&1; then
+    git merge --quit 2>/dev/null || git merge --abort 2>/dev/null || true
+  fi
   git reset --hard HEAD >/dev/null 2>&1 || true
 }
 
@@ -726,6 +733,7 @@ checkout_branch_head() {
     echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
     return 1
   fi
+  clear_merge_state
   git checkout -B "${branch}" "origin/${branch}" 1>&2
 }
 
