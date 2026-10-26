@@ -658,7 +658,13 @@ render_block_tool() {
       label="${F[title]}"
       [[ -n "${label}" ]] || label="${F[command]}"
       [[ -n "${label}" ]] || label="${tool}"
-      printf '$ %s\n' "${label}"
+      # GitHub Actions collapses a run's log by `::group::`/`::endgroup::`
+      # markers, so wrap each command block in one there and keep the plain
+      # `$ <command>` caption everywhere else.
+      if [[ "${GITHUB_ACTIONS:-}" == "true" || "${GITHUB_ACTIONS:-}" == "1" ]]; then
+        echo -n '::group::'
+      fi
+      echo "\$ ${label}"
     fi
   fi
 
@@ -756,6 +762,9 @@ render_block_tool() {
     fi
   else
     printf '✅ %s\n' "${label}"
+  fi
+  if [[ "${GITHUB_ACTIONS:-}" == "true" || "${GITHUB_ACTIONS:-}" == "1" ]]; then
+    echo '::endgroup::'
   fi
   [[ -n "${pid}" ]] && PART_STATE[${pid}]=1
   return 0

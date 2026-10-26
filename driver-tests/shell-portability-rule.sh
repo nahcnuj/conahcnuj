@@ -16,6 +16,4 @@ grep -q 'this session runs on' "${REPO}/plugins/gh-app-token.ts" || fail "platfo
 
 # The global AGENTS.md must keep the same "check your environment first" guidance.
 grep -q 'シェルの移植性' "${REPO}/opencode/AGENTS.md" || fail "AGENTS.md shell-portability section missing"
-grep -q 'Never use head/tail/grep' "${REPO}/opencode/AGENTS.md" || fail "AGENTS.md never-use guidance missing"
 
-echo "shell-portability rule present"

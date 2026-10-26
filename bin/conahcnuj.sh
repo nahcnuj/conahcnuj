@@ -348,13 +348,19 @@ branch_has_commits() {
   # and head). That is what crashed the driver into the bug-report chain of
   # issues #33/#34.
   ref="${default_oid}"
-  if ! git rev-parse --verify -q "${ref}^{commit}" >/dev/null 2>&1; then
+  if [[ -z "${ref}" ]] || ! git rev-parse --verify -q "${ref}^{commit}" >/dev/null 2>&1; then
     # The OID is not in this clone (offline tests feed a placeholder oid);
     # fall back to the local default-branch refs.
     ref="${default_branch}"
-    if git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
+    if [[ -n "${ref}" ]] && git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
       ref="origin/${default_branch}"
     fi
+  fi
+  if [[ -z "${ref}" ]]; then
+    # No base to compare against: cannot tell whether HEAD already carries
+    # work, so treat it as "no commits yet" (never accept a message-only
+    # round on an unknown base).
+    return 1
   fi
   count="$(git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0')"
   [[ "${count}" -gt 0 ]]
@@ -1446,7 +1452,7 @@ drive() {
       # #N" bug report chain (issues #33/#34).
       echo "PR could not be created for ${branch} -> ${base}; running an implementation round." >&2
       local produced_change="false"
-      if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created."; then
+      if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created." "${base}"; then
         produced_change="true"
       fi
       # Only a round that both changed the tree AND named the commit may be
@@ -1484,7 +1490,7 @@ drive() {
       fi
       echo "TODO.md is still present; the issue is not finished. Keeping PR #${pr} a draft and continuing the work." >&2
       local todo_change="false"
-      if implement "${title}" "${body}" "The per-issue progress file TODO.md is still in the working tree, so the issue is not finished and the pull request is still a draft. Continue the work, keep TODO.md current, and delete it once the issue is fully resolved and the pull request is ready for review."; then
+      if implement "${title}" "${body}" "The per-issue progress file TODO.md is still in the working tree, so the issue is not finished and the pull request is still a draft. Continue the work, keep TODO.md current, and delete it once the issue is fully resolved and the pull request is ready for review." "${base}"; then
         todo_change="true"
       fi
       # Same rule as the other rounds: only a dirty tree WITH a .commit-msg is
@@ -1617,7 +1623,7 @@ ${summary}" "${base}"; then
       fi
       fix_context="$(constraint_fix_context "${branch}" "${base}")"
       echo "PR #${pr}: constraints failing (${CONSTRAINT_FAILURE:-unknown}); fixing with a new implementation round." >&2
-      if implement "${title}" "${body}" "${fix_context}"; then
+      if implement "${title}" "${body}" "${fix_context}" "${base}"; then
         produced_change="true"
       fi
       # Same rule as the feedback round: a dirty tree without a .commit-msg is
@@ -1680,7 +1686,7 @@ start_issue() {
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
     commit_changes
   else
-    if ! implement "${title}" "${body}"; then
+    if ! implement "${title}" "${body}" "" "${default_branch}"; then
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi

@@ -27,4 +27,3 @@ grep -q "まず自分がどの OS" "${ROOT}/opencode/AGENTS.md" || {
   exit 1
 }
 
-echo "shell-portability guidance present"

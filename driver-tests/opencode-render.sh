@@ -359,6 +359,95 @@ test_command_running_has_no_verdict_yet() {
   echo "render running verdict passed"
 }
 
+test_command_grouped_in_github_actions() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # On GitHub Actions every command block is wrapped in a collapsible log
+  # group: the caption keeps its leading `$` (consistent with local runs)
+  # and `::endgroup::` closes it once the command finishes.
+  out="$(cat <<'EOF' |
+{"type":"tool_use","part":{"id":"prt_g1","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"cat tracked.txt"},"output":"one\ntwo\nthree\n","metadata":{"exit":0},"title":"cat tracked.txt"}}}
+EOF
+    GITHUB_ACTIONS=true bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  assert_contains "${out}" "::group::\$ cat tracked.txt" "group marker prefixes the caption"
+  assert_contains "${out}" "::endgroup::" "group is closed at the verdict"
+  rm -rf "${tmp}"
+  echo "render command grouped in github actions passed"
+}
+
+test_command_grouped_streaming_in_github_actions() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # A command that streams under GitHub Actions: the group opens on the first
+  # sighting (running) and closes once the command finishes, so the partial
+  # output and the verdict stay inside the collapsible group.
+  out="$(cat <<'EOF' |
+{"type":"tool_use","part":{"id":"prt_gs","type":"tool","tool":"bash","state":{"status":"running","input":{"command":"cat tracked.txt"},"output":"one\ntwo\n"},"title":"cat tracked.txt"}}
+{"type":"tool_use","part":{"id":"prt_gs","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"cat tracked.txt"},"output":"one\ntwo\nthree\n","metadata":{"exit":0},"title":"cat tracked.txt"}}}
+EOF
+    GITHUB_ACTIONS=true bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  assert_contains "${out}" "::group::\$ cat tracked.txt" "group marker opens on first sighting"
+  assert_contains "${out}" "  one" "partial output is inside the group"
+  assert_contains "${out}" "  three" "tail is inside the group"
+  assert_contains "${out}" "✅ cat tracked.txt" "verdict is inside the group"
+  assert_contains "${out}" "::endgroup::" "group is closed at the verdict"
+  [[ "$(printf '%s\n' "${out}" | grep -c '::group::')" == "1" ]] || fail "group opened more than once" "${out}"
+  rm -rf "${tmp}"
+  echo "render command grouped streaming in github actions passed"
+}
+
+test_command_not_grouped_outside_github_actions() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # Outside GitHub Actions the plain `$ <command>` caption is used and no
+  # group markers are emitted.
+  out="$(cat <<'EOF' |
+{"type":"tool_use","part":{"id":"prt_g2","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"cat tracked.txt"},"output":"one\ntwo\nthree\n","metadata":{"exit":0},"title":"cat tracked.txt"}}}
+EOF
+    GITHUB_ACTIONS='' bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  assert_contains "${out}" "\$ cat tracked.txt" "plain caption is used"
+  assert_not_contains "${out}" "::group::" "no group marker outside GHA"
+  assert_not_contains "${out}" "::endgroup::" "no endgroup marker outside GHA"
+  rm -rf "${tmp}"
+  echo "render command not grouped outside github actions passed"
+}
+
+test_command_grouped_in_github_actions_with_one() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # `GITHUB_ACTIONS=1` is the other documented truthy spelling and must group
+  # exactly like `GITHUB_ACTIONS=true`.
+  out="$(cat <<'EOF' |
+{"type":"tool_use","part":{"id":"prt_g3","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"cat tracked.txt"},"output":"one\ntwo\nthree\n","metadata":{"exit":0},"title":"cat tracked.txt"}}}
+EOF
+    GITHUB_ACTIONS=1 bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  assert_contains "${out}" "::group::\$ cat tracked.txt" "group marker prefixes the caption with =1"
+  assert_contains "${out}" "::endgroup::" "group is closed at the verdict with =1"
+  rm -rf "${tmp}"
+  echo "render command grouped in github actions with =1 passed"
+}
+
+test_command_not_grouped_with_unrecognized_github_actions() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  fixture_repo "${tmp}/repo"
+  # Only `true` and `1` count as GitHub Actions; any other value (including
+  # `false` and `0`) keeps the plain caption and no group markers.
+  out="$(cat <<'EOF' |
+{"type":"tool_use","part":{"id":"prt_g4","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"cat tracked.txt"},"output":"one\ntwo\nthree\n","metadata":{"exit":0},"title":"cat tracked.txt"}}}
+EOF
+    GITHUB_ACTIONS=0 bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  assert_contains "${out}" "\$ cat tracked.txt" "plain caption is used for =0"
+  assert_not_contains "${out}" "::group::" "no group marker for =0"
+  assert_not_contains "${out}" "::endgroup::" "no endgroup marker for =0"
+  rm -rf "${tmp}"
+  echo "render command not grouped for unrecognized github actions passed"
+}
+
 test_streamed_text_prints_only_the_tail() {
   local tmp out
   tmp="$(mktemp -d)"
@@ -569,6 +658,11 @@ test_tool_edit_stitched_diff
 test_tool_glob_reports_pattern_and_results
 test_command_streams_as_it_prints
 test_command_running_has_no_verdict_yet
+test_command_grouped_in_github_actions
+test_command_grouped_streaming_in_github_actions
+test_command_not_grouped_outside_github_actions
+test_command_grouped_in_github_actions_with_one
+test_command_not_grouped_with_unrecognized_github_actions
 test_streamed_text_prints_only_the_tail
 test_stream_snapshot_older_than_printed
 test_tool_input_does_not_shadow_state

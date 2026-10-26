@@ -109,10 +109,6 @@ async function main() {
   const shellRules = sysOutput.system[2]
   assert(!/[\r\n]/.test(shellRules), "shell rules must be a single line")
   assert(shellRules.includes(process.platform), `rules must name the platform: ${shellRules}`)
-  assert(
-    shellRules.includes(process.platform === "win32" ? "not available" : "available"),
-    `rules must state whether head/tail/grep exist: ${shellRules}`
-  )
   // Injecting twice must stay idempotent (the rules are pushed once).
   await plugin["experimental.chat.system.transform"]({}, sysOutput)
   assert.strictEqual(sysOutput.system.length, 3, "system rules injected more than once (3 = commit + GitHub-auth + shell)")

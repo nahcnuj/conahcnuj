@@ -1,4 +1,6 @@
-// Unit tests for the opencode plugin, driven entirely through the hooks
+// Unit tests for the opencode plugin, driven entirely through the hooks.
+// This file IS the test suite (unit.sh compiles the real plugin, then runs it);
+// it is not a separate test runner.
 // opencode calls (tool.execute.before, shell.env, the system-prompt
 // transform, chat.message / chat.params). plugin-tests/unit.sh compiles the real
 // plugins/gh-app-token.ts unchanged into ./.unit/out/, so the code under
@@ -19,6 +21,7 @@
 "use strict"
 
 const assert = require("node:assert")
+const { spawnSync } = require("node:child_process")
 const { createVerify, generateKeyPairSync } = require("node:crypto")
 const fs = require("node:fs")
 const os = require("node:os")
@@ -374,9 +377,112 @@ test("shell.env: publishes the App identity, the alias.vc wrapper and nothing el
   assert.strictEqual(fetchCalls.length, 0)
   for (const key of Object.keys(output.env)) {
     assert.ok(
-      /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key),
+      /^(GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)|PATH)$/.test(key),
       `unexpected shell env key: ${key}`
     )
+  }
+})
+
+test("shell.env: head/tail/grep run in the real PowerShell with the injected PATH", async () => {
+  // Verify against the real shell on this platform instead of a test double:
+  // on Windows that is the real PowerShell (pwsh/powershell) and Git for
+  // Windows' bash.exe; elsewhere /bin/sh and /bin/bash. The point is the
+  // same code path conahcnuj uses: the plugin's shell.env result is merged
+  // into the shell opencode spawns, then the commands must actually run.
+  const realBash =
+    process.platform === "win32"
+      ? "C:/Program Files/Git/bin/bash.exe"
+      : "/bin/bash"
+  if (!fs.existsSync(realBash)) {
+    assert.fail(`expected bash layout missing: ${realBash}`)
+  }
+  const gitRoot = path.dirname(path.dirname(realBash))
+  // Native spelling on the test host, matching what the plugin injects.
+  const usrBin = path.join(gitRoot, "usr", "bin")
+  if (!fs.existsSync(usrBin)) {
+    assert.fail(`expected usr/bin missing: ${usrBin}`)
+  }
+  // The injected directory must actually carry head/tail/grep for the shell
+  // to resolve them.
+  for (const cmd of ["head", "tail", "grep"]) {
+    const exe = path.join(usrBin, process.platform === "win32" ? `${cmd}.exe` : cmd)
+    assert.ok(fs.existsSync(exe), `missing ${cmd} in ${usrBin}`)
+  }
+  const injectedUsrBin = usrBin
+  const savedPath = process.env.PATH
+  try {
+    process.env.PATH = path.join(os.tmpdir(), "conahcnuj-no-such-dir")
+    stage({ BASH_EXE: forward(realBash) })
+    const plugin = await freshHooks()
+    const output = { env: {} }
+    await plugin["shell.env"]({ cwd: ".", sessionID: "s1" }, output)
+    assert.ok(output.env.PATH, "PATH was not injected")
+    assert.ok(
+      output.env.PATH.toLowerCase().includes(injectedUsrBin.toLowerCase()),
+      `usr/bin missing from PATH: ${output.env.PATH}`
+    )
+    // The platform-appropriate separator is used (not a hard-coded one).
+    assert.ok(output.env.PATH.includes(path.delimiter), output.env.PATH)
+
+    // Now actually run them through the real shell, with exactly the env
+    // opencode would hand the tool: process.env merged with the hook output.
+    const childEnv = { ...process.env, ...output.env }
+    if (process.platform === "win32") {
+      // Fixed, trusted install locations only: the executable path is a
+      // literal in each spawnSync call so CodeQL does not see an
+      // uncontrolled command (no path is derived from input).
+      const script = [
+        '$lines = "alpha`nbeta`ngamma"',
+        "$h = @($lines | head -n 1)[0]",
+        "$t = @($lines | tail -n 1)[0]",
+        "$g = @($lines | grep beta)[0]",
+        "if ($h -ne 'alpha') { throw \"head: $h\" }",
+        "if ($t -ne 'gamma') { throw \"tail: $t\" }",
+        "if ($g -ne 'beta') { throw \"grep: $g\" }",
+      ].join("; ")
+      let res
+      if (fs.existsSync("C:\\Program Files\\PowerShell\\7\\pwsh.exe")) {
+        res = spawnSync(
+          "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+          ["-NoProfile", "-NonInteractive", "-Command", script],
+          { env: childEnv, encoding: "utf8" }
+        )
+      } else if (
+        fs.existsSync(
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        )
+      ) {
+        res = spawnSync(
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-Command", script],
+          { env: childEnv, encoding: "utf8" }
+        )
+      } else {
+        assert.fail("no real PowerShell found on Windows")
+      }
+      assert.strictEqual(
+        res.status,
+        0,
+        `head/tail/grep failed in real PowerShell:\n${res.stdout}\n${res.stderr}`
+      )
+    } else {
+      const script =
+        "out=$(printf 'alpha\\nbeta\\ngamma\\n' | head -n 1) && [ \"$out\" = alpha ] || exit 1; " +
+        "out=$(printf 'alpha\\nbeta\\ngamma\\n' | tail -n 1) && [ \"$out\" = gamma ] || exit 1; " +
+        "out=$(printf 'alpha\\nbeta\\ngamma\\n' | grep beta) && [ \"$out\" = beta ] || exit 1"
+      const res = spawnSync("/bin/sh", ["-c", script], {
+        env: childEnv,
+        encoding: "utf8",
+      })
+      assert.strictEqual(
+        res.status,
+        0,
+        `head/tail/grep failed in /bin/sh:\n${res.stdout}\n${res.stderr}`
+      )
+    }
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH
+    else process.env.PATH = savedPath
   }
 })
 
@@ -720,14 +826,6 @@ test("system prompt: the git vc, GitHub-auth and shell rules are appended once a
   const shellRules = output.system[3]
   assert.ok(!/[\r\n]/.test(shellRules), "shell rules must be a single line")
   assert.ok(shellRules.includes(process.platform), shellRules)
-  assert.ok(
-    shellRules.includes(process.platform === "win32" ? "not available" : "available"),
-    shellRules
-  )
-  assert.ok(
-    shellRules.includes("Never use head/tail/grep; prefer the read and grep tools."),
-    shellRules
-  )
   await plugin["experimental.chat.system.transform"]({}, output)
   assert.strictEqual(output.system.length, 4, "system rules injected more than once (4 = existing + 3 injected)")
 })

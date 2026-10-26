@@ -359,7 +359,8 @@ gh_api_fetch_pr_state() {
 CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approved auto-merge}"
 
 # Aggregate a statusCheckRollup payload (stdin) into SUCCESS / PENDING /
-# FAILURE, leaving out the checks that belong to the workflows named in $1.
+# FAILURE, leaving out the checks that belong to the workflows named in $1 and
+# the issue driver's own job (see below).
 # Precedence follows GitHub's own rollup: a failing check beats a pending one,
 # and NEUTRAL / SKIPPED count as success.
 # A payload that carries no context list (an older response, or one that could
@@ -367,7 +368,7 @@ CONAHCNUJ_OWN_WORKFLOWS="${CONAHCNUJ_OWN_WORKFLOWS-Issue auto-drive,Owner-approv
 # as-is; an empty result means "no checks at all", which the caller reads as
 # SUCCESS.
 gh_api_rollup_state() {
-  local skip="${1:-}" json contexts node type state status conclusion workflow result="" pending="false"
+  local skip="${1:-}" json contexts node type state status conclusion workflow check_name result="" pending="false"
 
   json="$(gh_api_read_line)"
   if [[ "${json}" != *'"contexts"'* ]]; then
@@ -401,6 +402,22 @@ gh_api_rollup_state() {
         # the aggregate entirely: neither its pending nor its failed state may
         # gate the run that is doing the polling.
         workflow="$(printf '%s' "${node}" | sed -n 's/.*"workflow":{"name":"\([^"]*\)".*/\1/p')"
+        # The issue driver keeps the same job name ("Attempt to resolve issue")
+        # whether it runs in this repository or as a reusable workflow called by
+        # another repository. A reusable workflow's check run is reported under
+        # the caller's workflow name, though, so the workflow-name filter below
+        # misses it (or the run has no workflow attribution at all: checkSuite
+        # null). Exclude it by job name too so a cross-repo run does not wait
+        # for itself. Only the fields before checkSuite hold the check's own
+        # name; matching the whole node would pick up the nested workflow name
+        # instead. Gated on a non-empty skip list so an explicitly disabled
+        # filter stays disabled.
+        if [[ -n "${skip}" ]]; then
+          check_name="$(gh_api_json_str "${node%%\"checkSuite\"*}" "name")"
+          case "${check_name}" in
+            *"Attempt to resolve issue"*) continue ;;
+          esac
+        fi
         if [[ -n "${workflow}" && ",${skip}," == *",${workflow},"* ]]; then
           continue
         fi

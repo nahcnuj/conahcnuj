@@ -31,6 +31,13 @@ MOCK_CONDITIONS_NOCHECKS='{"data":{"repository":{"pullRequest":{"mergeable":"MER
 # workflow it belongs to through checkSuite.workflowRun.workflow.
 MOCK_CONDITIONS_CONTEXTS='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Issue auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"enable / enable","status":"COMPLETED","conclusion":"SKIPPED","checkSuite":{"workflowRun":{"workflow":{"name":"Owner-approved auto-merge"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
 
+# A reusable workflow run (the driver called from another repository, or via
+# workflow_call): the check run name is prefixed with the caller's job name and
+# the workflow attribution is the caller's workflow, so the workflow-name filter
+# alone cannot see that this is the driver's own run. The called job name
+# ("Attempt to resolve issue") is stable, so it must still be excluded.
+MOCK_CONDITIONS_CROSS_REPO='{"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[{"__typename":"CheckRun","name":"drive / Attempt to resolve issue","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"workflowRun":{"workflow":{"name":"Caller auto-drive"}}}},{"__typename":"CheckRun","name":"Lint shell scripts (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"workflowRun":{"workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false}}}}}]}}}}}'
+
 # The driver's own run failed (a maintainer cancelled it, or it timed
 # out): no code change can ever fix that, so it must not count as a
 # constraint the driver tries to "fix" in a loop.
@@ -167,6 +174,22 @@ test_fetch_pr_conditions() {
   out="$(printf '%s\n' "${MOCK_CONDITIONS_OWN_FAILED}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
   state="$(printf '%s' "${out}" | cut -d'|' -f1)"
   [[ "${state}" == "SUCCESS" ]]
+
+  # A reusable workflow reports the check under the caller's workflow name and
+  # prefixes the job name with the caller's job. The driver's own run must not
+  # become a constraint in that case either (issue #492).
+  out="$(printf '%s\n' "${MOCK_CONDITIONS_CROSS_REPO}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15)"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "SUCCESS" ]]
+
+  # Turning the exclusion off also turns off the job-name exclusion.
+  out="$(
+    CONAHCNUJ_OWN_WORKFLOWS=""
+    export CONAHCNUJ_OWN_WORKFLOWS
+    printf '%s\n' "${MOCK_CONDITIONS_CROSS_REPO}" | gh_api_fetch_pr_conditions "nahcnuj" "conahcnuj" 15
+  )"
+  state="$(printf '%s' "${out}" | cut -d'|' -f1)"
+  [[ "${state}" == "PENDING" ]]
 
   # The auto-merge job's own check is excluded the same way: it waits for the
   # driver's check run, so the driver waiting for it would deadlock the pair.
