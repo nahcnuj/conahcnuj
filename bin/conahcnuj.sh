@@ -709,6 +709,27 @@ next_free_branch() {
 # run (the stopped run files a bug report, issue #115).
 checkout_branch_head() {
   local branch="${1}"
+  # A previous run may have left the index with unmerged entries (for example an
+  # agent-started merge that was never committed before the run aborted). Git
+  # then refuses every checkout with "you need to resolve your current index
+  # first", so abort any in-progress operation and reset to HEAD before
+  # fetching. The remote branch head is the source of truth on resume, so the
+  # discarded in-progress work is re-done from there.
+  if git rev-parse --verify -q MERGE_HEAD >/dev/null 2>&1; then
+    git merge --abort >/dev/null 2>&1 || true
+  fi
+  if [[ -d "$(git rev-parse --git-path rebase-merge 2>/dev/null)" ]] || [[ -d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ]]; then
+    git rebase --abort >/dev/null 2>&1 || true
+  fi
+  if [[ -f "$(git rev-parse --git-path CHERRY_PICK_HEAD 2>/dev/null)" ]]; then
+    git cherry-pick --abort >/dev/null 2>&1 || true
+  fi
+  if [[ -f "$(git rev-parse --git-path REVERT_HEAD 2>/dev/null)" ]]; then
+    git revert --abort >/dev/null 2>&1 || true
+  fi
+  if git rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    git reset --hard HEAD >/dev/null 2>&1 || true
+  fi
   # git's own output goes to stderr: callers capture this script's stdout, and
   # `git checkout -B <b> origin/<b>` prints "branch '<b>' set up to track ..."
   # to stdout, which would be captured as part of a branch name.
