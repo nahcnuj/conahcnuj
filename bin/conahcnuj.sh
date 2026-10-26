@@ -700,6 +700,15 @@ next_free_branch() {
   printf '%s\n' "${branch}"
 }
 
+# Discard any in-progress merge or unmerged index entries left by an
+# interrupted previous run so a subsequent `git checkout` is not blocked by
+# "you need to resolve your current index first" (issue #489). Untracked files
+# are preserved; only the index / merge state is reset.
+clear_merge_state() {
+  git merge --abort 2>/dev/null || git merge --quit 2>/dev/null || true
+  git reset --hard HEAD >/dev/null 2>&1 || true
+}
+
 # Fetch <branch> from origin and check out its head. A failed fetch stops the
 # run instead of falling back to whatever origin/<branch> happens to hold: such
 # a checkout "succeeds" at a stale commit, the driver then reads the branch as
@@ -709,6 +718,7 @@ next_free_branch() {
 # run (the stopped run files a bug report, issue #115).
 checkout_branch_head() {
   local branch="${1}"
+  clear_merge_state
   # git's own output goes to stderr: callers capture this script's stdout, and
   # `git checkout -B <b> origin/<b>` prints "branch '<b>' set up to track ..."
   # to stdout, which would be captured as part of a branch name.
@@ -766,6 +776,7 @@ checkout_new_branch_from_base() {
     echo "ERROR: no base commit to start ${branch} from." >&2
     return 1
   fi
+  clear_merge_state
   git checkout -B "${branch}" "${base}" 1>&2
 }
 
@@ -781,6 +792,7 @@ ensure_issue_branch() {
   echo "Feature branch: ${branch} (from ${default_branch})" >&2
 
   if [[ "${TEST_MODE}" == "1" ]]; then
+    clear_merge_state
     git checkout -B "${branch}" >/dev/null 2>&1 || git checkout -b "${branch}"
     printf '%s\n' "${branch}"
     return 0
@@ -810,6 +822,7 @@ ensure_issue_branch() {
       echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
     fi
     if fetch_new_branch_ref "${branch}"; then
+      clear_merge_state
       git checkout -B "${branch}" "origin/${branch}" 1>&2 || return 1
     elif [[ "${created}" == "1" ]]; then
       echo "WARNING: ${branch} is not fetchable right after creation; starting it from ${default_branch}." >&2
@@ -828,6 +841,7 @@ ensure_pr_branch_head() {
   local owner="${1}" repo="${2}" head="${3}"
   echo "Checking out PR head branch ${head}..." >&2
   if [[ "${TEST_MODE}" == "1" ]]; then
+    clear_merge_state
     git checkout -B "${head}" >/dev/null 2>&1 || git checkout -b "${head}"
     return 0
   fi
@@ -872,6 +886,7 @@ resolve_agent_branch_name() {
     # The ref may not be fetchable the instant it was created; the branch is
     # brand-new, so starting it from the base loses no committed work.
     if fetch_new_branch_ref "${want}"; then
+      clear_merge_state
       git checkout -B "${want}" "origin/${want}" 1>&2
     else
       echo "WARNING: ${want} is not fetchable right after creation; starting it from the base." >&2
@@ -881,6 +896,7 @@ resolve_agent_branch_name() {
       }
     fi
   else
+    clear_merge_state
     git checkout -B "${want}" >/dev/null 2>&1
   fi
   echo "Using the coding agent's feature branch: ${want}" >&2
