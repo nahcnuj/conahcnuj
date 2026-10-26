@@ -139,6 +139,7 @@ jobs:
         with:
           repository: ${{ inputs.repository || github.repository }}
           path: target
+          fetch-depth: 0
 
       # opencode is not preinstalled on runners; shared with ci.yml through the
       # install-opencode composite action (authenticated release lookup so

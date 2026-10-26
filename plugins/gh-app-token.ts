@@ -155,6 +155,13 @@ async function resolveBotUserId(slug: string): Promise<string> {
     throw new Error(`Unexpected user lookup response for ${slug}[bot].`)
   }
   const id = String((data as { id: number }).id)
+  // The value written below is the bot account's numeric user ID, validated
+  // as digits only; it is not arbitrary response data.
+  // codeql[js/http-to-file-access]
+  // lgtm[js/http-to-file-access]
+  if (!/^\d+$/.test(id)) {
+    throw new Error(`Unexpected bot user ID in lookup response: ${id}`)
+  }
   try {
     fs.writeFileSync(BOT_ID_CACHE_FILE, id, "utf8")
   } catch {
