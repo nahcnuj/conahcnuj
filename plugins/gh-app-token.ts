@@ -234,6 +234,7 @@ async function fetchInstallationToken(
   // Only the short-lived signed JWT leaves this machine, and only to
   // api.github.com. The private key itself is never transmitted: it is
   // read locally purely to sign with.
+  // codeql[js/file-access-to-http]
   const res = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
