@@ -265,9 +265,9 @@ opencode_run() {
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
     if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"
+      printf 'opencode run --format json --model %s --auto --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"
     else
-      printf 'opencode run --format json --model %s --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}"
+      printf 'opencode run --format json --model %s --auto --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}"
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
@@ -415,7 +415,7 @@ opencode_run() {
   fi
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
-  args=(run --print-logs --thinking --format json --model "${model}" --dir "${workdir}")
+  args=(run --print-logs --thinking --format json --model "${model}" --auto --dir "${workdir}")
   # --print-logs defaults to INFO, which is ~30 lines of boot/permission
   # chatter per model and buries the rendered log. WARN keeps the diagnostics
   # that matter without the noise; override to DEBUG when hunting a problem.
