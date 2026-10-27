@@ -214,7 +214,12 @@ EOF
   [[ "${args}" == *"--session ses_parsed"* ]]
   # Thinking and a quiet log level are part of a readable log: --thinking makes
   # the model show its reasoning, --log-level WARN drops the INFO boot chatter.
-  [[ "${args}" == *"--auto"* ]] || { echo "FAIL: opencode runs without --auto"; exit 1; }
+  read -ra __parsed_args <<< "${args}"
+  __auto_found=0
+  for __a in "${__parsed_args[@]}"; do
+    [[ "${__a}" == "--auto" ]] && __auto_found=1
+  done
+  [[ "${__auto_found}" -eq 1 ]] || { echo "FAIL: opencode runs without --auto"; exit 1; }
   [[ "${args}" == *"--thinking"* ]]
   [[ "${args}" == *"--log-level WARN"* ]]
   CONAHCNUJ_OPENCODE_LOG_LEVEL=DEBUG opencode_run "Issue" "Body" "${tmp}" "opencode/third" >/dev/null || rc=$?
