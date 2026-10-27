@@ -265,9 +265,9 @@ opencode_run() {
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
     if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"
+      printf 'opencode run --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}" >&2
     else
-      printf 'opencode run --format json --model %s --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}"
+      printf 'opencode run --format json --model %s --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}" >&2
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID

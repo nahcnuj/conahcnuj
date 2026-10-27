@@ -126,7 +126,7 @@ test_opencode_run_message_only() {
   [[ -s "${tmp}/.commit-msg" ]] || { echo "FAIL: the mock message-only round wrote no message"; cat "${log}" >&2; exit 1; }
   [[ ! -e "${tmp}/conahcnuj.mock" ]] || { echo "FAIL: the mock message-only round touched the tree"; exit 1; }
   # The next model is handed the same session and asked to finish the work.
-  out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/talker")"
+  out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/talker" 2>&1)"
   [[ "${out}" == *"--session ses_mock"* ]]
   [[ "${out}" == *"Your part is the change in the working tree"* ]] || { echo "FAIL: the handoff prompt lost the division of labour"; exit 1; }
   [[ "${out}" == *"because it could not complete the task"* ]] || { echo "FAIL: the takeover prompt does not say why the previous round stopped"; exit 1; }
@@ -143,7 +143,7 @@ test_opencode_run() {
   local tmp
   tmp="$(mktemp -d)"
   local out
-  out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "more ctx")"
+  out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "more ctx" 2>&1)"
   [[ "${out}" == *"opencode run --format json --model opencode/mimo-v2.5-free"* ]]
   [[ "${out}" == *"--dir ${tmp}"* ]]
   [[ "${out}" == *"Test Issue"* ]]
@@ -153,7 +153,7 @@ test_opencode_run() {
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
   # The collected context reaches the prompt through the run itself.
-  out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "" "" "" "collected ctx")"
+  out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "" "" "" "collected ctx" 2>&1)"
   [[ "${out}" == *"Collected context:"* ]] || { echo "FAIL: opencode_run dropped the collected context"; exit 1; }
   [[ "${out}" == *"collected ctx"* ]] || { echo "FAIL: the collected context is missing from the run prompt"; exit 1; }
   rm -rf "${tmp}"
@@ -171,7 +171,7 @@ test_opencode_run_noop_models() {
   [[ ! -f "${tmp}/conahcnuj.mock" ]]
   [[ ! -f "${tmp}/.commit-msg" ]]
   local out
-  out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" "" "${OPENCODE_SESSION_ID}" "opencode/dead-model")"
+  out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" "" "${OPENCODE_SESSION_ID}" "opencode/dead-model" 2>&1)"
   [[ "${out}" == *"--session ses_mock"* ]]
   [[ "${out}" == *"taking over unfinished work from model opencode/dead-model"* ]]
   [[ -f "${tmp}/conahcnuj.mock" ]]
