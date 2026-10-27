@@ -424,6 +424,13 @@ gh_api_rollup_state() {
             # too, so a cross-repo run does not wait for the merge job that is
             # itself waiting for this run (issue #574).
             *enable) continue ;;
+            # The E2E smoke test runs opencode against free models that are a
+            # shared, flaky service: a failing or pending run there is not
+            # something this driver can fix by changing code, and treating it as
+            # a constraint burns the whole time budget (issue #582). Exclude
+            # it by job name, the same way the own run and the auto-merge job
+            # are excluded above.
+            *"E2E opencode run"*) continue ;;
           esac
         fi
         if [[ -n "${workflow}" && ",${skip}," == *",${workflow},"* ]]; then
