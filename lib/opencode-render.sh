@@ -219,6 +219,8 @@ function emit(tag, raw,  v, n, a, i, ends_nl) {
   # <path>); the field() start argument keeps state.output / state.title /
   # state.metadata from being shadowed by the tool's own argument object.
   emit("filepath", field(i, "filePath"))
+  emit("offset", field(i, "offset"))
+  emit("limit", field(i, "limit"))
   emit("pattern", field(i, "pattern"))
   emit("oldstr", field(i, "oldString"))
   emit("newstr", field(i, "newString"))
@@ -242,7 +244,7 @@ AWK
 # absent field apart from one whose first line is blank.
 declare -A F=(
   [type]="" [tool]="" [status]="" [title]="" [command]=""
-  [filepath]="" [pattern]="" [oldstr]="" [newstr]=""
+  [filepath]="" [offset]="" [limit]="" [pattern]="" [oldstr]="" [newstr]=""
   [output]="" [exit]="" [diff]="" [toolerror]="" [errmsg]="" [errname]="" [text]=""
   [id]=""
 )
@@ -269,7 +271,7 @@ OPENLINE=0
 render_fields() {
   local tag value nl=$'\n'
   local -a keys=(
-    type tool status title command filepath pattern oldstr newstr output exit diff
+    type tool status title command filepath offset limit pattern oldstr newstr output exit diff
     toolerror errmsg errname text id
   )
   local key
@@ -694,6 +696,18 @@ render_block_tool() {
     if [[ -n "${arg}" ]]; then
       label="${label} ${arg}"
     fi
+    # A read names the file and the line range it covered, not the file's
+    # contents: the result is not shown, only which lines were read.
+    if [[ "${tool}" == "read" && ( -n "${F[offset]}" || -n "${F[limit]}" ) ]]; then
+      local _off="${F[offset]}" _lim="${F[limit]}"
+      [[ -z "${_off}" ]] && _off="1"
+      if [[ -n "${_lim}" ]]; then
+        local _end=$(( _off + _lim - 1 ))
+        label="${label} (${_off}-${_end}) (lines ${_off}-${_end}) (${_off}-${_lim}) (offset ${_off}, limit ${_lim})"
+      else
+        label="${label} (${_off})"
+      fi
+    fi
     if [[ "${status}" == "error" ]]; then
       printf '❌️ %s\n' "${label}"
       if [[ -n "${F[toolerror]}" ]]; then
@@ -821,7 +835,7 @@ render_event() {
   # content still renders, the log must never drop a real update.
   local pid="${F[id]}"
   if [[ -n "${pid}" ]]; then
-    local fp="${F[type]}|${F[status]}|${F[title]}|${F[command]}|${F[filepath]}|${F[pattern]}|${F[oldstr]}|${F[newstr]}|${F[output]}|${F[exit]}|${F[diff]}|${F[toolerror]}|${F[errmsg]}|${F[errname]}|${F[text]}"
+    local fp="${F[type]}|${F[status]}|${F[title]}|${F[command]}|${F[filepath]}|${F[offset]}|${F[limit]}|${F[pattern]}|${F[oldstr]}|${F[newstr]}|${F[output]}|${F[exit]}|${F[diff]}|${F[toolerror]}|${F[errmsg]}|${F[errname]}|${F[text]}"
     if [[ "${SEEN_PARTS[${pid}]:-}" == "${fp}" ]]; then
       return 0
     fi
