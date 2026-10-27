@@ -188,6 +188,12 @@ test_opencode_run_session_handoff() {
   mkdir -p "${tmp}/bin"
   cat > "${tmp}/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
+# Behavioural gate: opencode blocks on a permission prompt unless --auto is
+# passed, so a run without --auto must not complete successfully.
+if [[ " $* " != *" --auto "* ]]; then
+  echo "permission prompt (no --auto)" >&2
+  exit 1
+fi
 printf '{"type":"step_start","sessionID":"ses_parsed"}\n'
 printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
 exit "${FAKE_OPENCODE_EXIT:-0}"
@@ -214,12 +220,9 @@ EOF
   [[ "${args}" == *"--session ses_parsed"* ]]
   # Thinking and a quiet log level are part of a readable log: --thinking makes
   # the model show its reasoning, --log-level WARN drops the INFO boot chatter.
-  read -ra __parsed_args <<< "${args}"
-  __auto_found=0
-  for __a in "${__parsed_args[@]}"; do
-    [[ "${__a}" == "--auto" ]] && __auto_found=1
-  done
-  [[ "${__auto_found}" -eq 1 ]] || { echo "FAIL: opencode runs without --auto"; exit 1; }
+  # --auto is verified behaviourally: the fake opencode above refuses to
+  # complete without it, so the rc==7 / session-id assertions above would
+  # already fail if --auto were dropped from the command.
   [[ "${args}" == *"--thinking"* ]]
   [[ "${args}" == *"--log-level WARN"* ]]
   CONAHCNUJ_OPENCODE_LOG_LEVEL=DEBUG opencode_run "Issue" "Body" "${tmp}" "opencode/third" >/dev/null || rc=$?
