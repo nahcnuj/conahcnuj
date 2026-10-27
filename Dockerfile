@@ -46,5 +46,7 @@ COPY gh-app/ /opt/conahcnuj/gh-app/
 # as "dubious ownership". The container is disposable, so trust everything.
 RUN git config --global --add safe.directory '*'
 
+RUN chmod +x /opt/conahcnuj/bin/*.sh /opt/conahcnuj/gh-app/*.sh
+
 WORKDIR /work
 ENTRYPOINT ["/opt/conahcnuj/bin/conahcnuj.sh"]
