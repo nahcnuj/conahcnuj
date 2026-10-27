@@ -1147,7 +1147,7 @@ implement() {
             continue
           fi
           echo "Model ${model} produced no complete work." >&2
-          break 2
+          break
         else
           echo "Model ${model} produced no complete work; handing off to the next model." >&2
           break
