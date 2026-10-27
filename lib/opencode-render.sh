@@ -52,6 +52,7 @@ export LC_ALL=C
 export LANG=C
 
 GROUP_DEPTH=0
+LAST_CMD_INDICATOR="●"
 
 close_open_groups() {
   if [[ "${GITHUB_ACTIONS:-}" == "true" || "${GITHUB_ACTIONS:-}" == "1" ]]; then
@@ -505,7 +506,7 @@ render_header() {
   # A part that streams can leave its last line half-written; a header starts
   # a new line of the log, so close the open one first.
   close_line
-  printf '%-*s  %s [%s] %s\n' 44 \
+  printf '%s %-*s  %s [%s] %s\n' "${LAST_CMD_INDICATOR}" 44 \
     "$(render_model_label)@$(render_repo):$(render_dir)" \
     "$(render_sha)" "$(render_branch)" "$(render_diff)"
 }
@@ -859,6 +860,11 @@ render_block_tool() {
     fi
   else
     printf '✅ %s\n' "${label}"
+  fi
+  if [[ "${timed_out}" == "true" ]] || [[ "${status}" == "error" ]] || { [[ -n "${code}" ]] && [[ "${code}" != "0" ]]; }; then
+    LAST_CMD_INDICATOR="🔴"
+  else
+    LAST_CMD_INDICATOR="🟢"
   fi
   if [[ "${GITHUB_ACTIONS:-}" == "true" || "${GITHUB_ACTIONS:-}" == "1" ]]; then
     echo '::endgroup::'
