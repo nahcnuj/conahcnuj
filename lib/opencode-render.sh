@@ -703,9 +703,9 @@ render_block_tool() {
       [[ -z "${_off}" ]] && _off="1"
       if [[ -n "${_lim}" ]]; then
         local _end=$(( _off + _lim - 1 ))
-        label="${label} (${_off}-${_end}) (lines ${_off}-${_end}) (${_off}-${_lim}) (offset ${_off}, limit ${_lim})"
+        label="${label} (${_off}-${_end}) (lines ${_off}-${_end})"
       else
-        label="${label} (${_off})"
+        label="${label} (${_off}) (lines ${_off})"
       fi
     fi
     if [[ "${status}" == "error" ]]; then
