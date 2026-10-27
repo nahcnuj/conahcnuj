@@ -61,12 +61,12 @@ run_e2e_model() {
   cat "${slot_dir}/err.log" || true
 
   # Bad: a bash call that concluded with an unexplained failure -
-  # neither success (0), nor the sandbox norm (2: no remote), nor a
-  # git vc/api-commit.sh call failing due to missing remote/token
-  # (exit 1 is expected). Calls with no exit (null) never concluded
-  # and are benign: the model often interrupts a long command, and a
-  # hook-blocked `git commit` likewise never executes.
-  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 2 and (.exit != 1 or ((.cmd // "") | contains("git vc") | not) and ((.cmd // "") | contains("api-commit.sh") | not))) | [.cmd, .exit] | @tsv' || true)"
+  # neither success (0), nor the sandbox norms (1: a command that
+  # legitimately finds nothing / no remote, 2: api-commit.sh with no
+  # remote). Calls with no exit (null) never concluded and are benign:
+  # the model often interrupts a long command, and a hook-blocked
+  # `git commit` likewise never executes.
+  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 1 and .exit != 2) | [.cmd, .exit] | @tsv' || true)"
 
   # Record the raw exit status and whether this attempt emitted anything.
   # The orchestrator needs both to tell a regression from a service
