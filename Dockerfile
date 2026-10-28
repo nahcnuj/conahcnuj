@@ -44,6 +44,9 @@ RUN curl -fsSL https://opencode.ai/install | bash
 COPY bin/ /opt/conahcnuj/bin/
 COPY lib/ /opt/conahcnuj/lib/
 COPY gh-app/ /opt/conahcnuj/gh-app/
+# Windows checkouts may drop the executable bit; restore it so the entrypoint
+# and helpers run regardless of the host's file mode.
+RUN chmod +x /opt/conahcnuj/bin/*.sh /opt/conahcnuj/lib/*.sh /opt/conahcnuj/gh-app/*.sh
 
 # The work tree is bind-mounted from the host; git would otherwise refuse it
 # as "dubious ownership". The container is disposable, so trust everything.

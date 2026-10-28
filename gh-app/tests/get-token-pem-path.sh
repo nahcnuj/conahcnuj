@@ -101,3 +101,30 @@ if [[ "${OUT}" != *"failed to sign the App JWT"* ]]; then
 fi
 echo "PASS invalid key reports signing failure"
 rm -f "${BAD}"
+
+# MSYS scenario (issue #588): file lives at /c/... but a WSL-style /mnt/c/...
+# path is supplied via app.env. get-token.sh --print-pem-path must return the
+# /c/... form (not report "private key not found").
+MSYS_ROOT="/c/conahcnuj-gtpem-$$"
+if ( mkdir -p "${MSYS_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${MSYS_ROOT}/.ssh" 2>/dev/null; then
+  if [[ ! -w "${MSYS_ROOT}/.ssh" ]]; then
+    sudo chown "$(id -u):$(id -g)" "${MSYS_ROOT}" "${MSYS_ROOT}/.ssh" 2>/dev/null || true
+  fi
+  printf 'x' > "${MSYS_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${MSYS_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+  if [[ -f "${MSYS_ROOT}/.ssh/key.pem" ]]; then
+    sudo rm -rf "/mnt/c/conahcnuj-gtpem-$$" 2>/dev/null || rm -rf "/mnt/c/conahcnuj-gtpem-$$" 2>/dev/null || true
+    set_key_path "/mnt/c/conahcnuj-gtpem-$$/.ssh/key.pem"
+    GOT="$(bash "${STAGE}/get-token.sh" --print-pem-path)"
+    if [[ "${GOT}" != "${MSYS_ROOT}/.ssh/key.pem" ]]; then
+      echo "FAIL: MSYS /mnt path resolved to '${GOT}', expected '${MSYS_ROOT}/.ssh/key.pem'" >&2
+      rm -rf "${MSYS_ROOT}" 2>/dev/null || sudo rm -rf "${MSYS_ROOT}" 2>/dev/null || true
+      exit 1
+    fi
+    echo "PASS MSYS /mnt path rewrites to /c path (CLI)"
+    rm -rf "${MSYS_ROOT}" 2>/dev/null || sudo rm -rf "${MSYS_ROOT}" 2>/dev/null || true
+  else
+    echo "SKIP MSYS scenario: could not create key file"
+  fi
+else
+  echo "SKIP MSYS scenario: /c not writable"
+fi

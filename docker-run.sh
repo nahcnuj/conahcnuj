@@ -52,6 +52,97 @@ else
 fi
 docker_() { MSYS_NO_PATHCONV=1 docker "$@"; }
 
+resolve_host_path() {
+  local input="${1}"
+  # Drop CR so CRLF app.env files (common on Windows) do not leave a
+  # trailing \r on the path, which would make every -e check fail.
+  input="${input//$'\r'/}"
+  # Trim surrounding whitespace.
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+  # Strip surrounding quotes that an app.env value may carry (possibly
+  # more than one layer, e.g. "\"path\"").
+  while true; do
+    case "${input}" in
+      \"*\") input="${input:1:${#input}-2}" ;;
+      \'*\') input="${input:1:${#input}-2}" ;;
+      *) break ;;
+    esac
+  done
+  local p="${input/#\~/${HOME}}"
+  p="${p//\\//}"
+  p="${p//$'\r'/}"
+  # Trim again after normalization.
+  p="${p#"${p%%[![:space:]]*}"}"
+  p="${p%"${p##*[![:space:]]}"}"
+  local candidates=("${p}")
+  if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^/cygdrive/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    # The /<drive>/ form is already preferred; short-circuit when present.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^([a-zA-Z]):(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]:-}"
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
+    if [[ -n "${rest}" ]]; then
+      candidates+=("/${drive,,}${rest}")
+    else
+      candidates+=("/${drive,,}")
+    fi
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    if [[ -z "${rest}" ]]; then
+      candidates+=("${drive^^}:")
+    else
+      candidates+=("${drive^^}:${rest}")
+    fi
+  fi
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -e "${c}" ]]; then
+      printf '%s\n' "${c}"
+      return 0
+    fi
+  done
+  printf '%s\n' "${p}"
+}
+
+
 # --- Windows / WSL relaunch -------------------------------------------------
 
 # The configured Git Bash: environment override > app.env > the committed
@@ -64,12 +155,18 @@ docker_bash_exe() {
     printf '%s\n' "${BASH_EXE}"
     return 0
   fi
-  env_file="${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}"
+  env_file="$(resolve_host_path "${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}")"
   if [[ ! -f "${env_file}" ]]; then
-    env_file="${HERE}/gh-app/app.env.example"
+    env_file="$(resolve_host_path "${HERE}/gh-app/app.env.example")"
   fi
   if [[ -f "${env_file}" ]]; then
-    line="$(sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${env_file}" | head -1)"
+    line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' | head -1)"
+    if [[ -z "${line}" ]]; then
+      line="$(tr -d '\r' < "${env_file}" | sed -n "s/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*'\([^']*\)'[[:space:]]*$/\1/p" | head -1)"
+    fi
+    if [[ -z "${line}" ]]; then
+      line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' | head -1)"
+    fi
     if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
       printf '%s\n' "${line}"
       return 0
@@ -168,6 +265,11 @@ docker_relaunch() {
   exit "${rc}"
 }
 
+# Sourceable: tests set CONAHCNUJ_IMPORT=1 to load helpers without running.
+if [[ "${CONAHCNUJ_IMPORT:-0}" == "1" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0
+fi
+
 if docker_needs_relaunch; then
   docker_relaunch "$@"
 fi
@@ -201,21 +303,22 @@ fi
 
 # Turn the host app.env into a container-friendly one: the credential helper
 # must call the container's bash, and the key must point at the mounted secret.
-HOST_ENV="${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}"
+HOST_ENV="$(resolve_host_path "${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}")"
 if [[ ! -f "${HOST_ENV}" ]]; then
   echo "ERROR: ${HOST_ENV} not found. Create it from gh-app/app.env.example." >&2
   exit 1
 fi
 set -a
 # shellcheck source=gh-app/app.env.example
-. "${HOST_ENV}"
+# Strip CR so CRLF app.env files (common on Windows) parse cleanly.
+. <(tr -d '\r' < "${HOST_ENV}")
 set +a
 : "${APP_ID:?APP_ID missing from ${HOST_ENV}}"
 : "${INSTALLATION_ID:?INSTALLATION_ID missing from ${HOST_ENV}}"
 : "${APP_SLUG:?APP_SLUG missing from ${HOST_ENV}}"
 : "${PRIVATE_KEY_PATH:?PRIVATE_KEY_PATH missing from ${HOST_ENV}}"
 
-PEM_HOST="${PRIVATE_KEY_PATH/#\~/${HOME}}"
+PEM_HOST="$(resolve_host_path "${PRIVATE_KEY_PATH}")"
 if [[ ! -f "${PEM_HOST}" ]]; then
   echo "ERROR: private key not found: ${PEM_HOST}" >&2
   exit 1

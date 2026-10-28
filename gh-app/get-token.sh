@@ -12,31 +12,107 @@ fi
 
 set -a
 # shellcheck source=gh-app/app.env.example
-. "${ENV_FILE}"
+# Strip CR so CRLF app.env files (common on Windows) parse cleanly.
+. <(tr -d '\r' < "${ENV_FILE}")
 set +a
 
 # Expand ~, then accept a WSL /mnt/<drive>/ path when this bash is Git Bash.
 # Git Bash has no /mnt/<drive> mount, so openssl looks under its install
 # directory (C:/Program Files/Git/mnt/...). /<drive>/... is the same file.
 resolve_pem_path() {
-  local path="${1}"
-  local drive rest alt
-  path="${path/#\~/${HOME}}"
-  if [[ -e "${path}" ]]; then
-    printf '%s' "${path}"
-    return 0
-  fi
-  if [[ "${path}" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
-    drive="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-    rest="${BASH_REMATCH[2]}"
-    alt="/${drive}/${rest}"
-    if [[ -e "${alt}" ]]; then
-      printf '%s' "${alt}"
+  local input="${1}"
+  # Drop CR so CRLF app.env files (common on Windows) do not leave a
+  # trailing \r on the path, which would make every -e check fail.
+  input="${input//$'\r'/}"
+  # Trim surrounding whitespace.
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+  # Strip surrounding quotes that an app.env value may carry (possibly
+  # more than one layer, e.g. "\"path\"").
+  while true; do
+    case "${input}" in
+      \"*\") input="${input:1:${#input}-2}" ;;
+      \'*\') input="${input:1:${#input}-2}" ;;
+      *) break ;;
+    esac
+  done
+  local p="${input/#\~/${HOME}}"
+  p="${p//\\//}"
+  p="${p//$'\r'/}"
+  # Trim again after normalization.
+  p="${p#"${p%%[![:space:]]*}"}"
+  p="${p%"${p##*[![:space:]]}"}"
+  local candidates=("${p}")
+  if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
       return 0
     fi
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
   fi
-  printf '%s' "${path}"
+  if [[ "${p}" =~ ^/cygdrive/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    # The /<drive>/ form is already preferred; short-circuit when present.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^([a-zA-Z]):(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]:-}"
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
+    if [[ -n "${rest}" ]]; then
+      candidates+=("/${drive,,}${rest}")
+    else
+      candidates+=("/${drive,,}")
+    fi
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    if [[ -z "${rest}" ]]; then
+      candidates+=("${drive^^}:")
+    else
+      candidates+=("${drive^^}:${rest}")
+    fi
+  fi
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -e "${c}" ]]; then
+      printf '%s\n' "${c}"
+      return 0
+    fi
+  done
+  printf '%s\n' "${p}"
 }
+
+# Sourceable: tests set CONAHCNUJ_IMPORT=1 to load helpers without running.
+if [[ "${CONAHCNUJ_IMPORT:-0}" == "1" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0
+fi
 
 PEM_PATH="$(resolve_pem_path "${PRIVATE_KEY_PATH}")"
 API_BASE="${GH_APP_API_BASE:-https://api.github.com}"

@@ -31,4 +31,9 @@ for t in "${HERE}/"*.sh; do
   bash "${t}" "${TMP}/gh-app"
 done
 
+if [[ -f "${REPO_SCRIPTS}/../gh-app/get-token.test.sh" ]]; then
+  echo "--- get-token.test.sh"
+  bash "${REPO_SCRIPTS}/../gh-app/get-token.test.sh" "${TMP}/gh-app"
+fi
+
 echo "ALL MOCK TESTS PASSED"
