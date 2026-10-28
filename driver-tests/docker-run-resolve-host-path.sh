@@ -91,3 +91,24 @@ GOT="$(resolve_host_path "Z:/no-such-conahcnuj-key.pem")"
 echo "PASS missing drive-letter path unchanged"
 
 echo "All resolve_host_path tests passed"
+
+# Trim surrounding whitespace (spaces and tabs).
+WS_INPUT="   ${REAL}   "
+GOT="$(resolve_host_path "${WS_INPUT}")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: whitespace-padded path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS surrounding whitespace trimmed"
+
+# Nested quotes (more than one layer) are stripped.
+GOT="$(resolve_host_path "\"'${REAL}'\"")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: nested-quoted path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS nested quotes stripped"
+
+# Drive-letter root with no trailing path is tolerated.
+GOT="$(resolve_host_path "C:")"
+[[ "${GOT}" == "C:" ]] || { echo "FAIL: drive-letter root resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS drive-letter root tolerated"
+
+# Missing drive-letter path with spaces survives (no crash).
+GOT="$(resolve_host_path "Z:/no such file.pem")"
+[[ "${GOT}" == "Z:/no such file.pem" ]] || { echo "FAIL: missing spaced drive path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing spaced drive path unchanged"
