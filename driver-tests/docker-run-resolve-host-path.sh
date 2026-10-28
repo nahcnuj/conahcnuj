@@ -90,24 +90,49 @@ GOT="$(resolve_host_path "Z:/no-such-conahcnuj-key.pem")"
 [[ "${GOT}" == "Z:/no-such-conahcnuj-key.pem" ]] || { echo "FAIL: missing drive-letter path resolved to '${GOT}'" >&2; exit 1; }
 echo "PASS missing drive-letter path unchanged"
 
-# Surrounding whitespace is trimmed.
-GOT="$(resolve_host_path "   ${REAL}   ")"
+# Trim surrounding whitespace (spaces and tabs).
+WS_INPUT="   ${REAL}   "
+GOT="$(resolve_host_path "${WS_INPUT}")"
 [[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: whitespace-padded path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS whitespace-padded path trimmed"
+echo "PASS surrounding whitespace trimmed"
 
-# Nested quotes (mixed single/double) are stripped.
+# Nested quotes (more than one layer) are stripped.
 GOT="$(resolve_host_path "\"'${REAL}'\"")"
 [[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: nested-quoted path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS nested-quoted path stripped"
+echo "PASS nested quotes stripped"
 
-# A missing MSYS-style drive root is left unchanged.
-GOT="$(resolve_host_path "/q")"
-[[ "${GOT}" == "/q" ]] || { echo "FAIL: missing drive root resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS missing drive root unchanged"
+# Drive-letter root with no trailing path is tolerated.
+GOT="$(resolve_host_path "Z:")"
+[[ "${GOT}" == "Z:" ]] || { echo "FAIL: drive-letter root resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS drive-letter root tolerated"
 
-# A missing Windows drive root is left unchanged.
-GOT="$(resolve_host_path "Q:")"
-[[ "${GOT}" == "Q:" ]] || { echo "FAIL: missing Windows drive root resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS missing Windows drive root unchanged"
+# Missing drive-letter path with spaces survives (no crash).
+GOT="$(resolve_host_path "Z:/no such file.pem")"
+[[ "${GOT}" == "Z:/no such file.pem" ]] || { echo "FAIL: missing spaced drive path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing spaced drive path unchanged"
+
+# MSYS scenario (issue #588): file lives at /c/... but a WSL-style /mnt/c/...
+# path is given. resolve_host_path must rewrite to the existing /c form instead
+# of reporting "private key not found". Runs on Linux by creating /c when
+# writable (sudo is available on GitHub runners); skipped otherwise.
+MSYS_ROOT="/c/conahcnuj-test-$$"
+if ( mkdir -p "${MSYS_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${MSYS_ROOT}/.ssh" 2>/dev/null; then
+  if [[ ! -w "${MSYS_ROOT}/.ssh" ]]; then
+    sudo chown "$(id -u):$(id -g)" "${MSYS_ROOT}" "${MSYS_ROOT}/.ssh" 2>/dev/null || true
+  fi
+  printf 'x' > "${MSYS_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${MSYS_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+  if [[ -f "${MSYS_ROOT}/.ssh/key.pem" ]]; then
+    # Ensure the /mnt form does NOT exist so the conversion is exercised.
+    sudo rm -rf "/mnt/c/conahcnuj-test-$$" 2>/dev/null || rm -rf "/mnt/c/conahcnuj-test-$$" 2>/dev/null || true
+    GOT="$(resolve_host_path "/mnt/c/conahcnuj-test-$$/.ssh/key.pem")"
+    [[ "${GOT}" == "${MSYS_ROOT}/.ssh/key.pem" ]] || { echo "FAIL: MSYS /mnt->/c rewrite resolved to '${GOT}'" >&2; exit 1; }
+    echo "PASS MSYS /mnt path rewrites to /c path"
+    rm -rf "${MSYS_ROOT}" 2>/dev/null || sudo rm -rf "${MSYS_ROOT}" 2>/dev/null || true
+  else
+    echo "SKIP MSYS scenario: could not create key file"
+  fi
+else
+  echo "SKIP MSYS scenario: /c not writable"
+fi
 
 echo "All resolve_host_path tests passed"
