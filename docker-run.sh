@@ -54,19 +54,13 @@ docker_() { MSYS_NO_PATHCONV=1 docker "$@"; }
 
 resolve_host_path() {
   local input="${1}"
-  # Drop CR so CRLF app.env files (common on Windows) do not leave a
-  # trailing \r on the path, which would make every -f check fail.
-  input="${input//$'\r'/}"
+  # Strip surrounding quotes that an app.env value may carry.
+  input="${input#\"}"
+  input="${input%\"}"
+  input="${input#\'}"
+  input="${input%\'}"
   local p="${input/#\~/${HOME}}"
   p="${p//\\//}"
-  p="${p//$'\r'/}"
-  # Under MSYS/Git Bash, WSL /mnt/<drive>/ mounts do not exist; map them to
-  # the MSYS /<drive>/ form syntactically before the existence checks.
-  if command -v cygpath >/dev/null 2>&1 && [[ "${p}" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
-    local _drive="${BASH_REMATCH[1]}"
-    local _rest="${BASH_REMATCH[2]}"
-    p="/${_drive,,}/${_rest}"
-  fi
   local candidates=("${p}")
   if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
@@ -74,10 +68,18 @@ resolve_host_path() {
     candidates+=("/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
   fi
+  if [[ "${p}" =~ ^/cygdrive/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
   if [[ "${p}" =~ ^/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
     candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
   fi
   if [[ "${p}" =~ ^([a-zA-Z]):/(.*)$ ]]; then
@@ -85,10 +87,11 @@ resolve_host_path() {
     local rest="${BASH_REMATCH[2]}"
     candidates+=("/${drive,,}/${rest}")
     candidates+=("/mnt/${drive,,}/${rest}")
+    candidates+=("/cygdrive/${drive,,}/${rest}")
   fi
   local c
   for c in "${candidates[@]}"; do
-    if [[ -f "${c}" ]]; then
+    if [[ -e "${c}" ]]; then
       printf '%s\n' "${c}"
       return 0
     fi
@@ -108,12 +111,12 @@ docker_bash_exe() {
     printf '%s\n' "${BASH_EXE}"
     return 0
   fi
-  env_file="$(resolve_host_path "${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}")"
+  env_file="${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}"
   if [[ ! -f "${env_file}" ]]; then
     env_file="${HERE}/gh-app/app.env.example"
   fi
   if [[ -f "${env_file}" ]]; then
-    line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' | head -1)"
+    line="$(sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${env_file}" | head -1)"
     if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
       printf '%s\n' "${line}"
       return 0
@@ -212,6 +215,11 @@ docker_relaunch() {
   exit "${rc}"
 }
 
+# Sourceable: tests set CONAHCNUJ_IMPORT=1 to load helpers without running.
+if [[ "${CONAHCNUJ_IMPORT:-0}" == "1" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0
+fi
+
 if docker_needs_relaunch; then
   docker_relaunch "$@"
 fi
@@ -252,8 +260,7 @@ if [[ ! -f "${HOST_ENV}" ]]; then
 fi
 set -a
 # shellcheck source=gh-app/app.env.example
-# Strip CR so CRLF app.env files (common on Windows) parse cleanly.
-. <(tr -d '\r' < "${HOST_ENV}")
+. "${HOST_ENV}"
 set +a
 : "${APP_ID:?APP_ID missing from ${HOST_ENV}}"
 : "${INSTALLATION_ID:?INSTALLATION_ID missing from ${HOST_ENV}}"
