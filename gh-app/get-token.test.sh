@@ -101,3 +101,27 @@ if [[ "${OUT}" != *"failed to sign the App JWT"* ]]; then
 fi
 echo "PASS invalid key reports signing failure"
 rm -f "${BAD}"
+
+# Drive-letter path (C:/...) early-returns to the existing /c/... form when
+# that file exists, mirroring docker-run.sh's resolve_host_path (#588).
+DRV_ROOT="/c/conahcnuj-gt-drv-$$"
+if ( mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null; then
+  if [[ ! -w "${DRV_ROOT}/.ssh" ]]; then
+    sudo chown "$(id -u):$(id -g)" "${DRV_ROOT}" "${DRV_ROOT}/.ssh" 2>/dev/null || true
+  fi
+  printf 'x' > "${DRV_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${DRV_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+  if [[ -f "${DRV_ROOT}/.ssh/key.pem" ]]; then
+    set_key_path "C:/conahcnuj-gt-drv-$$/.ssh/key.pem"
+    GOT="$(bash "${STAGE}/get-token.sh" --print-pem-path)"
+    if [[ "${GOT}" != "${DRV_ROOT}/.ssh/key.pem" ]]; then
+      echo "FAIL: drive-letter path resolved to '${GOT}', expected '${DRV_ROOT}/.ssh/key.pem'" >&2
+      exit 1
+    fi
+    echo "PASS drive-letter path rewrites to /c path"
+    rm -rf "${DRV_ROOT}" 2>/dev/null || sudo rm -rf "${DRV_ROOT}" 2>/dev/null || true
+  else
+    echo "SKIP drive-letter scenario: could not create key file"
+  fi
+else
+    echo "SKIP drive-letter scenario: /c not writable"
+fi

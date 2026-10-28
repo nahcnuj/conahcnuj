@@ -109,6 +109,11 @@ resolve_pem_path() {
   printf '%s\n' "${p}"
 }
 
+# Sourceable: tests set CONAHCNUJ_IMPORT=1 to load helpers without running.
+if [[ "${CONAHCNUJ_IMPORT:-0}" == "1" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0
+fi
+
 PEM_PATH="$(resolve_pem_path "${PRIVATE_KEY_PATH}")"
 API_BASE="${GH_APP_API_BASE:-https://api.github.com}"
 
