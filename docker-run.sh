@@ -79,6 +79,11 @@ resolve_host_path() {
   if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     candidates+=("/${drive,,}${rest}")
     candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
@@ -86,6 +91,11 @@ resolve_host_path() {
   if [[ "${p}" =~ ^/cygdrive/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     candidates+=("/${drive,,}${rest}")
     candidates+=("/mnt/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
@@ -93,6 +103,11 @@ resolve_host_path() {
   if [[ "${p}" =~ ^/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
+    # The /<drive>/ form is already preferred; short-circuit when present.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     candidates+=("/mnt/${drive,,}${rest}")
     candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")

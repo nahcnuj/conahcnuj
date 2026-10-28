@@ -21,12 +21,14 @@ set +a
 # directory (C:/Program Files/Git/mnt/...). /<drive>/... is the same file.
 resolve_pem_path() {
   local input="${1}"
-  # Drop CR so CRLF app.env files do not leave a trailing \r.
+  # Drop CR so CRLF app.env files (common on Windows) do not leave a
+  # trailing \r on the path, which would make every -e check fail.
   input="${input//$'\r'/}"
   # Trim surrounding whitespace.
   input="${input#"${input%%[![:space:]]*}"}"
   input="${input%"${input##*[![:space:]]}"}"
-  # Strip surrounding quotes (possibly more than one layer).
+  # Strip surrounding quotes that an app.env value may carry (possibly
+  # more than one layer, e.g. "\"path\"").
   while true; do
     case "${input}" in
       \"*\") input="${input:1:${#input}-2}" ;;
@@ -34,17 +36,21 @@ resolve_pem_path() {
       *) break ;;
     esac
   done
-  input="${input#"${input%%[![:space:]]*}"}"
-  input="${input%"${input##*[![:space:]]}"}"
   local p="${input/#\~/${HOME}}"
   p="${p//\\//}"
   p="${p//$'\r'/}"
+  # Trim again after normalization.
   p="${p#"${p%%[![:space:]]*}"}"
   p="${p%"${p##*[![:space:]]}"}"
   local candidates=("${p}")
   if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     candidates+=("/${drive,,}${rest}")
     candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
@@ -52,6 +58,11 @@ resolve_pem_path() {
   if [[ "${p}" =~ ^/cygdrive/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
+    # Prefer the Git Bash /<drive>/ form when it exists.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     candidates+=("/${drive,,}${rest}")
     candidates+=("/mnt/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
@@ -59,6 +70,11 @@ resolve_pem_path() {
   if [[ "${p}" =~ ^/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
+    # The /<drive>/ form is already preferred; short-circuit when present.
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     candidates+=("/mnt/${drive,,}${rest}")
     candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
