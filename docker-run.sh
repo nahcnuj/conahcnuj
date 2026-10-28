@@ -57,14 +57,24 @@ resolve_host_path() {
   # Drop CR so CRLF app.env files (common on Windows) do not leave a
   # trailing \r on the path, which would make every -e check fail.
   input="${input//$'\r'/}"
-  # Strip surrounding quotes that an app.env value may carry.
-  input="${input#\"}"
-  input="${input%\"}"
-  input="${input#\'}"
-  input="${input%\'}"
+  # Trim surrounding whitespace.
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+  # Strip surrounding quotes that an app.env value may carry (possibly
+  # more than one layer, e.g. "\"path\"").
+  while true; do
+    case "${input}" in
+      \"*\") input="${input:1:${#input}-2}" ;;
+      \'*\') input="${input:1:${#input}-2}" ;;
+      *) break ;;
+    esac
+  done
   local p="${input/#\~/${HOME}}"
   p="${p//\\//}"
   p="${p//$'\r'/}"
+  # Trim again after normalization.
+  p="${p#"${p%%[![:space:]]*}"}"
+  p="${p%"${p##*[![:space:]]}"}"
   local candidates=("${p}")
   if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
@@ -86,12 +96,21 @@ resolve_host_path() {
     candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
   fi
-  if [[ "${p}" =~ ^([a-zA-Z]):/(.*)$ ]]; then
+  if [[ "${p}" =~ ^([a-zA-Z]):(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
-    local rest="${BASH_REMATCH[2]}"
-    candidates+=("/${drive,,}/${rest}")
-    candidates+=("/mnt/${drive,,}/${rest}")
-    candidates+=("/cygdrive/${drive,,}/${rest}")
+    local rest="${BASH_REMATCH[2]:-}"
+    if [[ -n "${rest}" ]]; then
+      candidates+=("/${drive,,}${rest}")
+    else
+      candidates+=("/${drive,,}")
+    fi
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    if [[ -z "${rest}" ]]; then
+      candidates+=("${drive^^}:")
+    else
+      candidates+=("${drive^^}:${rest}")
+    fi
   fi
   local c
   for c in "${candidates[@]}"; do
@@ -121,6 +140,12 @@ docker_bash_exe() {
   fi
   if [[ -f "${env_file}" ]]; then
     line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' | head -1)"
+    if [[ -z "${line}" ]]; then
+      line="$(tr -d '\r' < "${env_file}" | sed -n "s/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*'\([^']*\)'[[:space:]]*$/\1/p" | head -1)"
+    fi
+    if [[ -z "${line}" ]]; then
+      line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' | head -1)"
+    fi
     if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
       printf '%s\n' "${line}"
       return 0
