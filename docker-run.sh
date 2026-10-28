@@ -52,6 +52,39 @@ else
 fi
 docker_() { MSYS_NO_PATHCONV=1 docker "$@"; }
 
+resolve_host_path() {
+  local input="${1}"
+  local p="${input/#\~/${HOME}}"
+  p="${p//\\//}"
+  local candidates=("${p}")
+  if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^([a-zA-Z]):/(.*)$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/${drive,,}/${rest}")
+    candidates+=("/mnt/${drive,,}/${rest}")
+  fi
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -f "${c}" ]]; then
+      printf '%s\n' "${c}"
+      return 0
+    fi
+  done
+  printf '%s\n' "${p}"
+}
+
 # --- Windows / WSL relaunch -------------------------------------------------
 
 # The configured Git Bash: environment override > app.env > the committed
@@ -201,7 +234,7 @@ fi
 
 # Turn the host app.env into a container-friendly one: the credential helper
 # must call the container's bash, and the key must point at the mounted secret.
-HOST_ENV="${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}"
+HOST_ENV="$(resolve_host_path "${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}")"
 if [[ ! -f "${HOST_ENV}" ]]; then
   echo "ERROR: ${HOST_ENV} not found. Create it from gh-app/app.env.example." >&2
   exit 1
@@ -215,7 +248,7 @@ set +a
 : "${APP_SLUG:?APP_SLUG missing from ${HOST_ENV}}"
 : "${PRIVATE_KEY_PATH:?PRIVATE_KEY_PATH missing from ${HOST_ENV}}"
 
-PEM_HOST="${PRIVATE_KEY_PATH/#\~/${HOME}}"
+PEM_HOST="$(resolve_host_path "${PRIVATE_KEY_PATH}")"
 if [[ ! -f "${PEM_HOST}" ]]; then
   echo "ERROR: private key not found: ${PEM_HOST}" >&2
   exit 1
