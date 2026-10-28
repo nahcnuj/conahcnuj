@@ -499,14 +499,16 @@ opencode_run() {
     OPENCODE_ROUND_MODEL_GONE="true"
   fi
   # Quota/billing exhaustion is provider-level like an environment error, and
-  # is read before it so the specific diagnosis wins over the generic one.
-  if [[ "${status}" != "0" ]] && { [[ "${quota_aborted}" == "true" ]] || opencode_round_is_quota_exhausted "${output_file}" "${err_file}"; }; then
+  # is read before it so the specific diagnosis wins over the generic one. A
+  # round the watchdog already killed on a quota tell is exhausted regardless
+  # of the exit status opencode happened to return for the signal.
+  if [[ "${quota_aborted}" == "true" ]] || { [[ "${status}" != "0" ]] && opencode_round_is_quota_exhausted "${output_file}" "${err_file}"; }; then
     OPENCODE_ROUND_QUOTA_EXHAUSTED="true"
   fi
   if [[ "${status}" != "0" ]] && opencode_round_is_environment "${output_file}" "${err_file}"; then
     OPENCODE_ROUND_ENVIRONMENT="true"
   fi
-  if [[ "${status}" != "0" ]] && [[ "${quota_aborted}" != "true" ]] && { [[ "${rate_aborted}" == "true" ]] || opencode_round_is_rate_limited "${output_file}" "${err_file}"; }; then
+  if [[ "${quota_aborted}" != "true" ]] && { [[ "${rate_aborted}" == "true" ]] || { [[ "${status}" != "0" ]] && opencode_round_is_rate_limited "${output_file}" "${err_file}"; }; }; then
     OPENCODE_ROUND_RATE_LIMITED="true"
   fi
   local detected_session
