@@ -51,6 +51,11 @@ on:
         description: Issue or pull request number to continue
         required: true
         type: number
+      runs-on:
+        description: 'GitHub-hosted runner label to use (default: ubuntu-latest)'
+        required: false
+        type: string
+        default: ubuntu-latest
   # Another repository drives one of its issues or pull requests by calling
   # this workflow. The job `if` below runs whenever `inputs.number` is set, and
   # the driver checkout follows this file (`job.workflow_repository` at
@@ -73,6 +78,11 @@ on:
         required: false
         type: string
         default: conahcnuj
+      runs-on:
+        description: 'GitHub-hosted runner label to use (default: ubuntu-latest)'
+        required: false
+        type: string
+        default: ubuntu-latest
     secrets:
       APP_ID:
         required: true
@@ -91,7 +101,7 @@ concurrency:
 jobs:
   attempt:
     name: Attempt to resolve issue
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on || 'ubuntu-latest' }}
     timeout-minutes: 60
     environment: ${{ inputs.environment || 'conahcnuj' }}
     if: >-
