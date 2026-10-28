@@ -1571,11 +1571,18 @@ drive() {
       echo "WARNING: could not read reviews for PR #${pr}; skipping feedback detection this cycle." >&2
       rv=""
     fi
-    decision="$(printf '%s' "${rv}" | cut -d'|' -f1)"
-    payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
-    raw="$(gh_api_unb64 "${payload}")"
-    summary="$(printf '%s' "${raw}" | gh_api_review_summary)"
-    sig="$(gh_api_review_fingerprint "${raw}")"
+    if [[ -z "${rv}" ]]; then
+      decision=""
+      raw=""
+      summary=""
+      sig=""
+    else
+      decision="$(printf '%s' "${rv}" | cut -d'|' -f1)"
+      payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
+      raw="$(gh_api_unb64 "${payload}")"
+      summary="$(printf '%s' "${raw}" | gh_api_review_summary)"
+      sig="$(gh_api_review_fingerprint "${raw}")"
+    fi
     echo "reviewDecision: ${decision:-NONE}" >&2
 
     if [[ "${decision}" == "APPROVED" ]]; then

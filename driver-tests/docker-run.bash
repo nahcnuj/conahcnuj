@@ -76,6 +76,7 @@ if (( REAL_ENV == 1 )); then
 else
   TOKEN_CHECK='echo "TOKEN_SKIP (no real env)"'
 fi
+set +e
 out="$(
   CONAHCNUJ_BUILD=1 \
   CONAHCNUJ_IMAGE="${IMAGE}" \
@@ -102,7 +103,14 @@ out="$(
     printf 'PWD=%s\\n' \"\$(pwd)\"
     printf 'PEM=%s\\n' \"\$(cat /run/secrets/app.pem)\"
   " 2>&1
-)"
+)
+rc=$?
+set -e
+if [[ ${rc} -ne 0 ]]; then
+  echo "FAIL: wrapper exited ${rc}; output:" >&2
+  printf '%s\n' "${out}" >&2
+  exit 1
+fi
 
 grep -q 'PWD=/work' <<<"${out}" || {
   echo "FAIL: container did not start in /work; output:" >&2
