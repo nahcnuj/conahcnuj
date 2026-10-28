@@ -205,4 +205,15 @@ GOT="$(resolve_host_path "\"${SPACE_FILE}\"")"
 [[ "${GOT}" == "${SPACE_FILE}" ]] || { echo "FAIL: quoted spaced path resolved to '${GOT}'" >&2; exit 1; }
 echo "PASS quoted path with spaces resolves"
 
+# Empty input resolves to empty (no crash).
+GOT="$(resolve_host_path "")"
+[[ "${GOT}" == "" ]] || { echo "FAIL: empty input resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS empty input tolerated"
+
+# Combined: surrounding spaces + quotes + CRLF normalize to the existing path.
+COMBINED="   \"${REAL}\"   "$'\r'
+GOT="$(resolve_host_path "${COMBINED}")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: combined input resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS combined whitespace/quote/CRLF normalized"
+
 echo "All resolve_host_path tests passed"
