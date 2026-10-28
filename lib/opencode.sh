@@ -223,6 +223,12 @@ opencode_round_is_rate_limited() {
 opencode_run() {
   local issue_title="${1}" issue_body="${2}" workdir="${3}" model="${4}" extra_context="${5:-}" session_id="${6:-}" previous_model="${7:-}" collected_context="${8:-}" prompt_override="${9:-}"
   local prompt
+  # Optional reasoning effort / variant for the coding agent. OpenCode exposes
+  # it as --variant (provider-specific reasoning effort: high, max, minimal, ...).
+  # The driver has no opinion of its own; it only forwards what the operator
+  # asked for through the environment, so a run on a high-spec runner can spend
+  # more effort without touching the driver's logic (#1395).
+  local variant="${CONAHCNUJ_MODEL_VARIANT:-${CONAHCNUJ_VARIANT:-${CONAHCNUJ_EFFORT:-${CONAHCNUJ_MODEL_EFFORT:-${OPENCODE_VARIANT:-${OPENCODE_EFFORT:-}}}}}}"
   OPENCODE_ROUND_ENVIRONMENT="false"
   OPENCODE_ROUND_MODEL_GONE="false"
   OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
@@ -264,10 +270,14 @@ opencode_run() {
   export GH_TOKEN
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
+    local variant_arg=""
+    if [[ -n "${variant}" ]]; then
+      variant_arg=" --variant ${variant}"
+    fi
     if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --auto --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"
+      printf 'opencode run --auto --format json --model %s --dir %s%s --session %s %s\n' "${model}" "${workdir}" "${variant_arg}" "${session_id}" "${prompt}"
     else
-      printf 'opencode run --auto --format json --model %s --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}"
+      printf 'opencode run --auto --format json --model %s --dir %s%s --title conahcnuj %s\n' "${model}" "${workdir}" "${variant_arg}" "${prompt}"
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
@@ -416,6 +426,9 @@ opencode_run() {
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
   args=(run --auto --print-logs --thinking --format json --model "${model}" --dir "${workdir}")
+  if [[ -n "${variant}" ]]; then
+    args+=(--variant "${variant}")
+  fi
   # --print-logs defaults to INFO, which is ~30 lines of boot/permission
   # chatter per model and buries the rendered log. WARN keeps the diagnostics
   # that matter without the noise; override to DEBUG when hunting a problem.

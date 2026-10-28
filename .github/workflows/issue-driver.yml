@@ -51,6 +51,21 @@ on:
         description: Issue or pull request number to continue
         required: true
         type: number
+      model_variant:
+        description: 'OpenCode model variant / reasoning effort passed as --variant (e.g. high, max). Empty uses the model default.'
+        required: false
+        type: string
+        default: ''
+      variant:
+        description: 'Alias for model_variant.'
+        required: false
+        type: string
+        default: ''
+      effort:
+        description: 'Alias for model_variant.'
+        required: false
+        type: string
+        default: 
   # Another repository drives one of its issues or pull requests by calling
   # this workflow. The job `if` below runs whenever `inputs.number` is set, and
   # the driver checkout follows this file (`job.workflow_repository` at
@@ -73,6 +88,21 @@ on:
         required: false
         type: string
         default: conahcnuj
+      model_variant:
+        description: 'OpenCode model variant / reasoning effort passed as --variant (e.g. high, max). Empty uses the model default.'
+        required: false
+        type: string
+        default: ''
+      variant:
+        description: 'Alias for model_variant.'
+        required: false
+        type: string
+        default: ''
+      effort:
+        description: 'Alias for model_variant.'
+        required: false
+        type: string
+        default: ''
     secrets:
       APP_ID:
         required: true
@@ -179,6 +209,7 @@ jobs:
           # checkout below puts the driver's own repository name in origin, so
           # relying on origin detection would drive the wrong repository.
           CONAHCNUJ_REPO: ${{ inputs.repository || github.repository }}
+          CONAHCNUJ_MODEL_VARIANT: ${{ inputs.model_variant || inputs.variant || inputs.effort }}
           # When true the driver runs from the `target/` checkout (same value as
           # the target checkout step's `if`). For the driver's own repository it
           # runs from the workspace root, the driver checkout itself.
