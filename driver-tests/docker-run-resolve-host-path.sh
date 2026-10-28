@@ -6,7 +6,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "${HERE}/.." && pwd)"
 
 export CONAHCNUJ_IMPORT=1
-# shellcheck source=../docker-run.sh
+# shellcheck source=docker-run.sh
 . "${REPO}/docker-run.sh"
 
 ROOT="$(mktemp -d)"
@@ -38,6 +38,7 @@ HOME_BACKUP="${HOME}"
 export HOME="${ROOT}/home"
 mkdir -p "${HOME}/.ssh"
 printf 'x' > "${HOME}/.ssh/key.pem"
+# shellcheck disable=SC2088
 GOT="$(resolve_host_path "~/.ssh/key.pem")"
 [[ "${GOT}" == "${HOME}/.ssh/key.pem" ]] || { echo "FAIL: tilde path resolved to '${GOT}'" >&2; exit 1; }
 export HOME="${HOME_BACKUP}"

@@ -100,6 +100,10 @@ resolve_host_path() {
   if [[ "${p}" =~ ^([a-zA-Z]):(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]:-}"
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     if [[ -n "${rest}" ]]; then
       candidates+=("/${drive,,}${rest}")
     else

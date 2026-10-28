@@ -17,7 +17,7 @@ run_case() {
   local assignment="${1}"
   printf '%s\n' "${assignment}" > "${APP_ENV}"
   export CONAHCNUJ_APP_ENV="${APP_ENV}"
-  # shellcheck source=../docker-run.sh
+  # shellcheck source=docker-run.sh
   . "${REPO}/docker-run.sh"
   docker_bash_exe
 }
@@ -40,6 +40,7 @@ echo "PASS unquoted BASH_EXE"
 # CRLF line endings are tolerated.
 printf 'BASH_EXE="C:/Program Files/Git/bin/bash.exe"\r\n' > "${APP_ENV}"
 export CONAHCNUJ_APP_ENV="${APP_ENV}"
+# shellcheck source=docker-run.sh
 . "${REPO}/docker-run.sh"
 GOT="$(docker_bash_exe)"
 [[ "${GOT}" == "C:/Program Files/Git/bin/bash.exe" ]] || { echo "FAIL: CRLF: got '${GOT}'" >&2; exit 1; }
