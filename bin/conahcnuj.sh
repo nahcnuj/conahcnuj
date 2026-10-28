@@ -1374,6 +1374,21 @@ request_review_from_owner() {
     echo "WARNING: no review request on PR #${pr} was accepted and the PR could not be read back either, so nobody can be confirmed as asked. The PR is complete and waits for a human, so the run ends here instead of filing a bug report for an unverifiable hand-off." >&2
     return 0
   fi
+  local reviews_payload review_decision
+  reviews_payload="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}" 2>/dev/null)" || reviews_payload=""
+  review_decision="$(printf "%s" "${reviews_payload}" | cut -d"|" -f1)"
+  if [[ -z "${reviews_payload}" ]]; then
+    REVIEW_HANDOFF_CONFIRMED="false"
+    echo "WARNING: no review request on PR #${pr} was accepted and the PR reviews could not be read back either, so nobody can be confirmed as asked." >&2
+    return 0
+  fi
+  case "${review_decision}" in
+    CHANGES_REQUESTED|COMMENTED|REVIEW_REQUIRED)
+      REVIEW_HANDOFF_CONFIRMED="false"
+      echo "WARNING: no review request on PR #${pr} was accepted, but the owner has already reviewed it (${review_decision}); treating the hand-off as unverifiable rather than lost." >&2
+      return 0
+      ;;
+  esac
   echo "ERROR: could not request review on PR #${pr}." >&2
   return 1
 }
