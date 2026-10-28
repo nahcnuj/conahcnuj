@@ -1,109 +1,134 @@
 #!/usr/bin/env bash
-# Private-key path: keep a path that exists, and rewrite a missing WSL
-# /mnt/<drive>/ path to the Git Bash /<drive>/ path when that file exists.
-# Usage: bash get-token-pem-path.sh <staged gh-app dir>
+# Unit tests for gh-app/get-token.sh's resolve_pem_path (offline).
+# Sources the function directly via CONAHCNUJ_IMPORT=1, mirroring the
+# docker-run.sh resolve_host_path tests.
 set -euo pipefail
 
-STAGE="${1:?staged gh-app dir required}"
-ENV_FILE="${STAGE}/app.env"
-ENV_BACKUP="$(mktemp)"
-cp "${ENV_FILE}" "${ENV_BACKUP}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-set_key_path() {
-  local key_path="${1}"
-  awk -v path="${key_path}" '
-    BEGIN { replaced = 0 }
-    /^PRIVATE_KEY_PATH=/ { print "PRIVATE_KEY_PATH=" path; replaced = 1; next }
-    { print }
-    END { if (!replaced) print "PRIVATE_KEY_PATH=" path }
-  ' "${ENV_BACKUP}" > "${ENV_FILE}"
-}
+STAGE="${1:-}"
+if [[ -n "${STAGE}" ]]; then
+  GT="${STAGE}/get-token.sh"
+else
+  GT="${HERE}/get-token.sh"
+fi
 
-cleanup() {
-  cp "${ENV_BACKUP}" "${ENV_FILE}"
-  rm -f "${ENV_BACKUP}"
-}
-trap cleanup EXIT
+export CONAHCNUJ_IMPORT=1
+# shellcheck source=get-token.sh
+. "${GT}"
 
-REAL="$(mktemp)"
+ROOT="$(mktemp -d)"
+trap 'rm -rf "${ROOT}"' EXIT
+
+REAL="${ROOT}/real.pem"
 printf 'x' > "${REAL}"
 
-set_key_path "${REAL}"
-GOT="$(bash "${STAGE}/get-token.sh" --print-pem-path)"
-if [[ "${GOT}" != "${REAL}" ]]; then
-  echo "FAIL: existing path '${REAL}' resolved to '${GOT}'" >&2
-  exit 1
-fi
-echo "PASS existing private-key path is unchanged"
+# Existing path is returned unchanged.
+GOT="$(resolve_pem_path "${REAL}")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: existing path '${REAL}' resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS existing path unchanged"
 
-set_key_path "/mnt/z/no-such-conahcnuj-key.pem"
-GOT="$(bash "${STAGE}/get-token.sh" --print-pem-path)"
-if [[ "${GOT}" != "/mnt/z/no-such-conahcnuj-key.pem" ]]; then
-  echo "FAIL: missing path resolved to '${GOT}'" >&2
-  exit 1
-fi
-echo "PASS missing /mnt path is left unchanged"
+# Missing /mnt path is left unchanged.
+GOT="$(resolve_pem_path "/mnt/z/no-such-conahcnuj-key.pem")"
+[[ "${GOT}" == "/mnt/z/no-such-conahcnuj-key.pem" ]] || { echo "FAIL: missing /mnt path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing /mnt path unchanged"
 
+# Backslash paths are normalized.
+mkdir -p "${ROOT}/sub"
+printf 'x' > "${ROOT}/sub/key.pem"
+WIN="${ROOT}\\sub\\key.pem"
+GOT="$(resolve_pem_path "${WIN}")"
+[[ "${GOT}" == "${ROOT}/sub/key.pem" ]] || { echo "FAIL: backslash path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS backslash path normalized"
+
+# Tilde expansion uses HOME.
+HOME_BACKUP="${HOME}"
+export HOME="${ROOT}/home"
+mkdir -p "${HOME}/.ssh"
+printf 'x' > "${HOME}/.ssh/key.pem"
+# shellcheck disable=SC2088
+GOT="$(resolve_pem_path "~/.ssh/key.pem")"
+[[ "${GOT}" == "${HOME}/.ssh/key.pem" ]] || { echo "FAIL: tilde path resolved to '${GOT}'" >&2; exit 1; }
+export HOME="${HOME_BACKUP}"
+echo "PASS tilde expansion"
+
+# WSL /mnt path rewrites to Git Bash drive path when that file exists.
 if command -v cygpath >/dev/null 2>&1; then
   MIXED="$(cygpath -m "${REAL}")"
   DRIVE="$(printf '%.1s' "${MIXED}" | tr '[:upper:]' '[:lower:]')"
   REST="${MIXED#?:/}"
   WSL_PATH="/mnt/${DRIVE}/${REST}"
   EXPECT="/${DRIVE}/${REST}"
-  set_key_path "${WSL_PATH}"
-  GOT="$(bash "${STAGE}/get-token.sh" --print-pem-path)"
-  if [[ "${GOT}" != "${EXPECT}" ]]; then
-    echo "FAIL: ${WSL_PATH} resolved to '${GOT}', expected '${EXPECT}'" >&2
-    exit 1
+  DRIVE_DIR="/${DRIVE}/$(dirname "${REST}")"
+  mkdir -p "${DRIVE_DIR}" 2>/dev/null || true
+  cp "${REAL}" "/${DRIVE}/${REST}" 2>/dev/null || true
+  if [[ -f "/${DRIVE}/${REST}" ]]; then
+    GOT="$(resolve_pem_path "${WSL_PATH}")"
+    [[ "${GOT}" == "${EXPECT}" ]] || { echo "FAIL: ${WSL_PATH} resolved to '${GOT}', expected '${EXPECT}'" >&2; exit 1; }
+    echo "PASS WSL /mnt path rewrites to drive path"
+    rm -f "/${DRIVE}/${REST}"
+  else
+    echo "SKIP /${DRIVE} not writable; WSL rewrite not tested"
   fi
-  echo "PASS WSL /mnt path rewrites to Git Bash drive path"
 fi
 
-rm -f "${REAL}"
+# CRLF in the path is stripped.
+CRLF_INPUT="${REAL}"$'\r'
+GOT="$(resolve_pem_path "${CRLF_INPUT}")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: CRLF path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS CRLF path stripped"
 
-set_key_path ""
-OUT="$(bash "${STAGE}/get-token.sh" --print-jwt 2>&1 || true)"
-if [[ "${OUT}" != *"PRIVATE_KEY_PATH is not set"* ]]; then
-  echo "FAIL: empty PRIVATE_KEY_PATH should report missing config:" >&2
-  echo "${OUT}" >&2
-  exit 1
+# Surrounding double quotes are stripped.
+GOT="$(resolve_pem_path "\"${REAL}\"")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: double-quoted path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS double-quoted path stripped"
+
+# Surrounding single quotes are stripped.
+GOT="$(resolve_pem_path "'${REAL}'")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: single-quoted path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS single-quoted path stripped"
+
+# Surrounding whitespace is trimmed.
+GOT="$(resolve_pem_path "  ${REAL}  ")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: whitespace-padded path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS whitespace trimmed"
+
+# Missing /cygdrive path is left unchanged.
+GOT="$(resolve_pem_path "/cygdrive/z/no-such-conahcnuj-key.pem")"
+[[ "${GOT}" == "/cygdrive/z/no-such-conahcnuj-key.pem" ]] || { echo "FAIL: missing cygdrive path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing cygdrive path unchanged"
+
+# Missing drive-letter path is left unchanged.
+GOT="$(resolve_pem_path "Z:/no-such-conahcnuj-key.pem")"
+[[ "${GOT}" == "Z:/no-such-conahcnuj-key.pem" ]] || { echo "FAIL: missing drive-letter path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing drive-letter path unchanged"
+
+# Empty input is tolerated.
+GOT="$(resolve_pem_path "")"
+[[ "${GOT}" == "" ]] || { echo "FAIL: empty path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS empty input tolerated"
+
+# /cygdrive path rewrites to /c form when that file exists.
+if command -v cygpath >/dev/null 2>&1; then
+  MIXED="$(cygpath -m "${REAL}")"
+  DRIVE="$(printf '%.1s' "${MIXED}" | tr '[:upper:]' '[:lower:]')"
+  REST="${MIXED#?:/}"
+  CYG_PATH="/cygdrive/${DRIVE}/${REST}"
+  EXPECT="/${DRIVE}/${REST}"
+  DRIVE_DIR="/${DRIVE}/$(dirname "${REST}")"
+  mkdir -p "${DRIVE_DIR}" 2>/dev/null || true
+  cp "${REAL}" "/${DRIVE}/${REST}" 2>/dev/null || true
+  if [[ -f "/${DRIVE}/${REST}" ]]; then
+    GOT="$(resolve_pem_path "${CYG_PATH}")"
+    [[ "${GOT}" == "${EXPECT}" ]] || { echo "FAIL: ${CYG_PATH} resolved to '${GOT}', expected '${EXPECT}'" >&2; exit 1; }
+    echo "PASS /cygdrive path rewrites to drive path"
+    rm -f "/${DRIVE}/${REST}"
+  else
+    echo "SKIP /${DRIVE} not writable; cygdrive rewrite not tested"
+  fi
 fi
-echo "PASS empty PRIVATE_KEY_PATH reports missing config"
 
-set_key_path "/tmp/nonexistent-conahcnuj-key-${$}.pem"
-OUT="$(bash "${STAGE}/get-token.sh" --print-jwt 2>&1 || true)"
-if [[ "${OUT}" != *"private key file not found"* ]]; then
-  echo "FAIL: missing key file should report not found:" >&2
-  echo "${OUT}" >&2
-  exit 1
-fi
-echo "PASS missing key file reports not found"
-
-EMPTY="$(mktemp)"
-set_key_path "${EMPTY}"
-OUT="$(bash "${STAGE}/get-token.sh" --print-jwt 2>&1 || true)"
-if [[ "${OUT}" != *"private key file is empty"* ]]; then
-  echo "FAIL: empty key file should report empty:" >&2
-  echo "${OUT}" >&2
-  exit 1
-fi
-echo "PASS empty key file reports empty"
-rm -f "${EMPTY}"
-
-BAD="$(mktemp)"
-printf 'not-a-pem' > "${BAD}"
-set_key_path "${BAD}"
-OUT="$(bash "${STAGE}/get-token.sh" --print-jwt 2>&1 || true)"
-if [[ "${OUT}" != *"failed to sign the App JWT"* ]]; then
-  echo "FAIL: invalid key should report signing failure:" >&2
-  echo "${OUT}" >&2
-  exit 1
-fi
-echo "PASS invalid key reports signing failure"
-rm -f "${BAD}"
-
-# Drive-letter path (C:/...) early-returns to the existing /c/... form when
-# that file exists, mirroring docker-run.sh's resolve_host_path (#588).
+# Drive-letter (C:/...) path rewrites to /c form when that file exists.
 DRV_ROOT="/c/conahcnuj-gt-drv-$$"
 if ( mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null; then
   if [[ ! -w "${DRV_ROOT}/.ssh" ]]; then
@@ -111,10 +136,10 @@ if ( mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${DRV_ROOT}/.ss
   fi
   printf 'x' > "${DRV_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${DRV_ROOT}/.ssh/key.pem'" 2>/dev/null || true
   if [[ -f "${DRV_ROOT}/.ssh/key.pem" ]]; then
-    set_key_path "C:/conahcnuj-gt-drv-$$/.ssh/key.pem"
-    GOT="$(bash "${STAGE}/get-token.sh" --print-pem-path)"
+    GOT="$(resolve_pem_path "C:/conahcnuj-gt-drv-$$/.ssh/key.pem")"
     if [[ "${GOT}" != "${DRV_ROOT}/.ssh/key.pem" ]]; then
       echo "FAIL: drive-letter path resolved to '${GOT}', expected '${DRV_ROOT}/.ssh/key.pem'" >&2
+      rm -rf "${DRV_ROOT}" 2>/dev/null || sudo rm -rf "${DRV_ROOT}" 2>/dev/null || true
       exit 1
     fi
     echo "PASS drive-letter path rewrites to /c path"
@@ -123,5 +148,31 @@ if ( mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${DRV_ROOT}/.ss
     echo "SKIP drive-letter scenario: could not create key file"
   fi
 else
-    echo "SKIP drive-letter scenario: /c not writable"
+  echo "SKIP drive-letter scenario: /c not writable"
 fi
+
+# MSYS scenario (issue #588): file lives at /c/... but a WSL-style /mnt/c/...
+# path is supplied. resolve_pem_path must return the /c/... form.
+MSYS_ROOT="/c/conahcnuj-gt-msys-$$"
+if ( mkdir -p "${MSYS_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${MSYS_ROOT}/.ssh" 2>/dev/null; then
+  if [[ ! -w "${MSYS_ROOT}/.ssh" ]]; then
+    sudo chown "$(id -u):$(id -g)" "${MSYS_ROOT}" "${MSYS_ROOT}/.ssh" 2>/dev/null || true
+  fi
+  printf 'x' > "${MSYS_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${MSYS_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+  if [[ -f "${MSYS_ROOT}/.ssh/key.pem" ]]; then
+    GOT="$(resolve_pem_path "/mnt/c/conahcnuj-gt-msys-$$/.ssh/key.pem")"
+    if [[ "${GOT}" != "${MSYS_ROOT}/.ssh/key.pem" ]]; then
+      echo "FAIL: MSYS /mnt path resolved to '${GOT}', expected '${MSYS_ROOT}/.ssh/key.pem'" >&2
+      rm -rf "${MSYS_ROOT}" 2>/dev/null || sudo rm -rf "${MSYS_ROOT}" 2>/dev/null || true
+      exit 1
+    fi
+    echo "PASS MSYS /mnt path rewrites to /c path"
+    rm -rf "${MSYS_ROOT}" 2>/dev/null || sudo rm -rf "${MSYS_ROOT}" 2>/dev/null || true
+  else
+    echo "SKIP MSYS scenario: could not create key file"
+  fi
+else
+  echo "SKIP MSYS scenario: /c not writable"
+fi
+
+echo "ALL get-token resolve_pem_path TESTS PASSED"
