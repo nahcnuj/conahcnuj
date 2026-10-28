@@ -27,10 +27,14 @@ resolve_pem_path() {
   path="${path/#\~/${HOME}}"
   # Under MSYS/Git Bash, WSL /mnt/<drive>/ mounts do not exist; map them to
   # the MSYS /<drive>/ form syntactically.
-  if command -v cygpath >/dev/null 2>&1 && [[ "${path}" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
+  if command -v cygpath >/dev/null 2>&1 && [[ "${path}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
     drive="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
     rest="${BASH_REMATCH[2]}"
-    path="/${drive}/${rest}"
+    if [[ -n "${rest}" ]]; then
+      path="/${drive}${rest}"
+    else
+      path="/${drive}"
+    fi
   fi
   if [[ -e "${path}" ]]; then
     printf '%s' "${path}"
