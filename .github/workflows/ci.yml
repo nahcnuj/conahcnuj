@@ -288,7 +288,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Build image and exercise the wrapper
-        run: bash driver-tests/docker-run.bash
+        run: |
+          & "C:/Program Files/Git/bin/bash.exe" driver-tests/docker-run.bash
 
   docker-run-mocked-windows:
     name: docker-run.sh mocked (Windows/pwsh)
