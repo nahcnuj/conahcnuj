@@ -66,6 +66,10 @@ resolve_pem_path() {
   if [[ "${p}" =~ ^([a-zA-Z]):(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]:-}"
+    if [[ -n "${rest}" && -e "/${drive,,}${rest}" ]]; then
+      printf '%s\n' "/${drive,,}${rest}"
+      return 0
+    fi
     if [[ -n "${rest}" ]]; then
       candidates+=("/${drive,,}${rest}")
     else
@@ -82,11 +86,11 @@ resolve_pem_path() {
   local c
   for c in "${candidates[@]}"; do
     if [[ -e "${c}" ]]; then
-      printf '%s' "${c}"
+      printf '%s\n' "${c}"
       return 0
     fi
   done
-  printf '%s' "${p}"
+  printf '%s\n' "${p}"
 }
 
 PEM_PATH="$(resolve_pem_path "${PRIVATE_KEY_PATH}")"
