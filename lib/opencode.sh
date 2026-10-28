@@ -62,6 +62,38 @@ opencode_get_models() {
   opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 }
 
+# Resolve the reasoning-effort variant the run should ask opencode for. Empty
+# means "use the model's default". Accepts CONAHCNUJ_VARIANT, CONAHCNUJ_EFFORT
+# (e.g. "max") and the boolean CONAHCNUJ_MAX_EFFORT flag, so the driver's CLI
+# flag and the issue-driver workflow input both land here.
+opencode_effort_variant() {
+  local v="${CONAHCNUJ_VARIANT:-}"
+  if [[ -z "${v}" ]]; then
+    v="${CONAHCNUJ_EFFORT:-}"
+  fi
+  if [[ -z "${v}" ]]; then
+    case "${CONAHCNUJ_MAX_EFFORT:-}" in
+      1|true|TRUE|yes|YES|on|ON) v="max" ;;
+    esac
+  fi
+  # Test-mode aliases, so offline tests can drive the variant the same way
+  # they drive every other opencode behaviour.
+  if [[ -z "${v}" && "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
+    v="${MOCK_OPENCODE_VARIANT:-${MOCK_OPENCODE_EFFORT:-}}"
+    if [[ -z "${v}" ]]; then
+      case "${MOCK_OPENCODE_MAX_EFFORT:-${MOCK_OPENCODE_MAX:-}}" in
+        1|true|TRUE|yes|YES|on|ON|max|MAX) v="max" ;;
+      esac
+    fi
+  fi
+  printf '%s' "${v}"
+}
+
+# True when the run is in max-effort mode (variant "max").
+opencode_max_effort_enabled() {
+  [[ "$(opencode_effort_variant)" == "max" ]]
+}
+
 # What every round shares, whatever the model or the stage: the point of the run
 # and who does what. This is deliberately one short paragraph. A model once read
 # a long list of instructions (banned commands, warnings that a message is not a
@@ -265,9 +297,17 @@ opencode_run() {
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
     if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --auto --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"
+      local _variant_part=""
+      if [[ -n "$(opencode_effort_variant)" ]]; then
+        _variant_part=" --variant $(opencode_effort_variant)"
+      fi
+      printf 'opencode run --auto --format json --model %s%s --dir %s --session %s %s\n' "${model}" "${_variant_part}" "${workdir}" "${session_id}" "${prompt}"
     else
-      printf 'opencode run --auto --format json --model %s --dir %s --title conahcnuj %s\n' "${model}" "${workdir}" "${prompt}"
+      local _variant_part=""
+      if [[ -n "$(opencode_effort_variant)" ]]; then
+        _variant_part=" --variant $(opencode_effort_variant)"
+      fi
+      printf 'opencode run --auto --format json --model %s%s --dir %s --title conahcnuj %s\n' "${model}" "${_variant_part}" "${workdir}" "${prompt}"
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
@@ -416,6 +456,9 @@ opencode_run() {
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
   args=(run --auto --print-logs --thinking --format json --model "${model}" --dir "${workdir}")
+  if [[ -n "$(opencode_effort_variant)" ]]; then
+    args+=(--variant "$(opencode_effort_variant)")
+  fi
   # --print-logs defaults to INFO, which is ~30 lines of boot/permission
   # chatter per model and buries the rendered log. WARN keeps the diagnostics
   # that matter without the noise; override to DEBUG when hunting a problem.

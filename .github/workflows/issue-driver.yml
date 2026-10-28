@@ -51,6 +51,11 @@ on:
         description: Issue or pull request number to continue
         required: true
         type: number
+      effort:
+        description: 'Reasoning effort passed to opencode as --variant (e.g. max). Empty uses the model default.'
+        required: false
+        type: string
+        default: ''
   # Another repository drives one of its issues or pull requests by calling
   # this workflow. The job `if` below runs whenever `inputs.number` is set, and
   # the driver checkout follows this file (`job.workflow_repository` at
@@ -73,6 +78,11 @@ on:
         required: false
         type: string
         default: conahcnuj
+      effort:
+        description: 'Reasoning effort passed to opencode as --variant (e.g. max). Empty uses the model default.'
+        required: false
+        type: string
+        default: ''
     secrets:
       APP_ID:
         required: true
@@ -187,6 +197,7 @@ jobs:
           # Just under the 60-minute job cap so the driver exits gracefully
           # and files its bug report before Actions kills the run.
           CONAHCNUJ_MAX_SECONDS: "3540"
+          CONAHCNUJ_EFFORT: ${{ inputs.effort }}
           OPENCODE_DISABLE_AUTOUPDATE: "true"
         run: |
           [[ "${CONAHCNUJ_INPUT}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number: ${CONAHCNUJ_INPUT}" >&2; exit 1; }
