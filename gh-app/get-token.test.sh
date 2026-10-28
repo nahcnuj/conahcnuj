@@ -15,6 +15,7 @@ fi
 
 export CONAHCNUJ_IMPORT=1
 # shellcheck source=get-token.sh
+# shellcheck disable=SC1090,SC1091
 . "${GT}"
 
 ROOT="$(mktemp -d)"
