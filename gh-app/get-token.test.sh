@@ -175,4 +175,53 @@ else
   echo "SKIP MSYS scenario: /c not writable"
 fi
 
+# Nested quotes (more than one layer) are stripped.
+GOT="$(resolve_pem_path "\"'${REAL}'\"")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: nested-quoted path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS nested quotes stripped"
+
+# Drive-letter root with no trailing path is tolerated.
+GOT="$(resolve_pem_path "Z:")"
+[[ "${GOT}" == "Z:" ]] || { echo "FAIL: drive-letter root resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS drive-letter root tolerated"
+
+# Missing drive-letter path with spaces survives (no crash).
+GOT="$(resolve_pem_path "Z:/no such file.pem")"
+[[ "${GOT}" == "Z:/no such file.pem" ]] || { echo "FAIL: missing spaced drive path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing spaced drive path unchanged"
+
+# Quoted path with internal spaces resolves when the file exists.
+SPACE_DIR="${ROOT}/dir with space"
+mkdir -p "${SPACE_DIR}"
+SPACE_FILE="${SPACE_DIR}/key file.pem"
+printf 'x' > "${SPACE_FILE}"
+GOT="$(resolve_pem_path "\"${SPACE_FILE}\"")"
+[[ "${GOT}" == "${SPACE_FILE}" ]] || { echo "FAIL: quoted spaced path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS quoted path with spaces resolves"
+
+# Combined: surrounding spaces + quotes + CRLF normalize to the existing path.
+COMBINED="   \"${REAL}\"   "$'\r'
+GOT="$(resolve_pem_path "${COMBINED}")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: combined input resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS combined whitespace/quote/CRLF normalized"
+
+# Backslash (Windows) path is normalized and resolved to an existing /<drive> form.
+BS_ROOT="/c/conahcnuj-gt-bs-$$"
+if ( mkdir -p "${BS_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${BS_ROOT}/.ssh" 2>/dev/null; then
+  if [[ ! -w "${BS_ROOT}/.ssh" ]]; then
+    sudo chown "$(id -u):$(id -g)" "${BS_ROOT}" "${BS_ROOT}/.ssh" 2>/dev/null || true
+  fi
+  printf 'x' > "${BS_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${BS_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+  if [[ -f "${BS_ROOT}/.ssh/key.pem" ]]; then
+    GOT="$(resolve_pem_path "C:\conahcnuj-gt-bs-$$\.ssh\key.pem")"
+    [[ "${GOT}" == "${BS_ROOT}/.ssh/key.pem" ]] || { echo "FAIL: backslash rewrite resolved to '${GOT}'" >&2; rm -rf "${BS_ROOT}" 2>/dev/null || sudo rm -rf "${BS_ROOT}" 2>/dev/null || true; exit 1; }
+    echo "PASS backslash Windows path resolves to /c path"
+    rm -rf "${BS_ROOT}" 2>/dev/null || sudo rm -rf "${BS_ROOT}" 2>/dev/null || true
+  else
+    echo "SKIP backslash scenario: could not create key file"
+  fi
+else
+  echo "SKIP backslash scenario: /c not writable"
+fi
+
 echo "ALL get-token resolve_pem_path TESTS PASSED"
