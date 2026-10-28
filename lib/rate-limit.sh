@@ -62,7 +62,7 @@ rate_limit_backoff() {
 # Sleep with jitter for polling intervals
 # Args: $1 = min seconds, $2 = max seconds
 # Sets global: POLL_SLEEP_SECONDS
-# If RATE_LIMIT_TEST_MODE=1, only calculates without sleeping
+# If RATE_LIMIT_TEST_MODE=1 or CONAHCNUJ_TEST_MODE=1, only calculates without sleeping
 rate_limit_poll_sleep() {
   local min="${1:-30}"
   local max="${2:-3600}"
@@ -75,7 +75,7 @@ rate_limit_poll_sleep() {
 
   POLL_SLEEP_SECONDS=$((min + jitter))
 
-  if [[ "${RATE_LIMIT_TEST_MODE:-0}" != "1" ]]; then
+  if [[ "${RATE_LIMIT_TEST_MODE:-0}" != "1" && "${CONAHCNUJ_TEST_MODE:-0}" != "1" ]]; then
     sleep "${POLL_SLEEP_SECONDS}"
   fi
 }
@@ -100,7 +100,7 @@ rate_limit_wait() {
   now=$(date +%s)
   local wait_time=$((RATE_LIMIT_RESET - now + 1))
 
-  if [[ ${wait_time} -gt 0 ]]; then
+  if [[ ${wait_time} -gt 0 && "${RATE_LIMIT_TEST_MODE:-0}" != "1" && "${CONAHCNUJ_TEST_MODE:-0}" != "1" ]]; then
     sleep "${wait_time}"
   fi
 
