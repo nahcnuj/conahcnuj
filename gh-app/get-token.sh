@@ -20,41 +20,73 @@ set +a
 # Git Bash has no /mnt/<drive> mount, so openssl looks under its install
 # directory (C:/Program Files/Git/mnt/...). /<drive>/... is the same file.
 resolve_pem_path() {
-  local path="${1}"
-  local drive rest alt
+  local input="${1}"
   # Drop CR so CRLF app.env files do not leave a trailing \r.
-  path="${path//$'\r'/}"
-  # Strip surrounding quotes that an app.env value may carry.
-  path="${path#\"}"
-  path="${path%\"}"
-  path="${path#\'}"
-  path="${path%\'}"
-  path="${path/#\~/${HOME}}"
-  # Under MSYS/Git Bash, WSL /mnt/<drive>/ mounts do not exist; map them to
-  # the MSYS /<drive>/ form syntactically.
-  if command -v cygpath >/dev/null 2>&1 && [[ "${path}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
-    drive="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-    rest="${BASH_REMATCH[2]}"
+  input="${input//$'\r'/}"
+  # Trim surrounding whitespace.
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+  # Strip surrounding quotes (possibly more than one layer).
+  while true; do
+    case "${input}" in
+      \"*\") input="${input:1:${#input}-2}" ;;
+      \'*\') input="${input:1:${#input}-2}" ;;
+      *) break ;;
+    esac
+  done
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+  local p="${input/#\~/${HOME}}"
+  p="${p//\\//}"
+  p="${p//$'\r'/}"
+  p="${p#"${p%%[![:space:]]*}"}"
+  p="${p%"${p##*[![:space:]]}"}"
+  local candidates=("${p}")
+  if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^/cygdrive/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/${drive,,}${rest}")
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^/([a-zA-Z])(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    candidates+=("${drive^^}:${rest}")
+  fi
+  if [[ "${p}" =~ ^([a-zA-Z]):(/.*)?$ ]]; then
+    local drive="${BASH_REMATCH[1]}"
+    local rest="${BASH_REMATCH[2]:-}"
     if [[ -n "${rest}" ]]; then
-      path="/${drive}${rest}"
+      candidates+=("/${drive,,}${rest}")
     else
-      path="/${drive}"
+      candidates+=("/${drive,,}")
+    fi
+    candidates+=("/mnt/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
+    if [[ -z "${rest}" ]]; then
+      candidates+=("${drive^^}:")
+    else
+      candidates+=("${drive^^}:${rest}")
     fi
   fi
-  if [[ -e "${path}" ]]; then
-    printf '%s' "${path}"
-    return 0
-  fi
-  if [[ "${path}" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
-    drive="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-    rest="${BASH_REMATCH[2]}"
-    alt="/${drive}/${rest}"
-    if [[ -e "${alt}" ]]; then
-      printf '%s' "${alt}"
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -e "${c}" ]]; then
+      printf '%s' "${c}"
       return 0
     fi
-  fi
-  printf '%s' "${path}"
+  done
+  printf '%s' "${p}"
 }
 
 PEM_PATH="$(resolve_pem_path "${PRIVATE_KEY_PATH}")"

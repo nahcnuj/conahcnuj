@@ -135,4 +135,74 @@ else
   echo "SKIP MSYS scenario: /c not writable"
 fi
 
+# /cygdrive path rewrites to an existing /<drive> form (MSYS).
+if ( mkdir -p /c 2>/dev/null ) || sudo mkdir -p /c 2>/dev/null; then
+  CYG_ROOT="/c/conahcnuj-cyg-$$"
+  if ( mkdir -p "${CYG_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${CYG_ROOT}/.ssh" 2>/dev/null; then
+    if [[ ! -w "${CYG_ROOT}/.ssh" ]]; then
+      sudo chown "$(id -u):$(id -g)" "${CYG_ROOT}" "${CYG_ROOT}/.ssh" 2>/dev/null || true
+    fi
+    printf 'x' > "${CYG_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${CYG_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+    if [[ -f "${CYG_ROOT}/.ssh/key.pem" ]]; then
+      GOT="$(resolve_host_path "/cygdrive/c/conahcnuj-cyg-$$/.ssh/key.pem")"
+      [[ "${GOT}" == "${CYG_ROOT}/.ssh/key.pem" ]] || { echo "FAIL: cygdrive rewrite resolved to '${GOT}'" >&2; exit 1; }
+      echo "PASS /cygdrive path rewrites to /c path"
+      rm -rf "${CYG_ROOT}" 2>/dev/null || sudo rm -rf "${CYG_ROOT}" 2>/dev/null || true
+    else
+      echo "SKIP /cygdrive scenario: could not create key file"
+    fi
+  else
+    echo "SKIP /cygdrive scenario: not writable"
+  fi
+else
+  echo "SKIP /cygdrive scenario: /c not writable"
+fi
+
+# Drive-letter path rewrites to an existing /<drive> form.
+DRV_ROOT="/c/conahcnuj-drv-$$"
+if ( mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${DRV_ROOT}/.ssh" 2>/dev/null; then
+  if [[ ! -w "${DRV_ROOT}/.ssh" ]]; then
+    sudo chown "$(id -u):$(id -g)" "${DRV_ROOT}" "${DRV_ROOT}/.ssh" 2>/dev/null || true
+  fi
+  printf 'x' > "${DRV_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${DRV_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+  if [[ -f "${DRV_ROOT}/.ssh/key.pem" ]]; then
+    GOT="$(resolve_host_path "C:/conahcnuj-drv-$$/.ssh/key.pem")"
+    [[ "${GOT}" == "${DRV_ROOT}/.ssh/key.pem" ]] || { echo "FAIL: drive-letter rewrite resolved to '${GOT}'" >&2; exit 1; }
+    echo "PASS drive-letter path rewrites to /c path"
+    rm -rf "${DRV_ROOT}" 2>/dev/null || sudo rm -rf "${DRV_ROOT}" 2>/dev/null || true
+  else
+    echo "SKIP drive-letter scenario: could not create key file"
+  fi
+else
+  echo "SKIP drive-letter scenario: /c not writable"
+fi
+
+# Backslash (Windows) path is normalized and resolved.
+BS_ROOT="/c/conahcnuj-bs-$$"
+if ( mkdir -p "${BS_ROOT}/.ssh" 2>/dev/null ) || sudo mkdir -p "${BS_ROOT}/.ssh" 2>/dev/null; then
+  if [[ ! -w "${BS_ROOT}/.ssh" ]]; then
+    sudo chown "$(id -u):$(id -g)" "${BS_ROOT}" "${BS_ROOT}/.ssh" 2>/dev/null || true
+  fi
+  printf 'x' > "${BS_ROOT}/.ssh/key.pem" 2>/dev/null || sudo sh -c "printf x > '${BS_ROOT}/.ssh/key.pem'" 2>/dev/null || true
+  if [[ -f "${BS_ROOT}/.ssh/key.pem" ]]; then
+    GOT="$(resolve_host_path "C:\conahcnuj-bs-$$\.ssh\key.pem")"
+    [[ "${GOT}" == "${BS_ROOT}/.ssh/key.pem" ]] || { echo "FAIL: backslash rewrite resolved to '${GOT}'" >&2; exit 1; }
+    echo "PASS backslash Windows path resolves to /c path"
+    rm -rf "${BS_ROOT}" 2>/dev/null || sudo rm -rf "${BS_ROOT}" 2>/dev/null || true
+  else
+    echo "SKIP backslash scenario: could not create key file"
+  fi
+else
+  echo "SKIP backslash scenario: /c not writable"
+fi
+
+# Quoted path with internal spaces resolves when the file exists.
+SPACE_DIR="${ROOT}/dir with space"
+mkdir -p "${SPACE_DIR}"
+SPACE_FILE="${SPACE_DIR}/key file.pem"
+printf 'x' > "${SPACE_FILE}"
+GOT="$(resolve_host_path "\"${SPACE_FILE}\"")"
+[[ "${GOT}" == "${SPACE_FILE}" ]] || { echo "FAIL: quoted spaced path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS quoted path with spaces resolves"
+
 echo "All resolve_host_path tests passed"

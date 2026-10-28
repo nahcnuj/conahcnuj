@@ -80,6 +80,7 @@ resolve_host_path() {
     local drive="${BASH_REMATCH[1]}"
     local rest="${BASH_REMATCH[2]}"
     candidates+=("/${drive,,}${rest}")
+    candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
   fi
   if [[ "${p}" =~ ^/cygdrive/([a-zA-Z])(/.*)?$ ]]; then
