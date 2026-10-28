@@ -156,7 +156,7 @@ opencode_round_is_environment() {
   printf '%s\n' "${signals}" |
     grep -Evi 'model .*is unavailable|has been deprecated|model not found|no such model|unknown model|does not exist' |
     grep -Evi 'rate limit|rate_limit|too many requests|please try again later|quota exceeded|usage limit|resource_exhausted|(^|[^0-9])429([^0-9]|$)' |
-    grep -Evi 'spending.limit|out of credits|exceeded your current quota|insufficient (credits|quota|funds)|payment required|billing|delinquent' |
+    grep -Evi 'spending.limit|out of credits|exceeded your current quota|insufficient (credits|quota|funds)|payment required|billing|delinquent|free usage limit|usage limit reached' |
     grep -Eiq 'token refresh failed|invalid_grant|cannot connect to api|unable to connect|was there a typo in the url|transport error|fetch failed|endpoint is unavailable|upstream request failed|upstream error|service temporarily overloaded|socket connection|providerautherror|authenticationerror|unauthorized|enotfound|econnrefused|econnreset|etimedout|getaddrinfo'
 }
 
@@ -171,7 +171,7 @@ opencode_round_is_environment() {
 # that merely writes the words is not quota-exhausted.
 opencode_round_is_quota_exhausted() {
   local output_file="${1}" err_file="${2:-}"
-  local pattern='spending.limit|out of credits|exceeded your current quota|insufficient (credits|quota|funds)|payment required|billing|delinquent|free usage limit'
+  local pattern='spending.limit|out of credits|exceeded your current quota|insufficient (credits|quota|funds)|payment required|billing|delinquent|free usage limit|usage limit reached'
   if [[ -f "${output_file}" ]] && grep -F '"type":"error"' "${output_file}" 2>/dev/null | grep -Eiq "${pattern}"; then
     return 0
   fi
@@ -206,10 +206,11 @@ opencode_round_is_model_gone() {
 opencode_round_is_rate_limited() {
   local output_file="${1}" err_file="${2:-}"
   local pattern='rate limit|rate_limit|too many requests|please try again later|retry-after|retry after|quota exceeded|usage limit|resource_exhausted|\b429\b'
-  if [[ -f "${output_file}" ]] && grep -F '"type":"error"' "${output_file}" 2>/dev/null | grep -Eiv 'free usage limit' | grep -Eiq "${pattern}"; then
+  local quota_pattern='spending\.limit|out of credits|exceeded your current quota|insufficient (credits|quota|funds)|payment required|billing|delinquent|free usage limit|usage limit reached'
+  if [[ -f "${output_file}" ]] && grep -F '"type":"error"' "${output_file}" 2>/dev/null | grep -Eiv "${quota_pattern}" | grep -Eiq "${pattern}"; then
     return 0
   fi
-  if [[ -n "${err_file}" && -f "${err_file}" ]] && grep -Eiv 'free usage limit' "${err_file}" 2>/dev/null | grep -Eiq "${pattern}"; then
+  if [[ -n "${err_file}" && -f "${err_file}" ]] && grep -Eiv "${quota_pattern}" "${err_file}" 2>/dev/null | grep -Eiq "${pattern}"; then
     return 0
   fi
   return 1
@@ -453,11 +454,12 @@ opencode_run() {
   # FIFO, so they exit on EOF the moment opencode closes it -- no orphans, no
   # extra pids to chase. When FIFOs are unavailable the plain tee pipeline is
   # kept and the rate limit is only detected at the end of the round.
-  local out_fifo err_fifo err_file consumer_pid err_pid rate_aborted
+  local out_fifo err_fifo err_file consumer_pid err_pid rate_aborted quota_aborted
   out_fifo="${output_file}.out"
   err_fifo="${output_file}.errfifo"
   err_file="${output_file}.err"
   rate_aborted="false"
+  quota_aborted="false"
   if mkfifo "${out_fifo}" "${err_fifo}" 2>/dev/null; then
     "${executable[@]}" "${args[@]}" < "${prompt_file}" >"${out_fifo}" 2>"${err_fifo}" &
     local opencode_pid=$!
@@ -466,6 +468,12 @@ opencode_run() {
     ( cat <"${err_fifo}" | tee "${err_file}" >&2 ) &
     err_pid=$!
     while kill -0 "${opencode_pid}" 2>/dev/null; do
+      if opencode_round_is_quota_exhausted "${output_file}" "${err_file}"; then
+        quota_aborted="true"
+        echo "opencode: ${model} exhausted its quota/billing; stopping its retry loop." >&2
+        kill -TERM "${opencode_pid}" 2>/dev/null || true
+        break
+      fi
       if opencode_round_is_rate_limited "${output_file}" "${err_file}"; then
         rate_aborted="true"
         echo "opencode: ${model} hit a rate limit; stopping its retry loop." >&2
@@ -492,13 +500,13 @@ opencode_run() {
   fi
   # Quota/billing exhaustion is provider-level like an environment error, and
   # is read before it so the specific diagnosis wins over the generic one.
-  if [[ "${status}" != "0" ]] && opencode_round_is_quota_exhausted "${output_file}" "${err_file}"; then
+  if [[ "${status}" != "0" ]] && { [[ "${quota_aborted}" == "true" ]] || opencode_round_is_quota_exhausted "${output_file}" "${err_file}"; }; then
     OPENCODE_ROUND_QUOTA_EXHAUSTED="true"
   fi
   if [[ "${status}" != "0" ]] && opencode_round_is_environment "${output_file}" "${err_file}"; then
     OPENCODE_ROUND_ENVIRONMENT="true"
   fi
-  if [[ "${status}" != "0" ]] && { [[ "${rate_aborted}" == "true" ]] || opencode_round_is_rate_limited "${output_file}" "${err_file}"; }; then
+  if [[ "${status}" != "0" ]] && [[ "${quota_aborted}" != "true" ]] && { [[ "${rate_aborted}" == "true" ]] || opencode_round_is_rate_limited "${output_file}" "${err_file}"; }; then
     OPENCODE_ROUND_RATE_LIMITED="true"
   fi
   local detected_session

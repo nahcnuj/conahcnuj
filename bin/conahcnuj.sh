@@ -1489,6 +1489,10 @@ drive() {
       if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created." "${base}"; then
         produced_change="true"
       fi
+      if [[ "${ENVIRONMENT_DOWN}" == "1" ]]; then
+        echo "ERROR: all models are unusable (environment or quota); stopping." >&2
+        exit 1
+      fi
       # Only a round that both changed the tree AND named the commit may be
       # committed: a failed round can leave a dirty tree without a .commit-msg,
       # and the driver must not crash on it (it never invents a message).
@@ -1526,6 +1530,10 @@ drive() {
       local todo_change="false"
       if implement "${title}" "${body}" "The per-issue progress file TODO.md is still in the working tree, so the issue is not finished and the pull request is still a draft. Continue the work, keep TODO.md current, and delete it once the issue is fully resolved and the pull request is ready for review." "${base}"; then
         todo_change="true"
+      fi
+      if [[ "${ENVIRONMENT_DOWN}" == "1" ]]; then
+        echo "ERROR: all models are unusable (environment or quota); stopping." >&2
+        exit 1
       fi
       # Same rule as the other rounds: only a dirty tree WITH a .commit-msg is
       # committed; a failed round never crashes the driver.
@@ -1601,6 +1609,10 @@ ${summary}"
       if ! implement "${title}" "${body}" "${code_help}" "${base}"; then
         echo "No working-tree change was produced for this feedback; keeping whatever thread replies were already made." >&2
       fi
+      if [[ "${ENVIRONMENT_DOWN}" == "1" ]]; then
+        echo "ERROR: all models are unusable (environment or quota); stopping." >&2
+        exit 1
+      fi
       # The agent is asked to commit with `git vc` itself; the driver only
       # commits uncommitted changes that still have a .commit-msg as a safety
       # net. A round can fail after leaving a partial change and no
@@ -1662,6 +1674,10 @@ ${summary}"
       echo "PR #${pr}: constraints failing (${CONSTRAINT_FAILURE:-unknown}); fixing with a new implementation round." >&2
       if implement "${title}" "${body}" "${fix_context}" "${base}"; then
         produced_change="true"
+      fi
+      if [[ "${ENVIRONMENT_DOWN}" == "1" ]]; then
+        echo "ERROR: all models are unusable (environment or quota); stopping." >&2
+        exit 1
       fi
       # Same rule as the feedback round: a dirty tree without a .commit-msg is
       # no commit, never a crash; back off and re-check instead.

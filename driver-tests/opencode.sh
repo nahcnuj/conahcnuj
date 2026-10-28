@@ -347,6 +347,11 @@ test_opencode_round_is_rate_limited() {
   printf '%s\n' '{"type":"text","part":{"type":"text","text":"I am rate limited, please wait"}}' > "${out}"
   printf 'booted provider x\n' > "${err}"
   opencode_round_is_rate_limited "${out}" "${err}" && { echo "FAIL: model text classified as rate limit"; exit 1; }
+  # A free-usage-limit error is quota exhaustion, not a transient rate
+  # limit, even though its wording contains "usage limit".
+  printf '%s\n' '{"type":"error","error":{"message":"AI_APICallError: Free usage limit reached. Free models work in OpenCode"}}' > "${out}"
+  : > "${err}"
+  opencode_round_is_rate_limited "${out}" "${err}" && { echo "FAIL: free usage limit classified as rate limit"; exit 1; }
   # An unrelated error event is not a rate limit either.
   printf '%s\n' '{"type":"error","error":{"message":"model not found"}}' > "${out}"
   opencode_round_is_rate_limited "${out}" "${err}" && { echo "FAIL: unrelated error classified as rate limit"; exit 1; }
@@ -375,6 +380,14 @@ test_opencode_round_is_quota_exhausted() {
   printf '%s\n' '{"type":"error","error":{"data":{"message":"You exceeded your current quota, please check your plan and billing details."}}}' > "${out}"
   : > "${err}"
   opencode_round_is_quota_exhausted "${out}" "${err}" || { echo "FAIL: billing-details error not classified"; exit 1; }
+  # A free-usage-limit error (opencode's free tier) is quota exhaustion.
+  printf '%s\n' '{"type":"error","error":{"message":"AI_APICallError: Free usage limit reached. Free models work in OpenCode"}}' > "${out}"
+  : > "${err}"
+  opencode_round_is_quota_exhausted "${out}" "${err}" || { echo "FAIL: free usage limit not classified as quota exhaustion"; exit 1; }
+  # The same signal on stderr counts too.
+  : > "${out}"
+  printf '%s\n' 'timestamp=... level=ERROR error.error="AI_APICallError: Free usage limit reached."' > "${err}"
+  opencode_round_is_quota_exhausted "${out}" "${err}" || { echo "FAIL: stderr free usage limit not classified"; exit 1; }
   # A transient quota rate limit stays a rate limit, not billing exhaustion.
   printf '%s\n' '{"type":"error","error":{"message":"Rate limit exceeded. Please try again later."}}' > "${out}"
   : > "${err}"
