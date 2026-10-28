@@ -48,6 +48,5 @@ COPY gh-app/ /opt/conahcnuj/gh-app/
 # The work tree is bind-mounted from the host; git would otherwise refuse it
 # as "dubious ownership". The container is disposable, so trust everything.
 RUN git config --global --add safe.directory '*'
-
 WORKDIR /work
 ENTRYPOINT ["/opt/conahcnuj/bin/conahcnuj.sh"]
