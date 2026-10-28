@@ -925,14 +925,17 @@ collect_initial_context() {
   local owner="${1}" repo="${2}" pr="${3:-}"
   local out="" labels="" rv payload raw threads
   if [[ -n "${pr}" ]]; then
-    rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
-    payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
-    raw="$(gh_api_unb64 "${payload}")"
-    threads="$(printf '%s' "${raw}" | gh_api_unresolved_threads)"
-    if [[ -n "${threads}" ]]; then
-      out="Unresolved review threads on PR #${pr}:
+    if rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}" 2>/dev/null)"; then
+      payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
+      raw="$(gh_api_unb64 "${payload}")"
+      threads="$(printf '%s' "${raw}" | gh_api_unresolved_threads)"
+      if [[ -n "${threads}" ]]; then
+        out="Unresolved review threads on PR #${pr}:
 ${threads}"
-      labels="unresolved review threads of PR #${pr}"
+        labels="unresolved review threads of PR #${pr}"
+      fi
+    else
+      echo "WARNING: could not read reviews for PR #${pr}; skipping unresolved threads." >&2
     fi
   fi
 
@@ -942,7 +945,7 @@ ${threads}"
   file_list="${CONAHCNUJ_CONTEXT_FILES-README.md AGENTS.md}"
   while IFS= read -r file; do
     [[ -f "${file}" ]] || continue
-    content="$(cat -- "${file}")"
+    content="$(cat -- "${file}" 2>/dev/null || true)"
     [[ -n "${content}" ]] || continue
     if [[ -n "${out}" ]]; then
       out="${out}
@@ -1198,7 +1201,7 @@ ${body}"
   if [[ -n "${pr}" ]]; then
     if [[ -n "${closes}" ]] && ! pr_body_synced; then
       echo "Syncing body of PR #${pr} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}"
+      gh_api_update_pr "${owner}" "${repo}" "${pr}" "${pr_body}" || echo "WARNING: could not sync PR body; continuing." >&2
       pr_body_mark_synced
     fi
     printf '%s\n' "${pr}"
@@ -1210,7 +1213,7 @@ ${body}"
     echo "Reusing open PR #${existing} for ${branch}." >&2
     if [[ -n "${closes}" ]] && ! pr_body_synced; then
       echo "Syncing body of PR #${existing} with issue #${closes}." >&2
-      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}"
+      gh_api_update_pr "${owner}" "${repo}" "${existing}" "${pr_body}" || echo "WARNING: could not sync PR body; continuing." >&2
       pr_body_mark_synced
     fi
     printf '%s\n' "${existing}"
@@ -1564,7 +1567,10 @@ drive() {
     # chains off it); new feedback loops back into this phase to be addressed;
     # while nothing changes it waits, below, without re-asking.
     local rv decision payload raw summary sig actionable
-    rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}")"
+    if ! rv="$(gh_api_fetch_reviews "${owner}" "${repo}" "${pr}" 2>/dev/null)"; then
+      echo "WARNING: could not read reviews for PR #${pr}; skipping feedback detection this cycle." >&2
+      rv=""
+    fi
     decision="$(printf '%s' "${rv}" | cut -d'|' -f1)"
     payload="$(printf '%s' "${rv}" | cut -d'|' -f2)"
     raw="$(gh_api_unb64 "${payload}")"
