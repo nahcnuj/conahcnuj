@@ -54,6 +54,9 @@ docker_() { MSYS_NO_PATHCONV=1 docker "$@"; }
 
 resolve_host_path() {
   local input="${1}"
+  # Drop CR so CRLF app.env files (common on Windows) do not leave a
+  # trailing \r on the path, which would make every -e check fail.
+  input="${input//$'\r'/}"
   # Strip surrounding quotes that an app.env value may carry.
   input="${input#\"}"
   input="${input%\"}"
@@ -61,6 +64,7 @@ resolve_host_path() {
   input="${input%\'}"
   local p="${input/#\~/${HOME}}"
   p="${p//\\//}"
+  p="${p//$'\r'/}"
   local candidates=("${p}")
   if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
@@ -111,12 +115,12 @@ docker_bash_exe() {
     printf '%s\n' "${BASH_EXE}"
     return 0
   fi
-  env_file="${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}"
+  env_file="$(resolve_host_path "${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}")"
   if [[ ! -f "${env_file}" ]]; then
     env_file="${HERE}/gh-app/app.env.example"
   fi
   if [[ -f "${env_file}" ]]; then
-    line="$(sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${env_file}" | head -1)"
+    line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' | head -1)"
     if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
       printf '%s\n' "${line}"
       return 0
@@ -260,7 +264,9 @@ if [[ ! -f "${HOST_ENV}" ]]; then
 fi
 set -a
 # shellcheck source=gh-app/app.env.example
-. "${HOST_ENV}"
+# shellcheck disable=SC1091
+# Strip CR so CRLF app.env files (common on Windows) parse cleanly.
+. <(tr -d '\r' < "${HOST_ENV}")
 set +a
 : "${APP_ID:?APP_ID missing from ${HOST_ENV}}"
 : "${INSTALLATION_ID:?INSTALLATION_ID missing from ${HOST_ENV}}"
