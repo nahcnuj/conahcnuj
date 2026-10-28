@@ -250,16 +250,56 @@ gh_api_graphql() {
 gh_api_json_str() {
   local json="${1}" key="${2}"
   local val
-  # Try quoted string first
-  val="$(printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1)"
-  if [[ -n "${val}" ]]; then
-    printf '%s\n' "${val}"
-    return 0
-  fi
-  # Try unquoted value (bool, null, number, bare enum)
-  val="$(printf '%s' "${json}" | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p" | head -1)"
-  # Trim whitespace
-  val="$(printf '%s' "${val}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  val="$(printf '%s' "${json}" | awk -v key="${key}" '
+    {
+      pos = 1
+      n = length($0)
+      while (pos <= n) {
+        needle = "\"" key "\""
+        idx = index(substr($0, pos), needle)
+        if (idx == 0) break
+        idx = pos + idx - 1
+        rest = substr($0, idx + length(key) + 2)
+        while (length(rest) > 0 && (substr(rest,1,1) == " " || substr(rest,1,1) == "\t")) rest = substr(rest, 2)
+        if (substr(rest, 1, 1) != ":") { pos = idx + length(key) + 2; continue }
+        rest = substr(rest, 2)
+        while (length(rest) > 0 && (substr(rest,1,1) == " " || substr(rest,1,1) == "\t")) rest = substr(rest, 2)
+        if (substr(rest, 1, 1) == "\"") {
+          rest = substr(rest, 2)
+          out = ""
+          i = 1
+          m = length(rest)
+          while (i <= m) {
+            c = substr(rest, i, 1)
+            if (c == "\\") {
+              out = out substr(rest, i, 2)
+              i += 2
+              continue
+            }
+            if (c == "\"") break
+            out = out c
+            i++
+          }
+          print out
+          exit
+        } else {
+          out = ""
+          i = 1
+          m = length(rest)
+          while (i <= m) {
+            c = substr(rest, i, 1)
+            if (c == "," || c == "}" || c == "]") break
+            out = out c
+            i++
+          }
+          gsub(/^[ \t]+|[ \t]+$/, "", out)
+          print out
+          exit
+        }
+      }
+      pos = n + 1
+    }
+  ')"
   printf '%s\n' "${val}"
 }
 
@@ -542,12 +582,12 @@ gh_api_review_summary() {
     au="$(gh_api_json_str "${rn}" "login")"
     [[ -z "${bd}" ]] && bd="(no body)"
     printf -- '- [review %s] %s: %s\n' "${st}" "${au}" "${bd}"
-  done < <(printf '%s' "${reviews_part}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}' || true)
+  done < <(printf '%s' "${reviews_part}" | grep -oE '\{"state":"(\\.|[^"])*","body":"(\\.|[^"])*","author":\{"login":"[^"]*"\}' || true)
 
   # Issue-level comments.
   local comments_part comment_matches bn
   comments_part="$(printf '%s' "${json}" | sed 's/"reviewThreads":.*//' | sed -n 's/.*"comments":{"nodes":\(\[[^]]*\]\).*/\1/p')"
-  comment_matches="$(printf '%s' "${comments_part}" | grep -oE '"body":"[^"]*"' || true)"
+  comment_matches="$(printf '%s' "${comments_part}" | grep -oE '"body":"(\\.|[^"])*"' || true)"
   if [[ -n "${comment_matches}" ]]; then
     echo "COMMENTS:"
   fi
@@ -603,13 +643,13 @@ gh_api_format_unresolved_threads() {
       else
         printf -- '- %s\n' "${cb}"
       fi
-    done < <(printf '%s' "${tn}" | grep -oE '\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}' || true)
+    done < <(printf '%s' "${tn}" | grep -oE '\{"databaseId":[0-9]+,"body":"(\\.|[^"])*","author":\{"login":"[^"]*"\}' || true)
     if [[ "${printed}" != "true" ]]; then
       local bn
       while IFS= read -r bn; do
         [[ -z "${bn}" ]] && continue
         printf -- '- %s\n' "${bn}"
-      done < <(printf '%s' "${tn}" | grep -oE '"body":"[^"]*"' | sed 's/"body":"//; s/"$//' || true)
+      done < <(printf '%s' "${tn}" | grep -oE '"body":"(\\.|[^"])*"' | sed 's/"body":"//; s/"$//' || true)
     fi
   done < <(printf '%s' "${threads_part}" | grep -oE '\{"isResolved":false,"comments":\{"nodes":\[[^]]*\]' || true)
 }
@@ -623,7 +663,7 @@ gh_api_format_unresolved_threads() {
 # like fresh reviewer feedback (the driver would answer its own answer forever).
 gh_api_review_fingerprint() {
   local raw="${1}" matches="" decision=""
-  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"[^"]*","body":"[^"]*","author":\{"login":"[^"]*"\}|\{"databaseId":[0-9]+,"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*","author":\{"login":"[^"]*"\}|\{"body":"[^"]*"|"isResolved":(true|false)' | grep -v '\[bot\]' || true)"
+  matches="$(printf '%s' "${raw}" | grep -oE '\{"state":"(\\.|[^"])*","body":"(\\.|[^"])*","author":\{"login":"[^"]*"\}|\{"databaseId":[0-9]+,"body":"(\\.|[^"])*","author":\{"login":"[^"]*"\}|\{"body":"(\\.|[^"])*","author":\{"login":"[^"]*"\}|\{"body":"(\\.|[^"])*"|"isResolved":(true|false)' | grep -v '\[bot\]' || true)"
   if [[ -z "${matches}" ]]; then
     # Only a decision that means "do work now" counts as feedback on its own;
     # REVIEW_REQUIRED / empty just mean "waiting for reviewers".
