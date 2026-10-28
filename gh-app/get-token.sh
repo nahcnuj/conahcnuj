@@ -12,7 +12,8 @@ fi
 
 set -a
 # shellcheck source=gh-app/app.env.example
-. "${ENV_FILE}"
+# Strip CR so CRLF app.env files (common on Windows) parse cleanly.
+. <(tr -d '\r' < "${ENV_FILE}")
 set +a
 
 # Expand ~, then accept a WSL /mnt/<drive>/ path when this bash is Git Bash.
@@ -21,7 +22,16 @@ set +a
 resolve_pem_path() {
   local path="${1}"
   local drive rest alt
+  # Drop CR so CRLF app.env files do not leave a trailing \r.
+  path="${path//$'\r'/}"
   path="${path/#\~/${HOME}}"
+  # Under MSYS/Git Bash, WSL /mnt/<drive>/ mounts do not exist; map them to
+  # the MSYS /<drive>/ form syntactically.
+  if command -v cygpath >/dev/null 2>&1 && [[ "${path}" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
+    drive="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    rest="${BASH_REMATCH[2]}"
+    path="/${drive}/${rest}"
+  fi
   if [[ -e "${path}" ]]; then
     printf '%s' "${path}"
     return 0
