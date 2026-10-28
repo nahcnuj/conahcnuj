@@ -4,12 +4,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-for t in "${HERE}"/*.sh "${HERE}"/*.bash; do
-  [[ -e "${t}" ]] || continue
+for t in "${HERE}"/*.sh; do
   [[ "$(basename "${t}")" == "run.sh" ]] && continue
-  # docker-run.sh needs a working Docker daemon and a network/build;
-  # it is exercised by the dedicated docker-runner CI job instead.
-  [[ "$(basename "${t}")" == "docker-run.sh" || "$(basename "${t}")" == "docker-run.bash" ]] && continue
   echo "Running: $(basename "${t}")"
   bash "${t}"
   echo "PASS: $(basename "${t}")"

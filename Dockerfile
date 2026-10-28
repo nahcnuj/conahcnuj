@@ -1,10 +1,8 @@
 # Isolated runtime for the conahcnuj driver.
 #
-# This image packages everything the driver needs (bash, git, gh, curl,
-# openssl, opencode and the driver itself) so that an autonomous run is
-# confined to a container instead of the host machine. `gh` is included
-# because the plugin's global rules tell the agent that `GH_TOKEN` is already
-# set and `gh` is safe to use.
+# This image packages everything the driver needs (bash, git, curl, openssl,
+# opencode and the driver itself) so that an autonomous run is confined to a
+# container instead of the host machine.
 #
 # It does NOT bake in any secret: the GitHub App private key and app.env are
 # bind-mounted at run time by docker-run.sh.
@@ -26,7 +24,6 @@ RUN apt-get update \
         coreutils \
         curl \
         gawk \
-        gh \
         git \
         grep \
         openssl \

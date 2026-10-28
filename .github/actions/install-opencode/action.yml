@@ -21,14 +21,5 @@ runs:
         VER="${TAG#v}"
         test -n "$VER"
         curl -fsSL https://opencode.ai/install | bash -s -- --version "$VER"
-        # On Windows runners the GITHUB_PATH entries are consumed by
-        # PowerShell/cmd steps, which cannot resolve the MSYS-style
-        # /c/... paths that Git Bash uses; convert to native Windows paths
-        # there so `opencode` is found outside of bash steps too.
-        if command -v cygpath >/dev/null 2>&1; then
-          echo "$(cygpath -w "$HOME/.opencode/bin")" >> "$GITHUB_PATH"
-          echo "$(cygpath -w "$HOME/.local/bin")" >> "$GITHUB_PATH"
-        else
-          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        fi
+        echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
