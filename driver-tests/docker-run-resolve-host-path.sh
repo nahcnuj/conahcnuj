@@ -90,25 +90,24 @@ GOT="$(resolve_host_path "Z:/no-such-conahcnuj-key.pem")"
 [[ "${GOT}" == "Z:/no-such-conahcnuj-key.pem" ]] || { echo "FAIL: missing drive-letter path resolved to '${GOT}'" >&2; exit 1; }
 echo "PASS missing drive-letter path unchanged"
 
-echo "All resolve_host_path tests passed"
-
-# Trim surrounding whitespace (spaces and tabs).
-WS_INPUT="   ${REAL}   "
-GOT="$(resolve_host_path "${WS_INPUT}")"
+# Surrounding whitespace is trimmed.
+GOT="$(resolve_host_path "   ${REAL}   ")"
 [[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: whitespace-padded path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS surrounding whitespace trimmed"
+echo "PASS whitespace-padded path trimmed"
 
-# Nested quotes (more than one layer) are stripped.
+# Nested quotes (mixed single/double) are stripped.
 GOT="$(resolve_host_path "\"'${REAL}'\"")"
 [[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: nested-quoted path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS nested quotes stripped"
+echo "PASS nested-quoted path stripped"
 
-# Drive-letter root with no trailing path is tolerated.
-GOT="$(resolve_host_path "C:")"
-[[ "${GOT}" == "C:" ]] || { echo "FAIL: drive-letter root resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS drive-letter root tolerated"
+# A missing MSYS-style drive root is left unchanged.
+GOT="$(resolve_host_path "/q")"
+[[ "${GOT}" == "/q" ]] || { echo "FAIL: missing drive root resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing drive root unchanged"
 
-# Missing drive-letter path with spaces survives (no crash).
-GOT="$(resolve_host_path "Z:/no such file.pem")"
-[[ "${GOT}" == "Z:/no such file.pem" ]] || { echo "FAIL: missing spaced drive path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS missing spaced drive path unchanged"
+# A missing Windows drive root is left unchanged.
+GOT="$(resolve_host_path "Q:")"
+[[ "${GOT}" == "Q:" ]] || { echo "FAIL: missing Windows drive root resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS missing Windows drive root unchanged"
+
+echo "All resolve_host_path tests passed"
