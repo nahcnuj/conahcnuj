@@ -57,24 +57,25 @@ resolve_host_path() {
   # Drop CR so CRLF app.env files (common on Windows) do not leave a
   # trailing \r on the path, which would make every -e check fail.
   input="${input//$'\r'/}"
-  # Trim surrounding whitespace.
-  input="${input#"${input%%[![:space:]]*}"}"
-  input="${input%"${input##*[![:space:]]}"}"
-  # Strip surrounding quotes that an app.env value may carry (possibly
-  # more than one layer, e.g. "\"path\"").
-  while true; do
-    case "${input}" in
-      \"*\") input="${input:1:${#input}-2}" ;;
-      \'*\') input="${input:1:${#input}-2}" ;;
-      *) break ;;
-    esac
-  done
+  # Strip surrounding quotes that an app.env value may carry.
+  input="${input#\"}"
+  input="${input%\"}"
+  input="${input#\'}"
+  input="${input%\'}"
   local p="${input/#\~/${HOME}}"
   p="${p//\\//}"
   p="${p//$'\r'/}"
-  # Trim again after normalization.
-  p="${p#"${p%%[![:space:]]*}"}"
-  p="${p%"${p##*[![:space:]]}"}"
+  # Under MSYS/Git Bash, WSL /mnt/<drive>/ mounts do not exist; map them to
+  # the MSYS /<drive>/ form syntactically before the existence checks.
+  if command -v cygpath >/dev/null 2>&1 && [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
+    local _drive="${BASH_REMATCH[1]}"
+    local _rest="${BASH_REMATCH[2]}"
+    if [[ -n "${_rest}" ]]; then
+      p="/${_drive,,}${_rest}"
+    else
+      p="/${_drive,,}"
+    fi
+  fi
   local candidates=("${p}")
   if [[ "${p}" =~ ^/mnt/([a-zA-Z])(/.*)?$ ]]; then
     local drive="${BASH_REMATCH[1]}"
@@ -96,21 +97,12 @@ resolve_host_path() {
     candidates+=("/cygdrive/${drive,,}${rest}")
     candidates+=("${drive^^}:${rest}")
   fi
-  if [[ "${p}" =~ ^([a-zA-Z]):(/.*)?$ ]]; then
+  if [[ "${p}" =~ ^([a-zA-Z]):/(.*)$ ]]; then
     local drive="${BASH_REMATCH[1]}"
-    local rest="${BASH_REMATCH[2]:-}"
-    if [[ -n "${rest}" ]]; then
-      candidates+=("/${drive,,}${rest}")
-    else
-      candidates+=("/${drive,,}")
-    fi
-    candidates+=("/mnt/${drive,,}${rest}")
-    candidates+=("/cygdrive/${drive,,}${rest}")
-    if [[ -z "${rest}" ]]; then
-      candidates+=("${drive^^}:")
-    else
-      candidates+=("${drive^^}:${rest}")
-    fi
+    local rest="${BASH_REMATCH[2]}"
+    candidates+=("/${drive,,}/${rest}")
+    candidates+=("/mnt/${drive,,}/${rest}")
+    candidates+=("/cygdrive/${drive,,}/${rest}")
   fi
   local c
   for c in "${candidates[@]}"; do
@@ -136,16 +128,10 @@ docker_bash_exe() {
   fi
   env_file="$(resolve_host_path "${CONAHCNUJ_APP_ENV:-${HERE}/gh-app/app.env}")"
   if [[ ! -f "${env_file}" ]]; then
-    env_file="${HERE}/gh-app/app.env.example"
+    env_file="$(resolve_host_path "${HERE}/gh-app/app.env.example")"
   fi
   if [[ -f "${env_file}" ]]; then
     line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' | head -1)"
-    if [[ -z "${line}" ]]; then
-      line="$(tr -d '\r' < "${env_file}" | sed -n "s/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*'\([^']*\)'[[:space:]]*$/\1/p" | head -1)"
-    fi
-    if [[ -z "${line}" ]]; then
-      line="$(tr -d '\r' < "${env_file}" | sed -n 's/^[[:space:]]*BASH_EXE[[:space:]]*=[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' | head -1)"
-    fi
     if [[ -n "${line}" && "${line}" != "<your-bash-exe>" ]]; then
       printf '%s\n' "${line}"
       return 0
@@ -289,7 +275,6 @@ if [[ ! -f "${HOST_ENV}" ]]; then
 fi
 set -a
 # shellcheck source=gh-app/app.env.example
-# shellcheck disable=SC1091
 # Strip CR so CRLF app.env files (common on Windows) parse cleanly.
 . <(tr -d '\r' < "${HOST_ENV}")
 set +a

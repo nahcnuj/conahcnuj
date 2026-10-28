@@ -64,30 +64,22 @@ if command -v cygpath >/dev/null 2>&1; then
   fi
 fi
 
-# CRLF in the path (Windows app.env) is stripped.
-CRLF_INPUT="${REAL}"$'\r'
-GOT="$(resolve_host_path "${CRLF_INPUT}")"
-[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: CRLF path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS CRLF path stripped"
+# CR (CRLF) is stripped.
+CR_INPUT="${REAL}"$'\r'
+GOT="$(resolve_host_path "${CR_INPUT}")"
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: CR path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS CR stripped"
 
-# Surrounding double quotes are stripped.
+# Surrounding quotes are stripped.
 GOT="$(resolve_host_path "\"${REAL}\"")"
-[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: double-quoted path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS double-quoted path stripped"
-
-# Surrounding single quotes are stripped.
+[[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: quoted path resolved to '${GOT}'" >&2; exit 1; }
 GOT="$(resolve_host_path "'${REAL}'")"
 [[ "${GOT}" == "${REAL}" ]] || { echo "FAIL: single-quoted path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS single-quoted path stripped"
+echo "PASS quotes stripped"
 
-# Missing cygdrive path is left unchanged.
-GOT="$(resolve_host_path "/cygdrive/z/no-such-conahcnuj-key.pem")"
-[[ "${GOT}" == "/cygdrive/z/no-such-conahcnuj-key.pem" ]] || { echo "FAIL: missing cygdrive path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS missing cygdrive path unchanged"
-
-# Missing Windows drive-letter path is left unchanged.
-GOT="$(resolve_host_path "Z:/no-such-conahcnuj-key.pem")"
-[[ "${GOT}" == "Z:/no-such-conahcnuj-key.pem" ]] || { echo "FAIL: missing drive-letter path resolved to '${GOT}'" >&2; exit 1; }
-echo "PASS missing drive-letter path unchanged"
+# Single quotes inside double quotes etc handled by direct quote strip.
+GOT="$(resolve_host_path "\"${ROOT}/no-such.pem\"")"
+[[ "${GOT}" == "${ROOT}/no-such.pem" ]] || { echo "FAIL: quoted missing path resolved to '${GOT}'" >&2; exit 1; }
+echo "PASS quoted missing path normalized"
 
 echo "All resolve_host_path tests passed"

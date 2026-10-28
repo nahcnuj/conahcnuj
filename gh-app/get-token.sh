@@ -24,6 +24,11 @@ resolve_pem_path() {
   local drive rest alt
   # Drop CR so CRLF app.env files do not leave a trailing \r.
   path="${path//$'\r'/}"
+  # Strip surrounding quotes that an app.env value may carry.
+  path="${path#\"}"
+  path="${path%\"}"
+  path="${path#\'}"
+  path="${path%\'}"
   path="${path/#\~/${HOME}}"
   # Under MSYS/Git Bash, WSL /mnt/<drive>/ mounts do not exist; map them to
   # the MSYS /<drive>/ form syntactically.
