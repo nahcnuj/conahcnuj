@@ -1156,7 +1156,7 @@ implement() {
     done
   done
   echo "ERROR: no available model completed the work (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
-  if [[ "${failed_rounds}" -gt 0 && "$((env_failed_rounds + quota_failed_rounds))" -eq "${failed_rounds}" ]]; then
+  if [[ "${failed_rounds}" -gt 0 && "${ran_without_failure}" -eq 0 && "$((env_failed_rounds + quota_failed_rounds))" -eq "${failed_rounds}" ]]; then
     ENVIRONMENT_DOWN="1"
     echo "ERROR: every model round died on an environment error (provider unreachable, credentials rejected, or quota/billing exhausted; providers given up on:${dead_providers}${quota_providers}). Nothing the driver can do about that -- re-run it once its providers are usable again." >&2
   fi
