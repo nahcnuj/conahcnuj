@@ -33,11 +33,15 @@
 #      run the driver could not resolve is never silently lost. The report
 #      carries the tail of the run's console output as a detailed error log
 #
-# Usage: conahcnuj <issue-or-pr-number>
+# Usage: conahcnuj <issue-or-pr-number> [--effort max|--max-effort|--variant max]
 #
 # Environment overrides (all optional):
 #   CONAHCNUJ_REPO           owner/repo when no origin remote is available
 #   CONAHCNUJ_MAX_SECONDS    overall time budget (default: 259200 = 72 h)
+#   CONAHCNUJ_EFFORT         reasoning-effort variant passed to opencode as
+#                            --variant (e.g. "max" for max effort mode); empty
+#                            uses each model's default. CONAHCNUJ_MAX_EFFORT=1
+#                            is an alias for "max".
 #   CONAHCNUJ_HANDOFF_RETRY_SECONDS  pause before the single review-request
 #                            retry (default: 15 s; 0 disables the pause)
 #   CONAHCNUJ_BRANCH_FETCH_RETRY_PAUSE  pause between the retries of a
@@ -369,11 +373,16 @@ branch_has_commits() {
 # Shape a provider/model id like the plugin's label: `provider (model)`.
 # Only the effort part is missing, which the driver never sees.
 driver_model_value() {
-  local id="${1}" provider rest
+  local id="${1}" provider rest variant
   provider="${id%%/*}"
   rest="${id#*/}"
+  variant="$(opencode_effort_variant)"
   if [[ -n "${rest}" && "${rest}" != "${id}" ]]; then
-    printf '%s (%s)' "${provider}" "${rest}"
+    if [[ -n "${variant}" && "${rest}" != *"/${variant}" ]]; then
+      printf '%s (%s/%s)' "${provider}" "${rest}" "${variant}"
+    else
+      printf '%s (%s)' "${provider}" "${rest}"
+    fi
   else
     printf '%s' "${id}"
   fi
@@ -1800,13 +1809,68 @@ main() {
   if [[ -n "${CONAHCNUJ_ORIG_PWD_WIN:-}" ]]; then
     cd "${CONAHCNUJ_ORIG_PWD_WIN}" 2>/dev/null || true
   fi
-  if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <issue-or-pr-number>" >&2
-    exit 1
-  fi
-  local input="${1}" repo_info owner repo
-  if [[ "${input}" == -* ]]; then
-    echo "Unknown option: ${input}" >&2
+  local input="" repo_info owner repo
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --effort)
+        if [[ $# -ge 2 ]]; then
+          export CONAHCNUJ_EFFORT="${2}"
+          export CONAHCNUJ_VARIANT="${2}"
+          shift 2
+        else
+          export CONAHCNUJ_EFFORT="max"
+          export CONAHCNUJ_VARIANT="max"
+          shift
+        fi
+        ;;
+      --effort=*)
+        export CONAHCNUJ_EFFORT="${1#--effort=}"
+        export CONAHCNUJ_VARIANT="${1#--effort=}"
+        shift
+        ;;
+      --variant)
+        if [[ $# -ge 2 ]]; then
+          export CONAHCNUJ_VARIANT="${2}"
+          export CONAHCNUJ_EFFORT="${2}"
+          shift 2
+        else
+          export CONAHCNUJ_VARIANT="max"
+          export CONAHCNUJ_EFFORT="max"
+          shift
+        fi
+        ;;
+      --variant=*)
+        export CONAHCNUJ_VARIANT="${1#--variant=}"
+        export CONAHCNUJ_EFFORT="${1#--variant=}"
+        shift
+        ;;
+      --max-effort)
+        export CONAHCNUJ_MAX_EFFORT="1"
+        export CONAHCNUJ_EFFORT="max"
+        export CONAHCNUJ_VARIANT="max"
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        echo "Unknown option: ${1}" >&2
+        exit 1
+        ;;
+      *)
+        if [[ -z "${input}" ]]; then
+          input="${1}"
+        else
+          echo "Unexpected argument: ${1}" >&2
+          exit 1
+        fi
+        shift
+        ;;
+    esac
+  done
+  if [[ -z "${input}" ]]; then
+    echo "Usage: $0 <issue-or-pr-number> [--effort max|--max-effort|--variant max]" >&2
     exit 1
   fi
 
