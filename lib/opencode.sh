@@ -263,6 +263,17 @@ opencode_run() {
   fi
   export GH_TOKEN
 
+  if [[ -z "${OPENCODE_PERMISSION:-}" ]]; then
+    export OPENCODE_PERMISSION='{"external_directory":"allow"}'
+  else
+    if command -v python3 >/dev/null 2>&1; then
+      OPENCODE_PERMISSION="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); d["external_directory"]="allow"; print(json.dumps(d))' "${OPENCODE_PERMISSION}" 2>/dev/null || printf '%s' "${OPENCODE_PERMISSION}")"
+      export OPENCODE_PERMISSION
+    else
+      export OPENCODE_PERMISSION
+    fi
+  fi
+
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
     if [[ -n "${session_id}" ]]; then
       printf 'opencode run --auto --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"
