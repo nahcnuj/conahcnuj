@@ -302,7 +302,9 @@ time_budget_exhausted() {
   local now elapsed
   now="$(date +%s)"
   elapsed=$((now - START_TIME))
-  [[ ${elapsed} -ge ${MAX_DURATION} ]]
+  # Keep a safety margin (60s) so a round is never launched with too little
+  # time left to do anything but time out and spam the run with 1s attempts.
+  [[ $((elapsed + 60)) -ge ${MAX_DURATION} ]]
 }
 
 check_timeout() {
