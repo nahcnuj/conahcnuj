@@ -312,6 +312,23 @@ check_timeout() {
   fi
 }
 
+# Like check_timeout, but for starting a model round: a round needs at least the
+# 30s slack that run_timeout already reserves, so a run with only that much (or
+# less) left is treated as exhausted instead of launching a model that the
+# timeout will immediately kill (and then burning through the remaining models
+# one second at a time).
+check_model_timeout() {
+  local now elapsed remaining
+  now="$(date +%s)"
+  elapsed=$((now - START_TIME))
+  remaining=$((MAX_DURATION - elapsed))
+  if (( remaining <= 30 )); then
+    echo "ERROR: time budget (${MAX_DURATION}s) exhausted while waiting. Exiting." >&2
+    exit 1
+  fi
+  check_timeout
+}
+
 # True when the working tree holds real changes. The coding agent's
 # .commit-msg and .branch-name are metadata, not code changes, so they are
 # ignored: a model that writes nothing but a commit message or a branch name
@@ -1034,7 +1051,7 @@ persist_missing_model() {
 # base, so a message-only round there stays no work and still falls through to
 # the other models.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed opencode_run_status
   local dead_providers="" quota_providers="" failed_rounds=0 env_failed_rounds=0 quota_failed_rounds=0 ran_without_failure=0
   local model_list known_skipped=""
   local base_branch="${4:-}"
@@ -1053,7 +1070,7 @@ implement() {
   [[ -n "${known_skipped}" ]] && echo "Skipping models remembered as permanently unavailable:${known_skipped}" >&2
   for model in ${model_list}; do
     [[ -z "${model}" ]] && continue
-    check_timeout
+    check_model_timeout
     provider="${model%%/*}"
     if is_missing_model "${model}"; then
       continue
@@ -1068,7 +1085,7 @@ implement() {
     fi
     model_retried=0
     while true; do
-      check_timeout
+      check_model_timeout
       now="$(date +%s)"
       run_timeout=$((MAX_DURATION - (now - START_TIME) - 30))
       (( run_timeout > 0 )) || run_timeout=1
@@ -1079,9 +1096,18 @@ implement() {
         echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
       fi
       run_failed="false"
+      opencode_run_status=0
       head_before="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
-      if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
+      CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}" || opencode_run_status=$?
+      if [[ "${opencode_run_status}" != "0" ]]; then
         run_failed="true"
+      fi
+      # A round killed by its own timeout means the overall budget is gone:
+      # stop trying the remaining models one second at a time and let the
+      # driver exit with the time-budget-exhausted diagnosis.
+      if [[ "${opencode_run_status}" == "124" ]]; then
+        echo "ERROR: time budget (${MAX_DURATION}s) exhausted while waiting. Exiting." >&2
+        exit 1
       fi
       OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
       head_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
