@@ -136,24 +136,33 @@ fi
 # JSON/GraphQL-escape a string (backslashes first, then double quotes).
 # Newlines become \n so a multi-line commit body survives the query string.
 json_escape() {
-  printf '%s' "${1}" |
-    sed 's/\\/\\\\/g; s/"/\\"/g' |
-    awk '
-      BEGIN {
-        ORS = ""
-        ctl[""] = 0
-        for (i = 1; i < 32; i++) ctl[sprintf("%c", i)] = i
-        ctl[sprintf("%c", 127)] = 127
+  # Read the whole value as a single record (RS = NUL, which no filename
+  # or message can contain) so embedded newlines survive as data instead of
+  # being treated as record separators.
+  printf '%s' "${1}" | awk '
+    BEGIN {
+      RS = "\0"
+      ORS = ""
+      for (i = 0; i < 32; i++) ctl[sprintf("%c", i)] = i
+      ctl[sprintf("%c", 127)] = 127
+    }
+    {
+      if (NR > 1) {
+        # Should never happen with RS = NUL, but keep a separator just in case.
+        printf "\\n"
       }
-      NR > 1 { printf "\\n" }
-      {
-        n = length($0)
-        for (i = 1; i <= n; i++) {
-          c = substr($0, i, 1)
-          if (c in ctl) printf "\\u%04x", ctl[c]
-          else printf "%s", c
-        }
-      }'
+      n = length($0)
+      for (i = 1; i <= n; i++) {
+        c = substr($0, i, 1)
+        if (c == "\\") printf "\\\\"
+        else if (c == "\"") printf "\\\""
+        else if (c == sprintf("%c", 10)) printf "\\n"
+        else if (c == sprintf("%c", 13)) printf "\\r"
+        else if (c == sprintf("%c", 9)) printf "\\t"
+        else if (c in ctl) printf "\\u%04x", ctl[c]
+        else printf "%s", c
+      }
+    }'
 }
 
 # Collapse CONAHCNUJ_COMMIT_MODEL into one trailer value, or empty when unset.
