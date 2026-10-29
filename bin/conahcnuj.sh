@@ -334,29 +334,37 @@ todo_present() {
   [[ -f "TODO.jsonl" ]] && [[ -s "TODO.jsonl" ]]
 }
 
-# True when the current branch already carries commits on top of the default
-# branch, i.e. an earlier run already implemented the issue. Used to skip the
-# model fall-through (which would otherwise keep asking every model to do work
-# that is already committed) and go straight to opening the PR.
-branch_has_commits() {
-  local default_oid="${1}" default_branch="${2}" ref count
-  # Compare against the default branch's tip as freshly read from the API, not
-  # the local origin/<default> ref: the driver never fetches the default
-  # branch, so that ref goes stale once main advances through merged PRs. A
-  # feature branch pinned at the real main tip would then look like it already
-  # "has commits", the driver would skip implementation, and GitHub would
-  # reject the PR (createPullRequest: UNPROCESSABLE, no commits between base
-  # and head). That is what crashed the driver into the bug-report chain of
-  # issues #33/#34.
+# Resolve the base ref to compare the feature branch against. Shared by the
+# commit-count helpers below so the empty-initial-commit guard and the
+# skip-implement check agree on which base to use.
+_branch_base_ref() {
+  local default_oid="${1}" default_branch="${2}" ref
   ref="${default_oid}"
   if [[ -z "${ref}" ]] || ! git rev-parse --verify -q "${ref}^{commit}" >/dev/null 2>&1; then
-    # The OID is not in this clone (offline tests feed a placeholder oid);
-    # fall back to the local default-branch refs.
     ref="${default_branch}"
     if [[ -n "${ref}" ]] && git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
       ref="origin/${default_branch}"
     fi
   fi
+  printf '%s' "${ref}"
+}
+
+# Number of commits on the feature branch on top of the base branch (including
+# empty commits). Used to decide whether an empty initial commit is needed.
+branch_commit_count() {
+  local ref
+  ref="$(_branch_base_ref "$@")"
+  [[ -n "${ref}" ]] || { printf '0'; return 0; }
+  git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0'
+}
+
+# True when the current branch already carries commits on top of the default
+# branch, i.e. an earlier run already implemented the issue. Used to skip the
+# model fall-through (which would otherwise keep asking every model to do work
+# that is already committed) and go straight to opening the PR.
+branch_has_commits() {
+  local ref count
+  ref="$(_branch_base_ref "$@")"
   if [[ -z "${ref}" ]]; then
     # No base to compare against: cannot tell whether HEAD already carries
     # work, so treat it as "no commits yet" (never accept a message-only
@@ -1763,8 +1771,10 @@ start_issue() {
   # concurrency group and review/resume triggers can key on it instead of the
   # issue number). That requires at least one commit on the branch, so create
   # an empty initial commit first: it carries no file changes and only exists
-  # to let the PR be opened before the real implementation lands.
-  if ! branch_has_commits "${default_oid}" "${default_branch}"; then
+  # to let the PR be opened before the real implementation lands. Any commit on
+  # top of the base counts here (even an empty one left by an interrupted
+  # earlier run), so a second empty commit is never stacked on top of one.
+  if [[ "$(branch_commit_count "${default_oid}" "${default_branch}")" == "0" ]]; then
     echo "Creating an empty initial commit so a draft PR can be opened early." >&2
     if [[ "${TEST_MODE}" == "1" ]]; then
       git commit --allow-empty -q -m "Initial commit" 2>/dev/null || true
@@ -1780,8 +1790,9 @@ start_issue() {
   local early_pr=""
   if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
     echo "PR could not be created for ${branch} -> ${default_branch}; running an implementation round." >&2
-    if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created." "${default_branch}"; then
-      :
+    if ! implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created." "${default_branch}"; then
+      echo "ERROR: could not implement issue #${num} with any available model." >&2
+      exit 1
     fi
     rm -f .branch-name
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
