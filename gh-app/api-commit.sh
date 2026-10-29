@@ -330,19 +330,23 @@ if [[ -z "${HEAD_SHA}" ]]; then
   #     branch head (no commits pushed), the same thing a first
   #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
   #     followed by a commit needs no extra option.
-  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
+  _default_resp="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}")" || { echo "ERROR: cannot read repository metadata for ${REPO}" >&2; exit 1; }
+  DEFAULT_BRANCH="$(printf '%s' "${_default_resp}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
     exit 1
   fi
-  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
+  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")" || { echo "ERROR: cannot read branch ${DEFAULT_BRANCH} of ${REPO}" >&2; exit 1; }
   BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
   if [[ -z "${BASE_SHA}" ]]; then
     echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
     exit 1
   fi
   BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
+  if ! curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null; then
+    echo "ERROR: cannot create branch ${BRANCH} in ${REPO}" >&2
+    exit 1
+  fi
   echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
   HEAD_SHA="${BASE_SHA}"
 fi
@@ -378,11 +382,14 @@ BODY_FILE="$(mktemp)"
 trap 'rm -f "${BODY_FILE:-}"' EXIT
 printf '%s' "{\"query\":\"$(json_escape "${QUERY}")\"}" > "${BODY_FILE}"
 
-RESP="$(curl -fsSL -X POST \
+if ! RESP="$(curl -fsSL -X POST \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   --data-binary "@${BODY_FILE}" \
-  "${GRAPHQL}")"
+  "${GRAPHQL}")"; then
+  echo "ERROR: commit creation request failed for ${REPO}" >&2
+  exit 1
+fi
 COMMIT_SHA="$(printf '%s' "${RESP}" | tr -d '\n \t' | sed -n 's/.*"createCommitOnBranch":{"commit":{"oid":"\([^"]*\)".*/\1/p')"
 if [[ -z "${COMMIT_SHA}" ]]; then
   echo "ERROR: commit creation failed: ${RESP}" >&2
