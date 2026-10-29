@@ -1034,7 +1034,7 @@ persist_missing_model() {
 # base, so a message-only round there stays no work and still falls through to
 # the other models.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed remote_before="" remote_after="" branch_name=""
   local dead_providers="" quota_providers="" failed_rounds=0 env_failed_rounds=0 quota_failed_rounds=0 ran_without_failure=0
   local model_list known_skipped=""
   local base_branch="${4:-}"
@@ -1079,15 +1079,48 @@ implement() {
         echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
       fi
       run_failed="false"
+      # The agent commits with `git vc`, which creates the commit on the remote
+      # branch; the local HEAD may not have advanced by the time the round ends
+      # (and the agent may have dropped its .commit-msg afterwards). Capture the
+      # remote head before the round as well, so a commit made through `git vc`
+      # during the round is detected instead of being mistaken for "no work"
+      # (which made the driver retry every model until the time budget ran out).
+      local branch_name=""
+      branch_name="$(git -C "${workdir}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
       head_before="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
+      remote_before=""
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+        git -C "${workdir}" fetch origin "${branch_name}" >/dev/null 2>&1 || true
+        if git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+          remote_before="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
+        fi
+        if [[ -n "${remote_before}" ]]; then
+          head_before="${remote_before}"
+        fi
+      fi
       if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
         run_failed="true"
       fi
       OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
       head_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
+      remote_after=""
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+        git -C "${workdir}" fetch origin "${branch_name}" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+        remote_after="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
+      fi
+      if [[ -n "${remote_after}" ]]; then
+        head_after="${remote_after}"
+      fi
       committed="false"
       if [[ -n "${head_after}" && "${head_after}" != "${head_before}" ]]; then
         committed="true"
+      fi
+      # Sync the local tree to the commit the agent pushed, so the next round
+      # (and the PR creation) see the committed state instead of stale scratch.
+      if [[ "${committed}" == "true" && -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+        git -C "${workdir}" reset --hard "origin/${branch_name}" >/dev/null 2>&1 || true
       fi
       wrote_message="false"
       if [[ -s "${workdir}/.commit-msg" ]]; then
