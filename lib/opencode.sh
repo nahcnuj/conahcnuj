@@ -263,6 +263,26 @@ opencode_run() {
   fi
   export GH_TOKEN
 
+  # Make common tool directories (bun's installer, cargo, npm-global,
+  # Homebrew, ...) resolvable by the coding agent's shells. On some runners
+  # (notably GitHub Actions) bun is installed under ~/.bun/bin but that
+  # directory is not on the default PATH, so `bun` was unresolvable and runs
+  # failed even though the binary was present (#1399). The plugin does the
+  # same injection for interactive sessions; mirror it here so plugin-less
+  # driver runs (CI) get it too.
+  local _pdir _current_path
+    _current_path="${PATH:-}"
+    for _pdir in "${HOME:-}/.bun/bin" "${HOME:-}/.local/bin" "${HOME:-}/.cargo/bin" "${HOME:-}/.npm-global/bin" "/opt/homebrew/bin" "/usr/local/bin"; do
+      [[ -z "${_pdir}" ]] && continue
+      [[ -d "${_pdir}" ]] || continue
+      case ":${_current_path}:" in
+        *":${_pdir}:"*) ;;
+        *) _current_path="${_pdir}:${_current_path}" ;;
+      esac
+    done
+    PATH="${_current_path}"
+    export PATH
+
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
     if [[ -n "${session_id}" ]]; then
       printf 'opencode run --auto --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"

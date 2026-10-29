@@ -445,16 +445,37 @@ async function injectShellEnv(
   // keeps the first key that case-insensitively matches `PATH` (see the
   // Node.js child_process docs), so a single `PATH` entry is sufficient
   // and `Path`/`process.env.Path` need not be handled separately.
+  // Tool directories that are commonly installed outside the default PATH
+  // (bun's installer, cargo, npm-global, Homebrew, ...). opencode's shells
+  // inherit a restricted PATH on some runners (notably GitHub Actions, where
+  // bun lives in ~/.bun/bin but is not on PATH), so make those directories
+  // resolvable there too. Each entry is only added when it actually exists.
   const gitRoot = path.dirname(path.dirname(config.BASH_EXE.replace(/\\/g, "/")))
   const usrBin = path.join(gitRoot, "usr", "bin")
-  if (fs.existsSync(usrBin)) {
-    const current = env.PATH || env.Path || process.env.PATH || ""
-    const norm = (v: string) => v.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
-    const present = current.split(path.delimiter).some((e) => norm(e) === norm(usrBin))
-    if (!present) {
-      const next = current ? `${usrBin}${path.delimiter}${current}` : usrBin
-      env.PATH = next
+  const home = os.homedir()
+  const candidates = [
+    usrBin,
+    path.join(home, ".bun", "bin"),
+    path.join(home, ".local", "bin"),
+    path.join(home, ".cargo", "bin"),
+    path.join(home, ".npm-global", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+  ]
+  const norm = (v: string) => v.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+  let current = env.PATH || env.Path || process.env.PATH || ""
+  for (const dir of candidates) {
+    if (!dir || !fs.existsSync(dir)) {
+      continue
     }
+    const already = current.split(path.delimiter).some((e) => norm(e) === norm(dir))
+    if (already) {
+      continue
+    }
+    current = current ? `${dir}${path.delimiter}${current}` : dir
+  }
+  if (current !== (env.PATH || env.Path || process.env.PATH || "")) {
+    env.PATH = current
   }
 }
 
