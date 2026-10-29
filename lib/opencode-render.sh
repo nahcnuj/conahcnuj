@@ -348,6 +348,9 @@ declare -A PART_FED=()    # the feed (output / error) has started for this part
 # Whether the log's last line is half-written: streamed parts keep growing one
 # and glue their continuation onto it instead of starting a new line.
 OPENLINE=0
+# Whether a reasoning (thinking) block is currently open and still needs its
+# bottom cap (⎝) before the next header or end of stream.
+REASONING_OPEN="false"
 # Exit code of the most recently completed command: empty when none has run
 # yet, 0 for success, non-zero for failure. Drives the ●/🟢/🔴 marker on the
 # next header.
@@ -531,6 +534,12 @@ render_header() {
   # A part that streams can leave its last line half-written; a header starts
   # a new line of the log, so close the open one first.
   close_line
+  # Close an open reasoning (thinking) block's bottom cap before the next
+  # header, so the parenthesis wraps only that block.
+  if [[ "${REASONING_OPEN}" == "true" ]]; then
+    printf '   ⎝\n'
+    REASONING_OPEN="false"
+  fi
   # If a command block is still open (its command has not verdicted yet) when a
   # new block starts, close that group first so the previous command's result
   # precedes this block's header (the model name) instead of swallowing it in
@@ -576,7 +585,7 @@ render_indent() {
 # without a newline leaves the line half-written for the next chunk (the
 # global OPENLINE tracks that).
 render_stream() {
-  local value="${1:-}" prefix="${2:-}" line rest first=1 more=0
+  local value="${1:-}" prefix="${2:-}" first_indent="${3:-}" line rest first=1 more=0
   local had_nl=1
   [[ -n "${value}" ]] || return 0
   if [[ "${value}" == *$'\n' ]]; then
@@ -597,7 +606,7 @@ render_stream() {
       OPENLINE=0
       prefix=""
     elif [[ "${first}" == "1" ]]; then
-      printf '%s%s%s' "${INDENT}" "${prefix}" "${line}"
+      printf '%s%s%s' "${first_indent:-${INDENT}}" "${prefix}" "${line}"
     else
       printf '%s%s' "${INDENT}" "${line}"
     fi
@@ -676,6 +685,63 @@ render_block_text() {
       # shown are in the log, and staying silent would drop what changed.
       render_header
       render_stream "${F[text]}"
+      ;;
+  esac
+  PART_TEXT[${pid}]="${F[text]}"
+}
+
+# Reasoning (thinking) renders as a parenthesised block instead of plain
+# indented text, so it is visually distinct from the final answer.
+render_block_reasoning() {
+  local pid="${F[id]}" prev
+  if [[ -z "${pid}" ]]; then
+    [[ -n "${F[text]}" ]] || return 0
+    if [[ "${REASONING_OPEN}" == "true" ]]; then
+      close_line
+      printf '   ⎝\n'
+      REASONING_OPEN="false"
+    fi
+    render_header
+    printf '   ⎛\n'
+    REASONING_OPEN="true"
+    INDENT="   ⎜"
+    render_stream "${F[text]}" "" ".oO⎜"
+    return 0
+  fi
+  prev="${PART_TEXT[${pid}]:-}"
+  if [[ -z "${prev}" ]]; then
+    [[ -n "${F[text]}" ]] || return 0
+    if [[ "${REASONING_OPEN}" == "true" ]]; then
+      close_line
+      printf '   ⎝\n'
+      REASONING_OPEN="false"
+    fi
+    render_header
+    printf '   ⎛\n'
+    REASONING_OPEN="true"
+    INDENT="   ⎜"
+    render_stream "${F[text]}" "" ".oO⎜"
+    PART_TEXT[${pid}]="${F[text]}"
+    return 0
+  fi
+  stream_delta "${prev}" "${F[text]}"
+  case "${STREAM_KIND}" in
+    append)
+      INDENT="   ⎜"
+      render_stream "${STREAM_TAIL}"
+      ;;
+    stale) return 0 ;;
+    revise)
+      if [[ "${REASONING_OPEN}" == "true" ]]; then
+        close_line
+        printf '   ⎝\n'
+        REASONING_OPEN="false"
+      fi
+      render_header
+      printf '   ⎛\n'
+      REASONING_OPEN="true"
+      INDENT="   ⎜"
+      render_stream "${F[text]}" "" ".oO⎜"
       ;;
   esac
   PART_TEXT[${pid}]="${F[text]}"
@@ -933,6 +999,8 @@ render_block_error() {
 render_event() {
   local line="${1}"
   line="${line%$'\r'}"
+  # Each block starts from the default indent; reasoning overrides it.
+  INDENT="  "
   case "${line}" in
     '{'*) ;;
     '') return 0 ;;
@@ -981,7 +1049,8 @@ render_event() {
     return 0
   fi
   case "${F[type]}" in
-    text | reasoning) render_block_text ;;
+    text) render_block_text ;;
+    reasoning) render_block_reasoning ;;
     tool_use) render_block_tool ;;
     error) render_block_error ;;
     *)
@@ -1027,6 +1096,13 @@ for _buf in "${BUFFERED_EVENTS[@]}"; do
 done
 FLUSHING="false"
 BUFFERED_EVENTS=()
+
+# Close an open reasoning block's bottom cap at end of stream.
+if [[ "${REASONING_OPEN}" == "true" ]]; then
+  close_line
+  printf '   ⎝\n'
+  REASONING_OPEN="false"
+fi
 
 # Close any command group left open when the stream ended (e.g. a command that
 # was still running) so GitHub Actions does not swallow the trailing output.

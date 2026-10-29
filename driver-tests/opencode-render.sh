@@ -117,8 +117,8 @@ test_text_and_reasoning() {
 {"type":"step_finish","part":{"type":"step-finish","reason":"stop"}}
 EOF
     bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
-  assert_contains "${out}" "  first thought" "reasoning rendered"
-  assert_contains "${out}" "  second thought" "second reasoning line"
+  assert_contains "${out}" "first thought" "reasoning rendered"
+  assert_contains "${out}" "second thought" "second reasoning line"
   assert_contains "${out}" "  final answer" "text rendered"
   # Only the two content events open a block: step_start / step_finish carry no
   # content and must not produce a header.
@@ -589,7 +589,7 @@ test_nothing_is_truncated() {
 EOF
   )"
   assert_contains "${out}" "  ${long}" "long line kept in full"
-  assert_contains "${out}" "  second thought" "reasoning paragraph not cut short"
+  assert_contains "${out}" "second thought" "reasoning paragraph not cut short"
   assert_contains "${out}" "  third answer" "text block not cut short"
   assert_contains "${out}" "  line0005" "last line of the tool output kept"
   for ((i = 1; i <= 5; i++)); do
