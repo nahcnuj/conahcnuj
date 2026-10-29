@@ -46,9 +46,11 @@ fi
 # rate limit and avoids the "offline?" failure mode. Missing/invalid keys
 # (offline tests, fresh clones) simply leave the request unauthenticated.
 TOKEN=""
-if [[ -f "${DIR}/get-token.sh" ]]; then
-  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
-fi
+  if [[ -f "${DIR}/get-token.sh" ]]; then
+    set +e
+    TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null)"
+    set -e
+  fi
 TOKEN="$(printf '%s' "${TOKEN}" | tr -d '\n \t\r')"
 
 CURL_AUTH=()
@@ -75,5 +77,7 @@ if [[ -z "${ID}" ]]; then
   echo "(gh api users/${APP_SLUG}%5Bbot%5D --jq .id), not APP_ID." >&2
   exit 1
 fi
-printf '%s' "${ID}" > "${CACHE_FILE}" 2>/dev/null || true
+set +e
+printf '%s' "${ID}" > "${CACHE_FILE}" 2>/dev/null
+set -e
 printf '%s' "${ID}"
