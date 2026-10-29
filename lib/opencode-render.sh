@@ -537,7 +537,7 @@ render_header() {
   # Close an open reasoning (thinking) block's bottom cap before the next
   # header, so the parenthesis wraps only that block.
   if [[ "${REASONING_OPEN}" == "true" ]]; then
-    printf '   ⎝\n'
+    printf '   ⎝\n\n'
     REASONING_OPEN="false"
   fi
   # If a command block is still open (its command has not verdicted yet) when a
@@ -698,7 +698,7 @@ render_block_reasoning() {
     [[ -n "${F[text]}" ]] || return 0
     if [[ "${REASONING_OPEN}" == "true" ]]; then
       close_line
-      printf '   ⎝\n'
+      printf '   ⎝\n\n'
       REASONING_OPEN="false"
     fi
     render_header
@@ -713,7 +713,7 @@ render_block_reasoning() {
     [[ -n "${F[text]}" ]] || return 0
     if [[ "${REASONING_OPEN}" == "true" ]]; then
       close_line
-      printf '   ⎝\n'
+      printf '   ⎝\n\n'
       REASONING_OPEN="false"
     fi
     render_header
@@ -734,7 +734,7 @@ render_block_reasoning() {
     revise)
       if [[ "${REASONING_OPEN}" == "true" ]]; then
         close_line
-        printf '   ⎝\n'
+        printf '   ⎝\n\n'
         REASONING_OPEN="false"
       fi
       render_header
@@ -1100,7 +1100,7 @@ BUFFERED_EVENTS=()
 # Close an open reasoning block's bottom cap at end of stream.
 if [[ "${REASONING_OPEN}" == "true" ]]; then
   close_line
-  printf '   ⎝\n'
+  printf '   ⎝\n\n'
   REASONING_OPEN="false"
 fi
 
