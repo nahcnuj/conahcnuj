@@ -136,8 +136,26 @@ async function resolveBotUserId(slug: string): Promise<string> {
   if (!/^[A-Za-z0-9-]+$/.test(slug)) {
     throw new Error(`Invalid APP_SLUG for bot lookup: ${slug}`)
   }
-  const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, {
-    headers: { Accept: "application/vnd.github+json" },
+  // Best-effort authentication: an installation token raises the public API
+  // rate limit and avoids the "offline?" failure mode. Missing/invalid keys
+  // (offline tests, fresh clones) simply leave the request unauthenticated.
+  let token: string | null = null
+  try {
+    token = await getInstallationToken()
+  } catch {
+    token = null
+  }
+  const apiBase =
+    (typeof process !== "undefined" && process.env.GH_APP_API_BASE) ||
+    "https://api.github.com"
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const res = await fetch(`${apiBase}/users/${slug}%5Bbot%5D`, {
+    headers,
   })
   if (!res.ok) {
     throw new Error(
