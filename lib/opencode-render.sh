@@ -358,6 +358,7 @@ LAST_CMD_RESULT=""
 OPEN_CMD_PID=""
 declare -a BUFFERED_EVENTS=()
 FLUSHING="false"
+CURRENT_LINE=""
 
 render_fields() {
   local tag value nl=$'\n'
@@ -709,7 +710,7 @@ render_block_tool() {
   # timeout ..."). A timed-out command did not succeed, so it must not get a ✅
   # (#420).
   local timed_out="false"
-  case "${F[output]}${F[toolerror]}" in
+  case "${F[output]}${F[toolerror]}${F[errmsg]}${F[errname]}${F[text]}${CURRENT_LINE:-}" in
     *"terminated command after exceeding timeout"*) timed_out="true" ;;
   esac
   if [[ -n "${pid}" ]]; then
@@ -809,7 +810,9 @@ render_block_tool() {
     if [[ -n "${arg}" ]]; then
       label="${label} ${arg}"
     fi
-    if [[ "${status}" == "error" ]]; then
+    if [[ "${timed_out}" == "true" ]]; then
+      printf '❌️ %s (timed out)\n' "${label}"
+    elif [[ "${status}" == "error" ]]; then
       printf '❌️ %s\n' "${label}"
       if [[ -n "${F[toolerror]}" ]]; then
         print_newline
@@ -828,6 +831,9 @@ render_block_tool() {
         render_marked "${F[oldstr]}" "-"
         render_marked "${F[newstr]}" "+"
       fi
+    fi
+    if [[ "${timed_out}" == "true" ]]; then
+      LAST_CMD_RESULT=1
     fi
     [[ -n "${pid}" ]] && PART_STATE[${pid}]=1
     return 0
@@ -944,6 +950,7 @@ render_event() {
       return 0
       ;;
   esac
+  CURRENT_LINE="${line}"
   render_fields "${line}"
   local pid="${F[id]}"
   # Same part id and identical content again: a replay (resumed session /
