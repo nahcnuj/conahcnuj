@@ -366,7 +366,7 @@ opencode_run() {
       echo "opencode: mock no-op for ${model} (produces no changes)" >&2
     fi
     # MOCK_OPENCODE_TODO lists the models that simulate the per-issue progress
-    # file. The first round of such a model creates TODO.md (and remembers it in
+    # file. The first round of such a model creates TODO.jsonl (and remembers it in
     # MOCK_OPENCODE_STATE_DIR); the next round deletes it, standing in for an
     # agent that starts the issue, then finishes and cleans up. The state file
     # lives outside the work tree so it is never committed.
@@ -375,9 +375,9 @@ opencode_run() {
       todo_state="${MOCK_OPENCODE_STATE_DIR:-${TMPDIR:-/tmp}}/conahcnuj-todo-${model//\//-}"
       mkdir -p "$(dirname "${todo_state}")" 2>/dev/null || true
       if [[ -f "${todo_state}" ]]; then
-        rm -f "${workdir}/TODO.md"
+        rm -f "${workdir}/TODO.jsonl"
       else
-        printf '# TODO\n' > "${workdir}/TODO.md"
+        printf '{"task":"todo"}\n' > "${workdir}/TODO.jsonl"
         : > "${todo_state}"
       fi
     fi
