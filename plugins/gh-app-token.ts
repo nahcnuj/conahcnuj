@@ -154,6 +154,14 @@ async function resolveBotUserId(slug: string): Promise<string> {
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }
+  // The slug is validated against an allowlist above and apiBase comes from
+  // gh-app/app.env (trusted local config); both are used only to address this
+  // public user lookup, so the file-to-HTTP / request-forgery findings are
+  // accepted here.
+  // codeql[js/file-access-to-http]
+  // lgtm[js/file-access-to-http]
+  // codeql[js/request-forgery]
+  // lgtm[js/request-forgery]
   const res = await fetch(`${apiBase}/users/${slug}%5Bbot%5D`, {
     headers,
   })
