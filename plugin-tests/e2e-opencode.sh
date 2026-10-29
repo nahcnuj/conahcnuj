@@ -78,6 +78,13 @@ run_e2e_model() {
   if grep -q '[^[:space:]]' "${slot_dir}/out.jsonl" 2>/dev/null; then
     : > "${E2E_DIR}/results/r${round}-${slot}.output"
   fi
+  # A session that never tried to commit (git vc or git commit) reached no
+  # verdict about the plugin: it may have stalled mid-exploration or simply
+  # not reached the commit step. Only sessions that actually attempted a
+  # commit count as a plugin verdict (pass or fail).
+  if echo "${JSONL}" | jq -e 'any(.type=="tool_use" and .part.tool=="bash"; ((.part.state.input.command // "") | test("git (commit|vc)"))' >/dev/null 2>&1; then
+    : > "${E2E_DIR}/results/r${round}-${slot}.commit_attempted"
+  fi
 
   if echo "${TEXT}" | grep -q "git vc" && [ -z "${BAD}" ]; then
     echo ok > "${status_file}"
@@ -217,7 +224,7 @@ for f in "${E2E_DIR}/results/"*.rc; do
   saw_rc=1
   attempt_rc="$(cat "${f}")"
   stem="${f%.rc}"
-  if [ "${attempt_rc}" != 124 ] && [ -f "${stem}.output" ]; then
+  if [ "${attempt_rc}" != 124 ] && [ -f "${stem}.output" ] && [ -f "${stem}.commit_attempted" ]; then
     conclusive=1
   fi
 done
@@ -225,7 +232,7 @@ has_output=0
 for f in "${E2E_DIR}/results/"*.output; do
   if [ -f "${f}" ]; then has_output=1; fi
 done
-if [ "${conclusive}" = 0 ]; then
+if [ "${saw_rc}" = 1 ] && [ "${conclusive}" = 0 ]; then
   if [ "${has_output}" = 1 ]; then
     echo "E2E SKIP: free-model service stalled (events arrived but no attempt reached a verdict); treating as pass" >&2
   else
