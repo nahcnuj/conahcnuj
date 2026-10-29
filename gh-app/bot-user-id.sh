@@ -42,8 +42,38 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
-ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+AUTH_TOKEN=""
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  AUTH_TOKEN="${GH_TOKEN}"
+elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  AUTH_TOKEN="${GITHUB_TOKEN}"
+else
+  AUTH_TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+fi
+
+fetch_lookup() {
+  local token="${1}"
+  if [[ -n "${token}" ]]; then
+    curl -fsSL \
+      -H "Authorization: Bearer ${token}" \
+      -H "Accept: application/vnd.github+json" \
+      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true
+  else
+    curl -fsSL \
+      -H "Accept: application/vnd.github+json" \
+      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true
+  fi
+}
+
+LOOKUP=""
+if [[ -n "${AUTH_TOKEN}" ]]; then
+  LOOKUP="$(fetch_lookup "${AUTH_TOKEN}")"
+fi
+ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+if [[ -z "${ID}" ]]; then
+  LOOKUP="$(fetch_lookup "")"
+  ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+fi
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
   echo "Set BOT_USER_ID to the bot account user ID" >&2

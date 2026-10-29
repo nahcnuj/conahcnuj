@@ -180,6 +180,8 @@ jobs:
           EOF
           APP_SLUG="$(bash gh-app/app-slug.sh)"
           printf 'APP_SLUG="%s"\n' "${APP_SLUG}" >> gh-app/app.env
+          BOT_USER_ID="$(bash gh-app/bot-user-id.sh)"
+          printf 'BOT_USER_ID="%s"\n' "${BOT_USER_ID}" >> gh-app/app.env
 
       - name: Run the conahcnuj driver
         env:
