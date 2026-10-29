@@ -43,12 +43,16 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape: fetch_issue, get_repo, find_pr_by_head_any (empty),
-# create_issue. Reused by both runs (the sub-shell reopens it).
+# find_pr_by_head (empty), repo id, create_pr (128), create_issue. Reused by
+# all runs (the sub-shell reopens it).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"number": 14, "title": "test issue, providers down", "body": "dummy body", "labels": [], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
+{"data":{"repository":{"pullRequests":{"nodes":[]}}}}
+{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
+{"data":{"createPullRequest":{"pullRequest":{"number":128}}}}
 {"number": 25}
 EOF
 

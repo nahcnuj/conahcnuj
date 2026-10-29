@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # conahcnuj PR-creation-failure recovery test (offline).
 #
-# When GitHub refuses to create the PR (e.g. createPullRequest UNPROCESSABLE
-# because there is no diff between base and head), the driver must NOT die and
-# file the recursive "failed to resolve #N" bug report. It runs an
-# implementation round and retries; the branch ends up with real work and the
-# PR is eventually created.
+# When GitHub still refuses to create the early draft PR (e.g.
+# createPullRequest UNPROCESSABLE), the driver must NOT die and file the
+# recursive "failed to resolve #N" bug report. It runs an implementation round
+# and retries; the branch ends up with real work and the PR is eventually
+# created.
 #
-#   issue read -> branch -> implement -> create_pr (UNPROCESSABLE) ->
-#   re-implement -> create_pr (#125) -> constraints pass -> APPROVED ->
-#   "ready to merge" -> exit 0
+#   issue read -> branch -> early create_pr (UNPROCESSABLE) -> implement ->
+#   create_pr (#125) -> constraints pass -> APPROVED -> "ready to merge" ->
+#   exit 0
 #
 # No secrets, no network.
 set -euo pipefail
@@ -37,7 +37,7 @@ OID="$(git -C "${WORK}" rev-parse HEAD)"
 
 # Mocked response tape, in call order:
 #   fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head (empty),
-#   repo id, create_pr (UNPROCESSABLE) -> then, after the recovery round:
+#   repo id, early create_pr (UNPROCESSABLE) -> implement ->
 #   find_pr_by_head (empty), repo id, create_pr (125), fetch_reviews (APPROVED).
 #   The APPROVED read exits as ready to merge before any constraints poll (#219).
 TAPE="${ROOT}/tape.txt"
@@ -74,7 +74,8 @@ echo "-----------------------------"
 
 [[ ${RC} -eq 0 ]] || { echo "FAIL: driver exited ${RC} (expected 0)"; exit 1; }
 
-grep -q "PR could not be created for conahcnuj/18-fix-racing-driver -> main; running an implementation round." "${LOG}" || { echo "FAIL: the driver did not recover from the PR creation failure"; exit 1; }
+grep -q "ERROR: PR creation failed for conahcnuj/18-fix-racing-driver -> main." "${LOG}" || { echo "FAIL: the early PR creation failure was not handled"; exit 1; }
+grep -q "Implementing with available models" "${LOG}" || { echo "FAIL: the driver did not implement after the early PR creation failure"; exit 1; }
 grep -q "Created PR #125" "${LOG}" || { echo "FAIL: PR #125 was not created on the retry"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 grep -q "filing a bug report issue" "${LOG}" && { echo "FAIL: a failed PR creation must not trigger the bug report"; exit 1; }

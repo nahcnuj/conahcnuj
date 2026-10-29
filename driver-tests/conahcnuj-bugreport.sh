@@ -29,7 +29,8 @@ git -C "${WORK}" add -A
 git -C "${WORK}" commit -qm init
 
 # Mocked response tape, in call order:
-#   fetch_issue, get_repo, find_pr_by_head_any (empty), create_issue (25).
+#   fetch_issue, get_repo, find_pr_by_head_any (empty),
+#   find_pr_by_head (empty), repo id, create_pr (128), create_issue (25).
 # The mocked opencode is a no-op for every model, so implement produces no
 # changes, start_issue exits 1, and the EXIT trap files the bug report (one
 # extra API call reading the created issue's number).
@@ -38,6 +39,9 @@ cat > "${TAPE}" <<'EOF'
 {"number": 14, "title": "test issue that cannot be implemented", "body": "dummy body", "labels": [], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
+{"data":{"repository":{"pullRequests":{"nodes":[]}}}}
+{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
+{"data":{"createPullRequest":{"pullRequest":{"number":128}}}}
 {"number": 25}
 EOF
 

@@ -73,6 +73,7 @@ MESSAGE=""
 declare -a DELETE_PATHS=()
 TRACKED=false
 DRY_RUN=false
+ALLOW_EMPTY=false
 REPO=""
 BRANCH=""
 
@@ -102,6 +103,8 @@ while [[ $# -gt 0 ]]; do
       TRACKED=true; shift ;;
     --dry-run)
       DRY_RUN=true; shift ;;
+    --allow-empty)
+      ALLOW_EMPTY=true; shift ;;
     *)
       echo "Unknown option: ${1}" >&2
       exit 1 ;;
@@ -285,7 +288,7 @@ for f in "${ADD_FILES[@]}"; do
   ADDITIONS+=( "{path:\"${EP}\",contents:\"${B64}\"}" )
 done
 
-if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+if [[ "${ALLOW_EMPTY}" != "true" && ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
   echo "ERROR: nothing to commit (nothing staged; stage with git add or use -a)" >&2
   exit 1
 fi
