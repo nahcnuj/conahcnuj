@@ -115,6 +115,15 @@ function Deploy-GhApp {
         Write-Host "  copied missing-models"
     }
 
+    # bot-id.cache: the immutable bot account user ID. Shipping it lets
+    # bot-user-id.sh resolve offline (no network) on first run; the script
+    # still (re)creates it when missing.
+    $BotIdCache = Join-Path $SrcGhApp "bot-id.cache"
+    if (Test-Path -LiteralPath $BotIdCache) {
+        Copy-Item -LiteralPath $BotIdCache -Destination (Join-Path $Dst "bot-id.cache") -Force
+        Write-Host "  copied bot-id.cache"
+    }
+
     # app.env: copy the real one if it ships with the repo source, otherwise
     # create from example (fresh clone / CI) unless one already exists at the
     # destination (keep existing local config).

@@ -48,7 +48,7 @@ LOOKUP="$(curl -fsSL \
 
 # Compact the JSON first so the pattern does not depend on GitHub's
 # spacing, and take the only "slug" key the app object carries.
-SLUG="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"slug":"\([^"]*\)".*/\1/p')"
+SLUG="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"slug"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 if [[ ! "${SLUG}" =~ ^[A-Za-z0-9-]+$ ]]; then
   echo "ERROR: cannot resolve the App slug from GET ${API_BASE}/app." >&2
   echo "Set APP_SLUG in gh-app/app.env (see app.env.example)." >&2

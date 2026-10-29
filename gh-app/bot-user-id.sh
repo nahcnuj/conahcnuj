@@ -28,7 +28,7 @@ if [[ -n "${ID}" && "${ID}" != "<"* ]]; then
 fi
 
 if [[ -f "${CACHE_FILE}" ]]; then
-  CACHED="$(tr -d '\n \t' < "${CACHE_FILE}")"
+  CACHED="$(tr -d '\n \t\r' < "${CACHE_FILE}")"
   if [[ "${CACHED}" =~ ^[0-9]+$ ]]; then
     printf '%s' "${CACHED}"
     exit 0
@@ -42,8 +42,17 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
-ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+# The GitHub REST API returns pretty-printed JSON (whitespace after colons),
+# so the extraction allows optional whitespace. Retry a few times to ride
+# out transient failures / rate limits on shared runner IPs.
+LOOKUP=""
+for _attempt in 1 2 3; do
+  LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+  ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+  if [[ -n "${ID}" ]]; then
+    break
+  fi
+done
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
   echo "Set BOT_USER_ID to the bot account user ID" >&2
