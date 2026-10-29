@@ -834,8 +834,23 @@ ensure_issue_branch() {
       echo "WARNING: ${branch} is not fetchable right after creation; starting it from ${default_branch}." >&2
       checkout_new_branch_from_base "${branch}" "${default_branch}" "${default_oid}" || return 1
     else
-      echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
-      return 1
+      # Branch creation failed. The branch may still exist on the remote under
+      # a head we cannot safely assume, in which case the run must stop; but
+      # if the remote is reachable and the ref is verifiably absent, nothing
+      # could have been committed on it, so starting from the base is safe and
+      # avoids aborting the run on a transient create failure.
+      local remote_ref
+      if remote_ref="$(git ls-remote origin "refs/heads/${branch}" 2>/dev/null)"; then
+        if [[ -n "${remote_ref}" ]]; then
+          echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
+          return 1
+        fi
+        echo "WARNING: ${branch} is not fetchable right after creation; starting it from ${default_branch}." >&2
+        checkout_new_branch_from_base "${branch}" "${default_branch}" "${default_oid}" || return 1
+      else
+        echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
+        return 1
+      fi
     fi
     echo "Created feature branch ${branch}." >&2
   fi
