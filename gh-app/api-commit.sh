@@ -325,19 +325,19 @@ if [[ -z "${HEAD_SHA}" ]]; then
   #     branch head (no commits pushed), the same thing a first
   #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
   #     followed by a commit needs no extra option.
-  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
+  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p' || true)"
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
     exit 1
   fi
-  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
+  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}" || true)"
   BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
   if [[ -z "${BASE_SHA}" ]]; then
     echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
     exit 1
   fi
   BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
+  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null || { echo "ERROR: failed to create branch ${BRANCH}" >&2; exit 1; }
   echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
   HEAD_SHA="${BASE_SHA}"
 fi
@@ -370,7 +370,7 @@ RESP="$(curl -fsSL -X POST \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   --data-binary "@${BODY_FILE}" \
-  "${GRAPHQL}")"
+  "${GRAPHQL}" || true)"
 COMMIT_SHA="$(printf '%s' "${RESP}" | tr -d '\n \t' | sed -n 's/.*"createCommitOnBranch":{"commit":{"oid":"\([^"]*\)".*/\1/p')"
 if [[ -z "${COMMIT_SHA}" ]]; then
   echo "ERROR: commit creation failed: ${RESP}" >&2
