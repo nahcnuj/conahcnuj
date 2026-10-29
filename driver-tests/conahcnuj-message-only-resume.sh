@@ -48,7 +48,7 @@ git -C "${WORK}" commit -qm "mock commit from opencode/original"
 #   body -> real issue body), fetch_reviews (collection: one open thread),
 #   update_pr (body sync on the reuse path), fetch_reviews
 #   (CHANGES_REQUESTED with an open thread),
-#   request_review, conditions.
+#   conditions, request_review, fetch_reviews (APPROVED -> ready to merge).
 TAPE="${ROOT}/tape.txt"
 cat > "${TAPE}" <<'EOF'
 {"title":"Fix something","body":"stub","labels":[],"pull_request":{}}
@@ -57,8 +57,9 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":101,"body":"Please document the collected context","author":{"login":"reviewer"}}]}}]}}}}}
 {}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"CHANGES_REQUESTED","reviews":{"nodes":[{"state":"CHANGES_REQUESTED","body":"Please rename this function","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"databaseId":12345,"body":"What is Input?","author":{"login":"reviewer"}}]}}]}}}}}
-{}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
+{}
+{"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 EOF
 
 export CONAHCNUJ_TEST_MODE=1

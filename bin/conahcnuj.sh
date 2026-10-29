@@ -1577,6 +1577,14 @@ drive() {
       exit 0
     fi
 
+    # Offline tests have no human reviewer to approve; once the PR has been
+    # handed off, an unreadable/empty review decision (an exhausted mock tape)
+    # must not keep the run spinning until the time budget. End cleanly instead.
+    if [[ "${TEST_MODE}" == "1" && "${handed_off}" == "true" && -z "${decision}" ]]; then
+      echo "PR #${pr}: no readable review decision in test mode after hand-off; ending run." >&2
+      exit 0
+    fi
+
     actionable="false"
     case "${decision}" in
       CHANGES_REQUESTED|COMMENTED|REVIEW_REQUIRED|"") actionable="true" ;;
