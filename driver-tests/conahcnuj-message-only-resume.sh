@@ -76,7 +76,7 @@ LOG="${ROOT}/run.log"
 RC=0
 (
   cd "${WORK}"
-  CONAHCNUJ_MAX_SECONDS=120 bash "${DRIVER}" 15 < "${TAPE}"
+  CONAHCNUJ_MAX_SECONDS=2 bash "${DRIVER}" 15 < "${TAPE}"
 ) > "${LOG}" 2>&1 || RC=$?
 
 echo "----- conahcnuj run log -----"
