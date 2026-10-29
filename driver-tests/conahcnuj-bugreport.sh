@@ -171,6 +171,7 @@ grep -q '[[:cntrl:]]' "${ROOT}/payload.json" && { echo "FAIL: a raw control byte
 printf '%s\n' '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"make check"},"output":"ok\n","metadata":{"exit":0},"title":"make check"}}}'
 EOF
   chmod +x "${ROOT}/fakebin/opencode"
+  # shellcheck disable=SC2031
   PATH="${ROOT}/fakebin:${PATH}"
   export PATH
   # shellcheck source=bin/conahcnuj.sh
