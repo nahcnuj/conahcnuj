@@ -89,8 +89,8 @@ grep -q "filing a bug report issue" "${LOG}" && { echo "FAIL: a message-only rou
 ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the second model's .commit-msg was not used"; exit 1; }
 grep -q "mock commit from opencode/talker" <<<"${ONELINE}" && { echo "FAIL: a message-only round was committed"; exit 1; }
-# init + empty initial + implement = 3 commits from the branch tip.
-[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
+# init + implement = 2 commits from the branch tip.
+[[ "$(printf "%s\n" "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
 # The talker's message is what the driver consumes, never committed content.
 [[ ! -e "${WORK}/.commit-msg" ]] || { echo "FAIL: the talker's message survived into the commit"; exit 1; }
 

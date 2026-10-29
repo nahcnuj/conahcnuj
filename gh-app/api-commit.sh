@@ -72,8 +72,8 @@ auto_repo() {
 MESSAGE=""
 declare -a DELETE_PATHS=()
 TRACKED=false
-DRY_RUN=false
 ALLOW_EMPTY=false
+DRY_RUN=false
 REPO=""
 BRANCH=""
 
@@ -288,9 +288,11 @@ for f in "${ADD_FILES[@]}"; do
   ADDITIONS+=( "{path:\"${EP}\",contents:\"${B64}\"}" )
 done
 
-if [[ "${ALLOW_EMPTY}" != "true" && ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-  echo "ERROR: nothing to commit (nothing staged; stage with git add or use -a)" >&2
-  exit 1
+if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+  if [[ "${ALLOW_EMPTY}" != "true" ]]; then
+    echo "ERROR: nothing to commit (nothing staged; stage with git add or use -a)" >&2
+    exit 1
+  fi
 fi
 
 prepare_commit_message
@@ -362,7 +364,14 @@ if [[ -n "${COMMIT_BODY}" ]]; then
 else
   MESSAGE_FIELD="message:{headline:\"${EM}\"}"
 fi
-QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[${ADD_LIST}],deletions:[${DEL_LIST}]}}){commit{oid}}}"
+if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+  # Empty commit: fileChanges is optional and omitting it creates a commit
+  # with no file changes (an "empty" commit), which is what lets a draft PR
+  # be opened before any real work exists.
+  QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\"}){commit{oid}}}"
+else
+  QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[${ADD_LIST}],deletions:[${DEL_LIST}]}}){commit{oid}}}"
+fi
 # Pass the body via file: inline -d breaks Windows' 32KB command-line limit
 # when committing large files.
 BODY_FILE="$(mktemp)"
