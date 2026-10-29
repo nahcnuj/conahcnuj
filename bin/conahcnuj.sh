@@ -357,7 +357,6 @@ branch_commit_count() {
   [[ -n "${ref}" ]] || { printf '0'; return 0; }
   git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0'
 }
-
 # True when the current branch already carries commits on top of the default
 # branch, i.e. an earlier run already implemented the issue. Used to skip the
 # model fall-through (which would otherwise keep asking every model to do work

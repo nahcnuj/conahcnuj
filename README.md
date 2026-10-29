@@ -1,348 +1,123 @@
 # conahcnuj
 
-GitHub App として git 操作・認証を行うための、Git + opencode 設定をまとめたリポジトリ。
+## Getting started
 
-GitHub App「conahcnuj」のインストールトークンを発行し、それを利用して:
+1. あなたのアカウントに GitHub App を作成する。
+2. 使いたいリポジトリに作成したアプリをインストールする。
+3. 対象リポジトリの Secrets に `APP_ID` / `INSTALLATION_ID` / `PRIVATE_KEY`
+   を登録する（`APP_SLUG` は Secret にしない）。
+4. auto-merge を使う場合は Settings → General → Pull Requests で
+   **Allow auto-merge** を有効にする。
 
-- `gh` CLI / GitHub API が **App 名義（`conahcnuj[bot]`）** で動く
-- opencode 内の git 操作が **App 名義** で行われる
+### 使い方
 
-## 構成
+1. issue を作成する。
+2. 作成された PR をレビューする。
 
-```
-.
-├── gh-app/                    # シェルスクリプト群（App トークン発行・認証まわり）
-│   ├── get-token.sh           #   JWT 署名 → インストールトークン取得（キャッシュ付き）
-│   ├── git-credential-helper.sh  # git 用 credential helper
-│   ├── setup-git.sh           #   リポジトリに bot 向け git config を適用
-│   ├── api-commit.sh          #   GraphQL（createCommitOnBranch）で Verified コミットを作成
-│   ├── tests/                 #   offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
-│   ├── app.env                #   実設定（gitignore 対象・リポジトリ管理外）
-│   └── app.env.example        #   設定テンプレート
-├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
-├── lib/                       # ドライバ用ライブラリ（GitHub API / opencode / 出力整形 / レートリミット）
-├── plugins/gh-app-token.ts    # opencode プラグイン（GH_TOKEN / GIT_CONFIG_* を注入）
-├── opencode/AGENTS.md         # opencode グローバルルール（コミットは git vc。install.ps1 が配置）
-├── plugin-tests/               # プラグインのテスト（unit＋smoke＋e2e と install.ps1 の AGENTS.md merge。node/npm・pwsh・opencode が必要）
-├── driver-tests/               # ドライバの offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
-│   └── run.sh                  #   driver-tests/ 全体のランナー
-├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
-├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
-├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
-├── docs/                      # AI 向けリファレンス（GitHub Pages で配信。build.py が検証・HTML 化）
-├── .github/workflows/ci.yml           # GitHub Actions (Ubuntu / Windows)
-├── .github/workflows/issue-driver.yml # issue を open されたら自動でドライバ実行
-├── .github/workflows/auto-merge.yml   # owner 承認後に auto-merge を有効化
-├── .github/workflows/owner-approved-auto-merge.yml # 再利用用 auto-merge workflow
-├── .github/workflows/pages.yml        # docs/ を GitHub Pages へデプロイ
-├── .gitignore
-└── AGENTS.md
-```
+## Workflows
 
-## ドキュメント（GitHub Pages）
+reusable workflow の呼び出し方・入力は [docs/workflows.md](docs/workflows.md) を参照。
 
-アプリとその API（設定・CLI・ドライバ・プラグイン・環境変数・ワークフロー）の
-リファレンスを `docs/` に置き、GitHub Pages で配信しています。常に最新版のみで、
-バージョン切り替えはありません。
+- **issue の自動対応** (`issue-driver.yml`): issue の open/reopen などをトリガーに
+  ドライバを実行し、PR 作成・レビュー依頼まで進める。
+- **承認後の auto-merge** (`owner-approved-auto-merge.yml`): owner の Approve を
+  受けてマージする。
 
-- サイト: <https://nahcnuj.github.io/conahcnuj/>
-- 機械可読な索引: <https://nahcnuj.github.io/conahcnuj/llms.txt>
-- 各ページは Markdown 原文（同じパスの `.md`）と HTML の両方で開けます
+## ローカルで使う (opencode)
 
-`docs/*.md` がソースで、`.github/workflows/pages.yml` が push to main のたびに
-`docs/build.py`（リンク検証 + HTML 生成 → `_site/`）を実行してデプロイします。
-**初回のみ** Settings → Pages → Source = **GitHub Actions** を設定してください。
-CI の `Build docs site` ジョブが同じビルドを PR でも検証します。ローカルでは
-`python3 docs/build.py`（検証のみは `python3 docs/build.py --check`）で確認できます。
-標準ライブラリだけで動くので、追加のインストールは不要です。
+opencode を bot 名義でローカル実行する場合の手順です。配置の詳細は
+[docs/installation.md](docs/installation.md) を参照。
+
+前提: ネイティブ実行は Windows + Git for Windows（`C:/Program Files/Git/bin/bash.exe`）
+が主対象です。pwsh があれば Linux / macOS でも配置できますが、CI 検証は
+Windows のみです。配置せずに `bash bin/conahcnuj.sh` / `bash gh-app/*.sh` を直接
+呼ぶだけなら bash・git・curl・openssl で足ります。
+
+1. clone して `install.ps1` を実行する。
+
+   ```sh
+   git clone <repo>.git
+   cd <repo>
+   powershell -ExecutionPolicy Bypass -File install.ps1
+   ```
+
+2. `~/.config/opencode/gh-app/app.env` に `APP_ID` / `INSTALLATION_ID` /
+   `PRIVATE_KEY_PATH` / `APP_SLUG` / `BASH_EXE` を設定する。
+3. opencode を再起動し、`gh auth status` が bot アカウント (`<slug>[bot]`) を
+   示すことを確認する。
+4. `conahcnuj <issue番号>` を実行するか、issue を開く。
+
+opencode プラグインの仕組みは [docs/plugin.md](docs/plugin.md) を参照。
 
 ## 仕組み
 
-1. `get-token.sh` が GitHub App の秘密鍵で JWT を署名し、
-   `POST /app/installations/{id}/access_tokens` でインストールトークン（1時間有効）を取得。
-   取得済みなら有効期限内はキャッシュ（`gh-app/token.cache`）を返す。
+1. `gh-app/get-token.sh` が GitHub App の秘密鍵で JWT を署名し、インストール
+   トークン（1 時間有効）を取得する。有効期限内はキャッシュ
+   (`gh-app/token.cache`) を返す。
 2. opencode プラグイン `plugins/gh-app-token.ts` が `shell.env` フックで
-   `GH_TOKEN` と `GIT_CONFIG_*`（user.name / user.email / credential.helper /
-   commit.gpgsign / alias.vc）を注入。
-3. `experimental.chat.system.transform` フックで「コミットは `git vc`」と
-   「GitHub は `GH_TOKEN` で認証済みなので `gh` をそのまま使う（自分で export
-   しない）」という規則を全セッションのシステムプロンプトへ常時注入し、
-   `tool.execute.before` で `git commit` と `api-commit.sh` の直接実行を検知して
+   `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`）を注入する。
+3. `experimental.chat.system.transform` フックで「コミットは `git vc`」「`gh` は
+   `GH_TOKEN` で認証済みなので自分で export しない」という規則を常時注入し、
+   `tool.execute.before` で `git commit` / `api-commit.sh` の直接実行を検知して
    `git vc` へ誘導する。
-4. `install.ps1` は `opencode/AGENTS.md` を `~/.config/opencode/AGENTS.md` へ
-   管理ブロックとしてマージし、リポジトリごとの指示が無い場合でも
-   エージェントが `git vc` を選び、`gh` をそのまま使えるようにする（既存の内容は保持）。
 
-## Verified コミットを作る（`git vc`）
+## Verified コミット (`git vc`)
 
-コーディングエージェントは `git vc` でコミットする。`git vc` はプラグインが
-注入する git alias で、`gh-app/api-commit.sh` を正しい owner/repo/branch 付きで
-呼び出すラッパー。`git add` でステージしてから `git vc -m "<message>"`、
-tracked の作業ツリー変更をまとめるなら `git vc -m "<message>" -a`
-（`git commit` / `git commit -a` と収集内容は同じ）。`api-commit.sh` の直接実行は
-プラグインの `tool.execute.before` がブロックし、`git vc` へ誘導する。
-リモートに無いブランチ（`git switch -c <branch>` で作った直後など）は
-デフォルトブランチ起点で自動作成されるので、`git vc` に `--create-branch` のような
-`git commit` には無いオプションを足す必要はない。
+コーディングエージェントは `git vc` でコミットします。プラグインが注入する
+git alias で、GitHub GraphQL の `createCommitOnBranch` を使い Verified 署名付き
+コミットをブランチに作成します。
 
-`gh-app/api-commit.sh` は GitHub GraphQL の `createCommitOnBranch` を使い、ブランチに
-**Verified 署名のついたコミット**を 1 件作成する。コミットは GitHub 側が作成するため、
-「Commits must have verified signatures」等のブランチルールを満たす。
-
-なぜ普通の `git commit` ではダメなのか: opencode 上の git は App 名義で動き、
-署名鍵を持たない。`commit.gpgsign=false` なら unsigned コミットになりブロックされ、
-`true` に変えても鍵が無いため `git commit` 自体が失敗する。
-bot アカウントに GPG 鍵は登録できないため、Verified にするには API 経由で
-GitHub 自身にコミットを作成させるしかない。
-
-`CONAHCNUJ_COMMIT_MODEL` に値（例: `xai (grok-4.7/medium)`）が入っているとき、
-コミット本文の末尾へ Git trailer `Co-Authored-By: <値>` を足す。未設定なら足さない。
-OpenCode ではプラグインがセッションの provider・model・effort を
-`provider (model/effort)` の形でこの変数へ入れる（本文に既に
-`Co-Authored-By` があれば足さない）。
-別のエージェントや手元のシェルは、同じ変数に好きな文字列を入れて使える。
-
-## issue駆動自律開発（conahcnuj）
-
-`bin/conahcnuj.sh`（`install.ps1` により `conahcnuj` コマンドとして配備）は、
-指定した GitHub issue の解決を最後まで自律的に行うドライバです。
-
-```
-conahcnuj <issue番号>        # issue から開始
-conahcnuj <PR番号>           # 入力が PR なら自動で引き継いで再開
+```sh
+git vc -m "message"        # staged の内容をコミット
+git vc -m "message" -a     # tracked の作業ツリー変更をコミット
 ```
 
-流れ:
+詳細は [docs/cli.md](docs/cli.md)。
 
-0. issue の内容を読み、最新のデフォルトブランチからフィーチャーブランチを
-   作成して実装する。プロンプトは「issue ないし PR を owner の Approve まで
-   導くのが目的・エージェントの担当は作業ツリーの変更、ブランチ名・コミット・
-   push・PR の作成・レビュー依頼はドライバ」という 1 段落だけを全ラウンドに
-   共通で伝える。指示を積み増さないのは、コーディングエージェントの仕事を
-   邪魔しないため（禁止コマンドの一覧や「これは成果物ではない」という注意を
-   書くと、エージェントはそれが任務だと誤解してコードを書かなくなる）。
-   一方、決定論的に収集できる情報（issue / PR の本文、再開時 PR の未解決
-   レビュースレッド、`README.md` / `AGENTS.md` など `CONAHCNUJ_CONTEXT_FILES`
-   のファイル）は指示ではなく**材料**として `Collected context:` という別枠で
-   最初のプロンプトに同梱し、エージェントが初動で拾う手間を省く。例外はレビュー
-   スレッドへの返信で、これだけはエージェント自身が行う。契約には足さず、
-   フィードバック対応ラウンドの追加コンテキストで各スレッドの comment id と
-   返信エンドポイントを添えて「返信し、必要なら修正する」と伝える。
-   コミットメッセージは必ずコーディングエージェントが決める（`.commit-msg`。
-   ドライバが使う 1 行。未指定ならドライバはコミットしない。レビュー指摘への
-   対応ラウンドでは、メッセージだけ書いて作業ツリーが無変更でも、ブランチが
-   既に実装を持っていれば完了として受け入れ、持っていなければ no work として
-   次のモデルへ引き継ぐ）。
-   ブランチ名もエージェントが決められる（`.branch-name`。未指定時のみドライバが
-   `conahcnuj/<番号>-<スラッグ>` で採番する）。最初のモデルが作業中に
-   rate limit などのエラーで進められなくなった場合、opencode の同じ
-   `sessionID` と現在の作業ツリーを次のモデルへ引き継ぎ、完了まで継続する。
-   セッションIDを取得できなかった場合だけ新しいセッションで作業ツリーから再開する。
-1. PR を作成したら、まず **レビュアー以外の制約**（mergeable → status checks）を
-   ポーリングして、失敗していれば直す（コンフリクトの解消・CI 失敗の修正）。制約が
-   通って初めて **リポジトリ owner を reviewer にアサイン**してレビューを依頼する
-   （レビュアーには「マージできる・CI が green の PR」だけを渡す）。依頼したら
-   終わりではなく、ドライバは **owner が Approve するまでポーリングする**
-   （承認されたら「ready to merge」で正常終了する）。待っている間に新しいレビュー
-   意見が来れば次のラウンドで対応して再依頼する。承認待ちのまま時間予算が尽きた
-   場合は人間待ちとしてバグ報告せず正常終了し、次の `pull_request_review` 起動が
-   続きを引き継ぐ。
-   依頼の API が失敗を返しても PR を読み返して実際に依頼が入っているかを
-   確認する（GitHub が記録した後の通信エラーは拒绝と区別できないため。#134）。
-   PR の本文はクローズ対象 issue の内容を基に
-   `Closes #<番号>` と合わせて自動生成され、既存 PR を再利用した場合も同期される。
-2. 再開実行時に新しいレビュー意見（Comment / Request changes / 未解決の
-   レビュースレッド。セキュリティレビューの指摘を含む）がある場合は、
-   モデルを使って対応し、api-commit.sh で Verified コミットを push し、
-   **制約を再確認してから** owner へレビューを再依頼し、承認までポーリングする。
-   既知のレビュー
-   意見は制約（status checks・mergeable）のポーリングを待たずに先に対応する
-   （未解決スレッドが残る PR は、スレッドが片付くまで制約を満たせないため、
-   先に待つと時間予算を無駄にするだけ。#219）。レビュースレッド
-   への返信はエージェント自身が行い（ドライバは「Addressed the review
-   feedback」のような代行コメントを投稿しない）、返信は bot 著者として
-   レビュー fingerprint から除外されるので、自分の返信を新規意見と誤認して
-   ループしない。対応ラウンドの追加コンテキストには各スレッドの comment id と
-   返信エンドポイントを添える。
-3. owner の Approve と merge は `auto-merge.yml` /
-   `owner-approved-auto-merge.yml` の担当で、ドライバ自身は自動マージしない。
-4. 異常終了時（タイムアウト・全モデル失敗・想定外エラー・
-   レビュー依頼の失敗で PR を引き渡せなかった場合など、終了コード非 0 で
-   終わる場合）は、ドライバが対象
-   リポジトリへバグ報告 issue を自動作成する（`lib/gh-api.sh` の
-   `gh_api_create_issue`。終了コード・対象 #番号・ブランチ・HEAD・
-   実行ログ末尾を含む）。
+## 隔離環境 (Docker)
 
-ポーリング・リトライは GitHub のレートリミット（Retry-After /
-X-RateLimit-Reset）とジッター付きスリープで調整される（`lib/rate-limit.sh`）。
-環境変数の上書き（時間予算・ポーリング幅）や
-offline テストモード（`CONAHCNUJ_TEST_MODE=1`）については
-`bin/conahcnuj.sh` のヘッダーコメントを参照。
-
-`CONAHCNUJ_REPO=owner/repo`、`CONAHCNUJ_MAX_SECONDS`、ポーリング幅などは
-すべて省略可能です。
-
-## issue の自動対応（GitHub Actions）
-
-このリポジトリの `.github/workflows/issue-driver.yml` は、issue が open される
-と上記ドライバを Actions 上で自動実行して対応を試みるワークフローです。
-open 中の draft でない同一リポジトリの PR に `approved` 以外の review が
-submit・編集・dismiss された場合も、PR 番号でドライバを再開します。
-同じ PR で実行中の場合は、concurrency により新しい実行を待機させます。
-失敗時はドライバがバグ報告 issue を自動作成し、その issue（bot が開いたもの）
-は再帰防止のためワークフローから除外されます。
-
-- **タイムアウトは Actions 側で制御**します（ジョブの `timeout-minutes: 60`）。
-  `CONAHCNUJ_MAX_SECONDS=3540` をその直下に設定し、ジョブが強制終了される前に
-  ドライバが自己終了してバグ報告を残せるようにしています。予算を変えるときは
-  両方を合わせて変更してください。
-- 必要な repo secrets: `APP_ID` / `INSTALLATION_ID` / `PRIVATE_KEY`
-  （App の秘密鍵 PEM）。`APP_SLUG` はシークレットにしません。実行時に
-  `gh-app/app-slug.sh` が App 自身（`GET /app`）からスラッグを解決して
-  `gh-app/app.env` へ書きます。スラッグは `<slug>[bot]` のログイン名という
-  公開情報であり、シークレットにしてしまうと Actions がその値をログから
-  `***` に塗り潰すため、リポジトリ名を含む行（作成した PR の URL など）が
-  読めなくなる（既存の `APP_SLUG` シークレットは削除してよい）。
-- runner 上の `GITHUB_TOKEN` は `contents: read` のみで、書き込み（ブランチ・
-  コミット・PR・レビュー依頼・コメント）はすべてローカル実行と同じく App の
-  インストールトークンで行われます。
-- このワークフローは `workflow_call` で他リポジトリから再利用できます
-  （`number` + App の secrets を渡す。詳細は [workflows.md](docs/workflows.md)）。
-
-### 他のリポジトリで使う（Reusable Workflow）
-
-`.github/workflows/issue-driver.yml` は `workflow_call` で再利用できる Workflow です。
-イベント検知は利用側で行い、中央の Workflow がドライバを実行します。対象リポジトリには
-次のようなファイルを追加します（issue が open されたら駆動する例）。
-
-```yaml
-name: Issue auto-drive
-
-on:
-  issues:
-    types: [opened, reopened]
-
-permissions:
-  contents: read
-
-jobs:
-  drive:
-    uses: nahcnuj/conahcnuj/.github/workflows/issue-driver.yml@main
-    with:
-      number: ${{ github.event.issue.number }}
-    secrets: inherit
-```
-
-Reusable Workflow は利用側リポジトリの `GITHUB_TOKEN` を使い、App の secrets は
-`secrets: inherit`（同一 organization / enterprise）または名前付きで渡します。
-呼び出し側の `environment` を指定する場合は `with: environment: <name>` を足します。
-対象リポジトリに `bin/` / `gh-app/` / `lib/` を置く必要はありません（ドライバは
-このリポジトリの `job.workflow_repository` から取得されます）。
-
-## owner 承認後の自動マージ（GitHub Actions）
-
-`.github/workflows/auto-merge.yml` は、owner が open 中の draft でない PR を
-approve すると、承認された head に一致するときだけ即時マージを試します。必要な
-status checks が既に green ならその場でマージされ、まだ green でなければネイティブ
-auto-merge を有効化してジョブを終えます（CI の完了は GitHub 側で判断され、ジョブ
-自身は CI を待ちません。「merge if it's mergeable, or enable auto-merge」）。書き込みに
-は GitHub Actions の `GITHUB_TOKEN` を使用します。リポジトリ設定で
-auto-merge が有効になっている必要があります。
-
-承認からマージまでのあいだに別の PR が base ブランチへ入ると、head が base に
-遅れて GitHub が即時マージを拒否します。この Workflow はその場合に `--auto` で
-ネイティブ auto-merge を有効化するので（head が最新に戻れば自動的にマージされる）、
-ジョブが失敗にはなりません。有効化もできない場合はエラーとして報告します。
-
-### 他のリポジトリで使う（Reusable Workflow）
-
-`.github/workflows/owner-approved-auto-merge.yml` は、`workflow_call` で
-再利用できる Workflow です。イベント検知は利用側で行い、中央の Workflow が
-owner 承認条件と `gh pr merge` を実行します。対象リポジトリには次のファイルを
-追加します。
-
-```yaml
-name: Owner-approved auto-merge
-
-on:
-  pull_request_review:
-    types: [submitted]
-
-permissions:
-  contents: write
-  pull-requests: write
-
-jobs:
-  enable:
-    uses: nahcnuj/conahcnuj/.github/workflows/owner-approved-auto-merge@main
-    with:
-      repository: ${{ github.repository }}
-      pr-number: ${{ github.event.pull_request.number }}
-      head-sha: ${{ github.event.pull_request.head.sha }}
-```
-
-Reusable Workflow は利用側Workflowの `GITHUB_TOKEN` を使い、secret の
-`inherit` は不要です。呼び出し側の `permissions` で `contents: write` と
-`pull-requests: write` を許可し、対象リポジトリの **Settings → General →
-Pull Requests** で **Allow auto-merge** を有効にしてください。
-
-`merge-method` は省略すると `merge` です。Merge commitを許可しないリポジトリでは、
-`with` に `merge-method: squash` または `merge-method: rebase` を指定します。
-
-## 隔離環境で実行する（Docker）
-
-自律実行（opencode が作業ツリーを自由に編集する）をホストから隔離したい場合は、
-`Dockerfile` でビルドしたイメージ内でドライバを動かせます。opencode・git・
-curl・openssl・ドライバ本体はイメージに同梱し、**秘密鍵と `app.env` は
-イメージへ焼き込まず**実行時に読み取り専用でマウントします。
+自律実行をホストから隔離したい場合はイメージ内でドライバを動かせます。
 
 ```sh
 cd <対象リポジトリ>
 bash <このリポジトリ>/docker-run.sh <issue-or-PR番号>
 ```
 
-- 対象リポジトリは `/work` にバインドマウントされ、コンテナ内のドライバが
-  そこを操作する（ホストのリポジトリは直接汚さない）。
-- `gh-app/app.env` から `APP_ID` / `INSTALLATION_ID` / `APP_SLUG` /
-  `PRIVATE_KEY_PATH` を読み、コンテナ用の `app.env`（`BASH_EXE=/usr/bin/bash`、
-  鍵はマウント先）を生成して渡す。秘密鍵は `/run/secrets/app.pem` に読み取り
-  専用でマウントする。
-- opencode の設定・認証（`~/.config/opencode` / `~/.local/share/opencode`）が
-  あれば読み込み、ホストと同じモデルを使える。
-- 上書き用の環境変数（`CONAHCNUJ_IMAGE` / `CONAHCNUJ_TARGET` /
-  `CONAHCNUJ_APP_ENV` / `CONAHCNUJ_BUILD` / `OPENCODE_CONFIG_DIR` /
-  `OPENCODE_DATA_DIR`、および `CONAHCNUJ_REPO` 等のドライバ設定）は
-  `docker-run.sh` のヘッダーコメントを参照。
-
-## インストール
-
-前提:
-
-- Windows + Git for Windows（`C:/Program Files/Git/bin/bash.exe`）
-- opencode が `~/.config/opencode/` をグローバル設定として使う
-
-### 1. インストール
-
-```sh
-git clone <repo>.git
-cd <repo>
-./install.ps1
-```
-
-### 2. opencode を再起動
-
-`gh-app/app.env` に実値を入れてから OpenCode を再起動する。
+対象リポジトリは `/work` にバインドマウントされ、秘密鍵と `app.env` は
+イメージに焼き込まず実行時に読み取り専用でマウントします。詳細は
+[docs/installation.md](docs/installation.md)。
 
 ## トラブルシューティング
 
-- **`gh auth status` が 自分のアカウントを表示する**
-  プラグインがトークンを取得できていない。`BASH_EXE` が正しい Git Bash 経路か、
-  `app.env` の値を確認。Windows では素の `bash` は WSL に解決されることがあり、
-  `execFileSync("bash", ...)` では Windows パスを解釈できないため必須の設定。
-  変更後は opencode を再起動。
-- **トークンが取れない**
-  `bash gh-app/get-token.sh` を直接実行し、出力（`token.cache` 削除後に再実行）を確認。
-- **CI で実トークンの検証が無い**
-  CI の `mock-test` は秘密鍵・ネットワーク不要の offline 検証のみ。実トークンの
-  動作確認はローカルで `bash gh-app/get-token.sh` → `bash gh-app/setup-git.sh` を
-  実行して確認する。
+- **`gh auth status` が自分のアカウントを表示する**: プラグインがトークンを
+  取得できていない。`BASH_EXE` が正しい Git Bash 経路か、`app.env` の値を確認し、
+  opencode を再起動する。
+- **トークンが取れない**: `bash gh-app/get-token.sh` を直接実行して出力を確認する
+  (`token.cache` 削除後に再実行)。
+- **CI で実トークンの検証が無い**: `mock-test` は秘密鍵・ネットワーク不要の
+  offline 検証のみ。実トークンの動作確認はローカルで行う。
+
+## ドキュメント
+
+- サイト: <https://nahcnuj.github.io/conahcnuj/>
+- 機械可読な索引: <https://nahcnuj.github.io/conahcnuj/llms.txt>
+- AI エージェント向け: [AGENTS.md](AGENTS.md)
+
+## リポジトリ構成
+
+```
+.
+├── gh-app/                    # シェルスクリプト群（App トークン発行・認証まわり）
+├── bin/conahcnuj.sh           # issue駆動自律開発ドライバ本体
+├── lib/                       # ドライバ用ライブラリ
+├── plugins/gh-app-token.ts    # opencode プラグイン
+├── opencode/AGENTS.md         # opencode グローバルルール
+├── plugin-tests/              # プラグインのテスト
+├── driver-tests/              # ドライバの offline モックテスト
+├── Dockerfile / docker-run.sh # 隔離実行
+├── install.ps1                # 配置スクリプト
+├── docs/                      # リファレンス（GitHub Pages で配信）
+├── .github/workflows/         # GitHub Actions
+├── .gitignore
+└── AGENTS.md                  # AI エージェント向けルール
+```
