@@ -363,15 +363,30 @@ branch_has_commits() {
     return 1
   fi
   count="$(git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0')"
-  # An empty initial commit (no tree change) does not count as "implemented":
-  # it exists only to let a draft PR be opened early, and must not make the
-  # driver skip the implementation round.
-  if [[ "${count}" -gt 0 ]]; then
-    if git diff --quiet "${ref}" HEAD 2>/dev/null; then
-      return 1
+  [[ "${count}" -gt 0 ]]
+}
+
+# True when the current branch carries at least one commit that actually
+# changed files (i.e. something beyond an empty "initial" commit). Used to
+# decide whether an earlier run already implemented the issue, so an empty
+# commit created to open a draft PR early does not masquerade as work.
+branch_has_real_commits() {
+  local default_oid="${1}" default_branch="${2}" ref commit
+  ref="${default_oid}"
+  if [[ -z "${ref}" ]] || ! git rev-parse --verify -q "${ref}^{commit}" >/dev/null 2>&1; then
+    ref="${default_branch}"
+    if [[ -n "${ref}" ]] && git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
+      ref="origin/${default_branch}"
     fi
-    return 0
   fi
+  if [[ -z "${ref}" ]]; then
+    return 1
+  fi
+  for commit in $(git rev-list "${ref}..HEAD" 2>/dev/null); do
+    if [[ -n "$(git diff-tree --no-commit-id --name-only -r "${commit}" 2>/dev/null)" ]]; then
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -1132,7 +1147,7 @@ implement() {
         OPENCODE_LAST_MODEL="${model}"
         return 0
       fi
-      if [[ "${wrote_message}" == "true" ]] && branch_has_commits "" "${base_branch}"; then
+      if [[ "${wrote_message}" == "true" ]] && branch_has_real_commits "" "${base_branch}"; then
         rm -f "${workdir}/.commit-msg"
         echo "Model ${model} wrote .commit-msg and left the tree as it was; the branch already carries the implementation, so the round is complete." >&2
         OPENCODE_LAST_MODEL="${model}"
@@ -1736,47 +1751,35 @@ start_issue() {
   # agent will work on. An issue has no PR yet, hence no review threads.
   COLLECTED_CONTEXT="$(collect_initial_context "${owner}" "${repo}")"
 
-  # Open a draft PR early so its number is stable for the whole run (the
-  # concurrency group and review/resume triggers can key on it instead of the
-  # issue number). That requires at least one commit on the branch, so create
-  # an empty initial commit first: it carries no file changes and only exists
-  # to let the PR be opened before the real implementation lands.
-  if ! branch_has_commits "${default_oid}" "${default_branch}"; then
-    echo "Creating an empty initial commit so a draft PR can be opened early." >&2
+  # Remember whether an earlier run already implemented this issue BEFORE we
+  # add the early empty commit below: that commit would otherwise make the
+  # branch look implemented and skip the work.
+  local already_implemented="false"
+  if branch_has_real_commits "${default_oid}" "${default_branch}"; then
+    already_implemented="true"
+  fi
+
+  # Create an empty initial commit and open a draft PR early, so the PR number
+  # is available from the start (and the concurrency group / review triggers
+  # can key on it throughout). The draft is lifted later, once TODO.md is gone.
+  if [[ "${already_implemented}" != "true" ]] && ! branch_has_commits "${default_oid}" "${default_branch}"; then
+    echo "Creating an empty initial commit to open a draft PR early." >&2
     if [[ "${TEST_MODE}" == "1" ]]; then
-      git commit --allow-empty -q -m "Initial commit" 2>/dev/null || true
-    else
-      bash "${HERE}/../gh-app/api-commit.sh" -m "Initial commit" --allow-empty >/dev/null 2>&1 || echo "WARNING: could not create the empty initial commit; continuing." >&2
+      git commit --allow-empty -q -m "chore: initial empty commit" 2>/dev/null || true
+    elif ! bash "${HERE}/../gh-app/api-commit.sh" -m "chore: initial empty commit" --allow-empty >/dev/null 2>&1; then
+      echo "WARNING: could not create the early empty commit; continuing without it." >&2
     fi
   fi
 
-  # Open the draft PR now, before implementation, so its number is available
-  # from the start. It stays a draft while TODO.md is present. PR creation can
-  # fail when the branch has no real diff yet (e.g. only the empty initial
-  # commit); recover the same way drive() does instead of dying.
-  local early_pr=""
-  if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
-    echo "PR could not be created for ${branch} -> ${default_branch}; running an implementation round." >&2
-    if implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created." "${default_branch}"; then
-      :
-    fi
-    rm -f .branch-name
-    if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
-    fi
-    if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
-      echo "No PR could be created; backing off before retrying." >&2
-      rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
-    fi
-  fi
-  echo "Early draft PR: #${early_pr}" >&2
+  local pr=""
+  pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")" || true
 
   # An earlier run may have already committed the implementation to this
   # branch. In that case there is nothing left to implement, so skip the
   # model fall-through and go straight to opening the PR for review. This is
   # what keeps the driver from spinning through every model asking for work
   # that is already done.
-  if branch_has_commits "${default_oid}" "${default_branch}"; then
+  if [[ "${already_implemented}" == "true" ]]; then
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
   elif workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
@@ -1786,15 +1789,22 @@ start_issue() {
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi
-    # The PR is already open on the driver-derived branch, so keep that branch
-    # stable instead of renaming it mid-flight: the PR number must not change.
-    rm -f .branch-name
+    if [[ -n "${pr}" ]]; then
+      # The early draft PR already pins the head branch; changing it now would
+      # leave the PR pointing at the old branch and orphan the agent's work.
+      if [[ -f ".branch-name" ]]; then
+        echo "WARNING: PR #${pr} was opened before the agent chose a branch, so ${branch} stays the head branch; ignoring .branch-name." >&2
+        rm -f ".branch-name"
+      fi
+    else
+      branch="$(resolve_agent_branch_name "${owner}" "${repo}" "${default_oid}" "${branch}")"
+    fi
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
       commit_changes
     fi
   fi
 
-  drive "${owner}" "${repo}" "${early_pr}" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true"
+  drive "${owner}" "${repo}" "${pr}" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true"
 }
 
 resume_pr() {

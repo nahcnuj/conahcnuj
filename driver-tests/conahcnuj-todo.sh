@@ -143,6 +143,6 @@ if git -C "${WORK}" cat-file -e "HEAD:TODO.md" 2>/dev/null; then
   echo "FAIL: TODO.md must not exist at the handed-over branch head"; exit 1
 fi
 # init + empty initial + first round (creates TODO.md) + finishing round (deletes it).
-[[ "$(git -C "${WORK}" log --oneline | wc -l)" == "4" ]] || { echo "FAIL: expected init + empty + start + finish commits"; exit 1; }
+[[ "$(git -C "${WORK}" log --oneline | wc -l)" == "4" ]] || { echo "FAIL: expected init + start + finish commits"; exit 1; }
 
 echo "conahcnuj TODO.md lifecycle passed"

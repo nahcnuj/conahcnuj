@@ -25,6 +25,18 @@ fi
 popd >/dev/null || exit 1
 echo "PASS api-commit.sh rejects empty commit"
 
+# --allow-empty is how the driver creates the early commit that opens a draft
+# PR before any work exists. Dry-run proves it passes the empty guard offline.
+ALLOW_OUT="$(cd "${FIXEMPTY}" && bash "${APICOMMIT}" o/r b -m msg --dry-run --allow-empty 2>&1)" || {
+  echo "FAIL: api-commit.sh --allow-empty should accept a clean index" >&2
+  exit 1
+}
+grep -q "Additions:  0 file(s)" <<<"${ALLOW_OUT}" || {
+  echo "FAIL: api-commit.sh --allow-empty did not report an empty commit" >&2
+  exit 1
+}
+echo "PASS api-commit.sh --allow-empty accepts an empty commit"
+
 if bash "${APICOMMIT}" -m msg --file x=y >/dev/null 2>&1; then
   echo "FAIL: api-commit.sh with removed --file should exit non-zero" >&2
   exit 1

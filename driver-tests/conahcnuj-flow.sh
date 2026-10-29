@@ -76,7 +76,6 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 EOF
-
 export CONAHCNUJ_TEST_MODE=1
 export GH_API_TEST_MODE=1
 export OPENCODE_TEST_MODE=1
@@ -127,6 +126,11 @@ WAIT_LINE="$(grep -n "waiting for the reviewer's decision" "${LOG}" | head -1 | 
 [[ -n "${READY_LINE}" && "${ASSIGNED_LINE}" -lt "${READY_LINE}" ]] || { echo "FAIL: the driver did not keep polling to the approval"; exit 1; }
 [[ "${WAIT_LINE}" -lt "${READY_LINE}" ]] || { echo "FAIL: the driver must wait for the verdict before it sees the approval"; exit 1; }
 grep -q "Created draft PR #123" "${LOG}" || { echo "FAIL: PR #123 was not created"; exit 1; }
+# The draft PR must exist before implementation, so its number is stable from
+# the start of the run (issue #660).
+DRAFT_CREATED_LINE="$(grep -n "Created draft PR #123" "${LOG}" | head -1 | cut -d: -f1)"
+IMPLEMENT_LINE="$(grep -n "Implementing with available models" "${LOG}" | head -1 | cut -d: -f1)"
+[[ -n "${DRAFT_CREATED_LINE}" && -n "${IMPLEMENT_LINE}" && "${DRAFT_CREATED_LINE}" -lt "${IMPLEMENT_LINE}" ]] || { echo "FAIL: the draft PR must be opened before implementation"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" && { echo "FAIL: a fresh PR must not fire an implementation round"; exit 1; }
 grep -q "Model opencode/first failed before completing the work; handing off to the next model" "${LOG}" || { echo "FAIL: failed model did not hand off"; exit 1; }
 grep -q "Handing off session ses_mock from opencode/first to opencode/second" "${LOG}" || { echo "FAIL: session was not handed to the second model"; exit 1; }
@@ -147,9 +151,10 @@ grep -q "Collected context up front: README.md" "${LOG}" || { echo "FAIL: the ru
 ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver still used a fixed commit message"; exit 1; }
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the handoff model's .commit-msg was not used"; exit 1; }
+grep -q "chore: initial empty commit" <<<"${ONELINE}" || { echo "FAIL: the early empty initial commit is missing"; exit 1; }
 FULL_LOG="$(git -C "${WORK}" log --format=%B)"
 grep -q "Co-Authored-By: opencode (second)" <<<"${FULL_LOG}" || { echo "FAIL: handoff model trailer missing"; exit 1; }
 # init + empty initial + implement = 3 commits from the branch tip (no feedback round here).
-[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + empty + implement commits"; exit 1; }
+[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
 
 echo "conahcnuj flow passed"

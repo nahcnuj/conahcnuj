@@ -57,12 +57,12 @@ cat > "${TAPE_OK}" <<'EOF'
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 {}
-{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 EOF
 
 # Mocked response tape for a run that ends in a bug report:
-# fetch_issue, get_repo, find_pr_by_head_any (empty), create_issue.
+# fetch_issue, get_repo, find_pr_by_head_any (empty), find_pr_by_head
+# (empty), repo id, create_pr (127), create_issue (25).
 TAPE_BUG="${ROOT}/tape-bug.txt"
 cat > "${TAPE_BUG}" <<'EOF'
 {"number": 15, "title": "rate limited model gives way to the next one", "body": "Cut the wait out", "labels": [], "state": "open"}
@@ -70,7 +70,7 @@ cat > "${TAPE_BUG}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
-{"data":{"createPullRequest":{"pullRequest":{"number":126}}}}
+{"data":{"createPullRequest":{"pullRequest":{"number":127}}}}
 {"number": 25}
 EOF
 
@@ -105,10 +105,10 @@ grep -q "Review requested on PR #126 (reviewer: nahcnuj)" "${LOG1}" || { echo "F
 grep -q "Ready to merge" "${LOG1}" || { echo "FAIL: the run did not keep polling to the approval"; exit 1; }
 grep -q "filing a bug report issue" "${LOG1}" && { echo "FAIL: a rate limit must not file a bug report when a later model finishes"; exit 1; }
 
-# No bug report in scenario 1, so only init + implement commits.
+# No bug report in scenario 1: init + empty initial + implement commits.
 ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "mock commit from rlx/b" <<<"${ONELINE}" || { echo "FAIL: the second model's .commit-msg was not used"; exit 1; }
-[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + empty + implement commits"; exit 1; }
+[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
 
 LOG2="${ROOT}/run2.log"
 RC2=0
