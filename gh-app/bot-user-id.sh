@@ -28,7 +28,6 @@ if [[ -n "${ID}" && "${ID}" != "<"* ]]; then
 fi
 
 if [[ -f "${CACHE_FILE}" ]]; then
-  CACHED=""
   set +e
   CACHED="$(tr -d '\n \t\r' < "${CACHE_FILE}")"
   set -e
@@ -61,7 +60,6 @@ if [[ -n "${TOKEN}" ]]; then
   CURL_AUTH=(-H "Authorization: Bearer ${TOKEN}")
 fi
 
-LOOKUP=""
 set +e
 if [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
   LOOKUP="$(curl -fsSL \
@@ -73,9 +71,8 @@ else
     -H "Accept: application/vnd.github+json" \
     "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null)"
 fi
-set -e
 set +e
-ID="$(printf '%s' "${LOOKUP:-}" | tr -d '\n \t\r' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
 set -e
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
