@@ -46,11 +46,11 @@ fi
 # rate limit and avoids the "offline?" failure mode. Missing/invalid keys
 # (offline tests, fresh clones) simply leave the request unauthenticated.
 TOKEN=""
-  if [[ -f "${DIR}/get-token.sh" ]]; then
-    set +e
-    TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null)"
-    set -e
-  fi
+if [[ -f "${DIR}/get-token.sh" ]]; then
+  set +e
+  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null)"
+  set -e
+fi
 TOKEN="$(printf '%s' "${TOKEN}" | tr -d '\n \t\r')"
 
 CURL_AUTH=()
