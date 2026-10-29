@@ -115,7 +115,7 @@ if ! RESP="$(curl -fsSL \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
   "${API_BASE}/app/installations/${INSTALLATION_ID}/access_tokens")"; then
-  echo "ERROR: failed to fetch installation access token" >&2
+  echo "ERROR: failed to fetch installation access token (HTTP error from ${API_BASE}/app/installations/${INSTALLATION_ID}/access_tokens)" >&2
   exit 1
 fi
 
