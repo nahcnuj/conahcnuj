@@ -224,7 +224,11 @@ collect_worktree_changes() {
     esac
   done < <(git status --porcelain -z)
   popd >/dev/null || exit 1
-  mapfile -t ADD_FILES < <(printf '%s\n' "${ADD_PATHS_COLLECT[@]}" | sort -u | sed '/^$/d')
+  if [[ ${#ADD_PATHS_COLLECT[@]} -gt 0 ]]; then
+    mapfile -d '' -t ADD_FILES < <(printf '%s\0' "${ADD_PATHS_COLLECT[@]}" | sort -z -u)
+  else
+    ADD_FILES=()
+  fi
 }
 
 declare -a ADD_FILES=()
@@ -260,7 +264,11 @@ collect_staged_changes() {
     esac
   done < <(git diff --cached --name-status -z)
   popd >/dev/null || exit 1
-  mapfile -t ADD_FILES < <(printf '%s\n' "${ADD_PATHS_COLLECT[@]}" | sort -u | sed '/^$/d')
+  if [[ ${#ADD_PATHS_COLLECT[@]} -gt 0 ]]; then
+    mapfile -d '' -t ADD_FILES < <(printf '%s\0' "${ADD_PATHS_COLLECT[@]}" | sort -z -u)
+  else
+    ADD_FILES=()
+  fi
 }
 
 if [[ "${TRACKED}" == true ]]; then
