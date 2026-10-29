@@ -27,6 +27,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、それ�
 ├── plugin-tests/               # プラグインのテスト（unit＋smoke＋e2e と install.ps1 の AGENTS.md merge。node/npm・pwsh・opencode が必要）
 ├── driver-tests/               # ドライバの offline モックテスト（run.sh がランナー。秘密鍵・ネットワーク不要）
 │   └── run.sh                  #   driver-tests/ 全体のランナー
+├── action.yml                 # GitHub Marketplace 公開用の Action メタデータ（ルート必須。エントリポイント; ドライバ起動は reusable workflow 経由）
 ├── Dockerfile                 # conahcnuj 実行用の隔離イメージ（opencode 同梱）
 ├── docker-run.sh              # そのイメージでドライバを走らせるラッパー
 ├── install.ps1                # グローバル設定（~/.config/opencode）へ配置＋ conahcnuj コマンド配備
@@ -217,6 +218,43 @@ submit・編集・dismiss された場合も、PR 番号でドライバを再開
 - このワークフローは `workflow_call` で他リポジトリから再利用できます
   （`number` + App の secrets を渡す。詳細は [workflows.md](docs/workflows.md)）。
 
+### 他のリポジトリで使う（Reusable Workflow）
+
+`.github/workflows/issue-driver.yml` は `workflow_call` で再利用できる Workflow です。
+イベント検知は利用側で行い、中央の Workflow がドライバを実行します。対象リポジトリには
+次のようなファイルを追加します（issue が open されたら駆動する例）。
+
+```yaml
+name: Issue auto-drive
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  drive:
+    uses: nahcnuj/conahcnuj/.github/workflows/issue-driver.yml@main
+    with:
+      number: ${{ github.event.issue.number }}
+    secrets: inherit
+```
+
+Reusable Workflow は利用側リポジトリの `GITHUB_TOKEN` を使い、App の secrets は
+`secrets: inherit`（同一 organization / enterprise）または名前付きで渡します。
+呼び出し側の `environment` を指定する場合は `with: environment: <name>` を足します。
+対象リポジトリに `bin/` / `gh-app/` / `lib/` を置く必要はありません（ドライバは
+このリポジトリの `job.workflow_repository` から取得されます）。
+
+> **`action.yml` について**: ルートの `action.yml` は GitHub Marketplace にこの
+> リポジトリを公開するために必要なメタデータです（Marketplace 公開にはルートの
+> `action.yml` が必須）。**ここがドライバを起動する場所ではありません** — ドライバの
+> 起動は上記の reusable workflow（`.github/workflows/issue-driver.yml`）経由で行います。
+> composite action の `runs` は Marketplace 公開要件を満たすためのエントリポイントで、
+> 実際の issue 駆動は reusable workflow 側が担当します。
+
 ## owner 承認後の自動マージ（GitHub Actions）
 
 `.github/workflows/auto-merge.yml` は、owner が open 中の draft でない PR を
@@ -310,6 +348,16 @@ cd <repo>
 ### 2. opencode を再起動
 
 `gh-app/app.env` に実値を入れてから OpenCode を再起動する。
+
+## GitHub Marketplace での利用
+
+このリポジトリは GitHub Marketplace に **Action** として公開されます（ルートの
+`action.yml` が Marketplace 公開要件を満たすメタデータです）。Marketplace には
+composite action しか掲載できないため、`action.yml` 自体はエントリポイントの
+shim で、issue 駆動・auto-merge の実体は reusable workflow
+（`.github/workflows/issue-driver.yml` / `owner-approved-auto-merge.yml`）側に
+あります。利用時は `uses: nahcnuj/conahcnuj/.github/workflows/<name>.yml@<tag>`
+の形で呼び出してください（詳細は上記「他のリポジトリで使う」を参照）。
 
 ## トラブルシューティング
 

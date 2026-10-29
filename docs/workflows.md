@@ -1,6 +1,12 @@
 # GitHub Actions
 
-`.github/workflows/` の各ワークフローです。このリポジトリのポリシーとして、利用する
+`.github/workflows/` の各ワークフローです。
+
+> **Marketplace 公開について**: ルートの `action.yml` は GitHub Marketplace 公開要件
+> を満たすためのエントリポイントで、ドライバを起動する場所ではありません。
+> 実際の issue 駆動・auto-merge は下記の reusable workflow
+> (`.github/workflows/issue-driver.yml` / `owner-approved-auto-merge.yml`) を
+> `uses: nahcnuj/conahcnuj/.github/workflows/<name>.yml@<ref>` で呼び出して行います。このリポジトリのポリシーとして、利用する
 `actions/*` は **full-length SHA でピン留め**します。
 
 | ファイル | 名前 | 触発 | 役割 |
