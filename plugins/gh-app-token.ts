@@ -242,6 +242,12 @@ async function fetchInstallationToken(
     )
   }
   // IDs go into the request URL: digits only, so no URL structure can leak in.
+  // The installation ID and private key originate from gh-app/app.env (file
+  // data) and are intentionally used to authenticate this outbound request;
+  // validated as digits (installationId) and never transmitted raw (private key
+  // is only used to sign the short-lived JWT).
+  // codeql[js/file-access-to-http]
+  // lgtm[js/file-access-to-http]
   if (!/^\d+$/.test(installationId)) {
     throw new Error(
       `Invalid INSTALLATION_ID for token exchange: ${installationId}`
