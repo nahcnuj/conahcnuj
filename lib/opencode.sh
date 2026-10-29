@@ -263,6 +263,60 @@ opencode_run() {
   fi
   export GH_TOKEN
 
+  # Make the verified-commit alias (`git vc`) and the App git identity available
+  # to the coding agent's shells. The opencode plugin injects these through its
+  # shell.env hook when it is installed, but a driver run (CI or a machine
+  # without the plugin) has no such injection, so the agent would see no
+  # `git vc` and fall back to writing .commit-msg (or, worse, `git commit`,
+  # which the branch rules reject). Mirror the plugin's GIT_CONFIG_* injection
+  # here from the same gh-app source the driver uses, so it is inherited by
+  # opencode's child shells regardless of the plugin's state.
+  if [[ "${OPENCODE_TEST_MODE:-0}" != "1" ]]; then
+    local env_file bash_exe slug bot_user_id bot_name bot_email helper_sh api_commit_sh
+    env_file="${OPENCODE_LIB_DIR}/../gh-app/app.env"
+    if [[ ! -f "${env_file}" ]]; then
+      env_file="${OPENCODE_LIB_DIR}/../gh-app/app.env.example"
+    fi
+    if [[ -f "${env_file}" ]]; then
+      set -a
+      # shellcheck source=/dev/null
+      . "${env_file}"
+      set +a
+    fi
+    bash_exe="${BASH_EXE:-/usr/bin/bash}"
+    if [[ "${bash_exe}" == "<your-bash-exe>" || -z "${bash_exe}" ]]; then
+      bash_exe="/usr/bin/bash"
+    fi
+    slug="${APP_SLUG:-}"
+    bot_user_id=""
+    if [[ -n "${slug}" ]]; then
+      bot_user_id="$(bash "${OPENCODE_LIB_DIR}/../gh-app/bot-user-id.sh" 2>/dev/null || true)"
+    fi
+    bot_name="${slug}[bot]"
+    bot_email="${bot_user_id}+${slug}[bot]@users.noreply.github.com"
+    helper_sh="${OPENCODE_LIB_DIR}/../gh-app/git-credential-helper.sh"
+    api_commit_sh="${OPENCODE_LIB_DIR}/../gh-app/api-commit.sh"
+    # Normalise to forward slashes so the alias works on Windows Git Bash too.
+    bash_exe="${bash_exe//\\/\/}"
+    helper_sh="${helper_sh//\\/\/}"
+    api_commit_sh="${api_commit_sh//\\/\/}"
+    local -a _git_cfg_keys _git_cfg_vals
+    _git_cfg_keys=("user.name" "user.email" "credential.helper" "commit.gpgsign" "alias.vc")
+    _git_cfg_vals=(
+      "${bot_name}"
+      "${bot_email}"
+      "!\"${bash_exe}\" \"${helper_sh}\""
+      "false"
+      "!\"${bash_exe}\" \"${api_commit_sh}\""
+    )
+    export GIT_CONFIG_COUNT="${#_git_cfg_keys[@]}"
+    local _i
+    for _i in "${!_git_cfg_keys[@]}"; do
+      export "GIT_CONFIG_KEY_${_i}=${_git_cfg_keys[$_i]}"
+      export "GIT_CONFIG_VALUE_${_i}=${_git_cfg_vals[$_i]}"
+    done
+  fi
+
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
     if [[ -n "${session_id}" ]]; then
       printf 'opencode run --auto --format json --model %s --dir %s --session %s %s\n' "${model}" "${workdir}" "${session_id}" "${prompt}"

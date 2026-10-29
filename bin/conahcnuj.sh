@@ -462,7 +462,19 @@ commit_changes() {
     fi
     return 0
   fi
-  bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
+  local _commit_attempt
+  for _commit_attempt in 1 2 3; do
+    if bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"; then
+      break
+    fi
+    if [[ "${_commit_attempt}" -lt 3 ]]; then
+      echo "WARNING: verified commit creation failed (attempt ${_commit_attempt}/3); retrying." >&2
+      sleep 2
+    else
+      echo "ERROR: verified commit creation failed after 3 attempts." >&2
+      return 1
+    fi
+  done
   local branch
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git fetch origin "${branch}" >/dev/null 2>&1 || true
