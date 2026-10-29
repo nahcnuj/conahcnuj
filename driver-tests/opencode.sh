@@ -291,7 +291,9 @@ EOF
   local out
   out="$(cat "${log}")"
   [[ "${out}" == *"opencode/first@"* ]] || { echo "FAIL: no model header"; echo "${out}" >&2; exit 1; }
-  [[ "${out}" == *$'   ⎛\n.oO⎜thinking about it\n   ⎝'* ]] || { echo "FAIL: reasoning not rendered"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *".oO⎜thinking about it"* ]] || { echo "FAIL: reasoning not rendered"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *"⎛"* ]] || { echo "FAIL: thinking block top cap missing"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *"⎝"* ]] || { echo "FAIL: thinking block bottom cap missing"; echo "${out}" >&2; exit 1; }
   [[ "${out}" == *'$ make check'* ]] || { echo "FAIL: command not rendered"; echo "${out}" >&2; exit 1; }
   [[ "${out}" == *'✅ make check'* ]] || { echo "FAIL: success verdict missing"; echo "${out}" >&2; exit 1; }
   [[ "${out}" == *'❌️ make broken (exit 2)'* ]] || { echo "FAIL: failure verdict missing"; echo "${out}" >&2; exit 1; }

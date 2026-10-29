@@ -117,8 +117,10 @@ test_text_and_reasoning() {
 {"type":"step_finish","part":{"type":"step-finish","reason":"stop"}}
 EOF
     bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
-  assert_contains "${out}" "first thought" "reasoning rendered"
-  assert_contains "${out}" "second thought" "second reasoning line"
+  assert_contains "${out}" ".oO⎜first thought" "reasoning rendered"
+  assert_contains "${out}" "⎜second thought" "second reasoning line"
+  assert_contains "${out}" "⎛" "thinking block top cap"
+  assert_contains "${out}" "⎝" "thinking block bottom cap"
   assert_contains "${out}" "  final answer" "text rendered"
   # Only the two content events open a block: step_start / step_finish carry no
   # content and must not produce a header.
