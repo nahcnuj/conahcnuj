@@ -117,8 +117,12 @@ test_text_and_reasoning() {
 {"type":"step_finish","part":{"type":"step-finish","reason":"stop"}}
 EOF
     bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
-  actual_block="$(printf '%s\n' "${out}" | sed -n '/⎛/,/⎝/p')"
-  expected_block=$'   ⎛\n.oO⎜first thought\n   ⎜second thought\n   ⎝'
+  actual_block_file="$(mktemp)"
+  expected_block_file="$(mktemp)"
+  printf '%s\n' "${out}" | sed -n '/⎛/,/^$/p' > "${actual_block_file}"
+  printf '%s\n' '   ⎛' '.oO⎜first thought' '   ⎜second thought' '   ⎝' '' > "${expected_block_file}"
+  diff "${actual_block_file}" "${expected_block_file}" >/dev/null || fail "reasoning block exact" "${out}"
+  rm -f "${actual_block_file}" "${expected_block_file}"
   diff <(printf '%s\n' "${actual_block}") <(printf '%s\n' "${expected_block}") >/dev/null || fail "reasoning block exact" "${out}"
   assert_contains "${out}" "  final answer" "text rendered"
   # Only the two content events open a block: step_start / step_finish carry no
@@ -512,6 +516,7 @@ EOF
     bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
   actual_block="$(printf '%s\n' "${out}" | sed -n '/⎛/,/⎝/p')"
   expected_block=$'   ⎛\n.oO⎜thought\n   ⎜more thought\n   ⎝'
+  diff <(printf '%s\n' "${actual_block}") <(printf '%s\n' "${expected_block}") >/dev/null || fail "stale snapshot block exact" "${out}"
   diff <(printf '%s\n' "${actual_block}") <(printf '%s\n' "${expected_block}") >/dev/null || fail "stale snapshot block exact" "${out}"
   [[ "$(printf '%s\n' "${out}" | grep -c 'thought')" == "2" ]] || fail "stale snapshot reprinted lines" "${out}"
   headers="$(printf '%s\n' "${out}" | grep -c '\[main\]' || true)"
