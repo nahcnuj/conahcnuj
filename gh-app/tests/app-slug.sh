@@ -59,7 +59,7 @@ EOF
 
   # The extraction itself, offline: a canned /app body over file://.
   printf '{"id":1,"slug":"lookup-slug","name":"x"}' > "${WORK}/app"
-  if curl -fsSL -H "Accept: application/vnd.github+json" "file://${WORK}/app" >/dev/null 2>&1; then
+  if curl -sSL -H "Accept: application/vnd.github+json" "file://${WORK}/app" >/dev/null 2>&1; then
     OUT="$(GH_APP_API_BASE="file://${WORK}" bash "${WORK}/app-slug.sh")"
     if [[ "${OUT}" != "lookup-slug" ]]; then
       echo "FAIL: lookup returned '${OUT}', expected 'lookup-slug'" >&2

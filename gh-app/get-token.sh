@@ -109,12 +109,12 @@ if [[ "${1:-}" == "--print-jwt" ]]; then
 fi
 
 # 3) Exchange JWT for an installation access token
-RESP="$(curl -fsSL \
+RESP="$(curl -sSL \
   -X POST \
   -H "Authorization: Bearer ${JWT}" \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
-  "${API_BASE}/app/installations/${INSTALLATION_ID}/access_tokens")"
+  "${API_BASE}/app/installations/${INSTALLATION_ID}/access_tokens" || true)"
 
 TOKEN="$(printf '%s' "${RESP}" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 EXPIRES_AT="$(printf '%s' "${RESP}" | sed -n 's/.*"expires_at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"

@@ -40,7 +40,7 @@ if ! JWT="$(bash "${DIR}/get-token.sh" --print-jwt 2>"${JWT_ERR}")"; then
 fi
 rm -f "${JWT_ERR}"
 
-LOOKUP="$(curl -fsSL \
+LOOKUP="$(curl -sSL \
   -H "Authorization: Bearer ${JWT}" \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \

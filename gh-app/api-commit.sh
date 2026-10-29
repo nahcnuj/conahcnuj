@@ -316,28 +316,94 @@ fi
 TOKEN="$(bash "${DIR}/get-token.sh")"
 API="${API_BASE}/repos/${REPO}"
 
-# 2) Current HEAD sha of the branch (|| true: a missing branch must fall
-#    through to the branch-creation handling instead of tripping set -e).
-HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
+# Perform a GitHub API request without letting curl's raw exit code (22 for an
+# HTTP error) escape through set -e. API_BODY/API_STATUS let callers distinguish
+# an expected 404 from a permissions/auth failure and surface GitHub's message.
+api_request() {
+  local method="${1}" url="${2}" data_file="${3:-}" out rc last
+  local -a args=(
+    -sSL -X "${method}"
+    -H "Authorization: Bearer ${TOKEN}"
+    -H "Accept: application/vnd.github+json"
+    -w '\n%{http_code}'
+  )
+  if [[ -n "${data_file}" ]]; then
+    args+=(-H "Content-Type: application/json" --data-binary "@${data_file}")
+  fi
+  if out="$(curl "${args[@]}" "${url}")"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  API_STATUS=""
+  last="${out##*$'\n'}"
+  if [[ "${last}" =~ ^[0-9]{3}$ ]]; then
+    API_STATUS="${last}"
+    if [[ "${out}" == *$'\n'* ]]; then
+      API_BODY="${out%$'\n'*}"
+    else
+      API_BODY=""
+    fi
+  else
+    API_BODY="${out}"
+  fi
+  if [[ ${rc} -ne 0 ]]; then
+    echo "ERROR: ${method} ${url} failed (curl exit ${rc})" >&2
+    return 1
+  fi
+  return 0
+}
+
+api_require_ok() {
+  local method="${1}" url="${2}"
+  if [[ -n "${API_STATUS}" && "${API_STATUS}" != 2* ]]; then
+    echo "ERROR: ${method} ${url} -> HTTP ${API_STATUS}: ${API_BODY}" >&2
+    return 1
+  fi
+  return 0
+}
+
+# 2) Current HEAD sha of the branch. A 404 means the branch is missing and falls
+#    through to branch creation; any other non-2xx is a real API failure.
+api_request GET "${API}/git/refs/heads/${BRANCH}" || exit 1
+if [[ "${API_STATUS}" == "404" ]]; then
+  HEAD_JSON="${API_BODY}"
+elif api_require_ok GET "${API}/git/refs/heads/${BRANCH}"; then
+  HEAD_JSON="${API_BODY}"
+else
+  exit 1
+fi
 HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
 if [[ -z "${HEAD_SHA}" ]]; then
   # 2b) The remote does not have the branch yet. Create the ref from the default
   #     branch head (no commits pushed), the same thing a first
   #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
   #     followed by a commit needs no extra option.
-  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
+  api_request GET "${API}" || exit 1
+  api_require_ok GET "${API}" || exit 1
+  _repo_json="${API_BODY}"
+  DEFAULT_BRANCH="$(printf '%s' "${_repo_json}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
     exit 1
   fi
-  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
+  api_request GET "${API}/branches/${DEFAULT_BRANCH}" || exit 1
+  api_require_ok GET "${API}/branches/${DEFAULT_BRANCH}" || exit 1
+  BASE_JSON="${API_BODY}"
   BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
   if [[ -z "${BASE_SHA}" ]]; then
     echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
     exit 1
   fi
   BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
+  REF_BODY_FILE="$(mktemp)"
+  printf '%s' "${BODY}" > "${REF_BODY_FILE}"
+  if ! api_request POST "${API}/git/refs" "${REF_BODY_FILE}"; then
+    rm -f "${REF_BODY_FILE}"
+    exit 1
+  fi
+  rm -f "${REF_BODY_FILE}"
+  api_require_ok POST "${API}/git/refs" || exit 1
   echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
   HEAD_SHA="${BASE_SHA}"
 fi
@@ -366,11 +432,9 @@ BODY_FILE="$(mktemp)"
 trap 'rm -f "${BODY_FILE:-}"' EXIT
 printf '%s' "{\"query\":\"$(json_escape "${QUERY}")\"}" > "${BODY_FILE}"
 
-RESP="$(curl -fsSL -X POST \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  --data-binary "@${BODY_FILE}" \
-  "${GRAPHQL}")"
+api_request POST "${GRAPHQL}" "${BODY_FILE}" || exit 1
+api_require_ok POST "${GRAPHQL}" || exit 1
+RESP="${API_BODY}"
 COMMIT_SHA="$(printf '%s' "${RESP}" | tr -d '\n \t' | sed -n 's/.*"createCommitOnBranch":{"commit":{"oid":"\([^"]*\)".*/\1/p')"
 if [[ -z "${COMMIT_SHA}" ]]; then
   echo "ERROR: commit creation failed: ${RESP}" >&2
