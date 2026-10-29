@@ -67,10 +67,11 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":123}}}}
+{}
+{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING"}}}]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{}
 {}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
@@ -125,7 +126,7 @@ WAIT_LINE="$(grep -n "waiting for the reviewer's decision" "${LOG}" | head -1 | 
 [[ -n "${WAIT_LINE}" ]] || { echo "FAIL: the driver exited at the review request instead of waiting for the verdict"; exit 1; }
 [[ -n "${READY_LINE}" && "${ASSIGNED_LINE}" -lt "${READY_LINE}" ]] || { echo "FAIL: the driver did not keep polling to the approval"; exit 1; }
 [[ "${WAIT_LINE}" -lt "${READY_LINE}" ]] || { echo "FAIL: the driver must wait for the verdict before it sees the approval"; exit 1; }
-grep -q "Created PR #123" "${LOG}" || { echo "FAIL: PR #123 was not created"; exit 1; }
+grep -q "Created draft PR #123" "${LOG}" || { echo "FAIL: PR #123 was not created"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" && { echo "FAIL: a fresh PR must not fire an implementation round"; exit 1; }
 grep -q "Model opencode/first failed before completing the work; handing off to the next model" "${LOG}" || { echo "FAIL: failed model did not hand off"; exit 1; }
 grep -q "Handing off session ses_mock from opencode/first to opencode/second" "${LOG}" || { echo "FAIL: session was not handed to the second model"; exit 1; }
@@ -148,7 +149,7 @@ grep -q "conahcnuj: implement issue #10" <<<"${ONELINE}" && { echo "FAIL: driver
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the handoff model's .commit-msg was not used"; exit 1; }
 FULL_LOG="$(git -C "${WORK}" log --format=%B)"
 grep -q "Co-Authored-By: opencode (second)" <<<"${FULL_LOG}" || { echo "FAIL: handoff model trailer missing"; exit 1; }
-# init + implement = 2 commits from the branch tip (no feedback round here).
-[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "2" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
+# init + empty initial + implement = 3 commits from the branch tip (no feedback round here).
+[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + empty + implement commits"; exit 1; }
 
 echo "conahcnuj flow passed"

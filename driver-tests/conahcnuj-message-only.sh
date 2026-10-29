@@ -46,9 +46,10 @@ cat > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":126}}}}
+{}
+{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
-{}
 {}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"nahcnuj"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 EOF
@@ -79,7 +80,7 @@ grep -q "Model opencode/talker left the working tree unchanged and only wrote .c
 grep -q "produced no complete work" "${LOG}" && { echo "FAIL: the message-only round was reported as an ordinary empty round"; exit 1; }
 grep -q "Handing off session ses_mock from opencode/talker to opencode/second" "${LOG}" || { echo "FAIL: the session was not handed to the next model"; exit 1; }
 grep -q "Model opencode/second completed the work" "${LOG}" || { echo "FAIL: the second model was not adopted"; exit 1; }
-grep -q "Created PR #126" "${LOG}" || { echo "FAIL: PR #126 was not created"; exit 1; }
+grep -q "Created draft PR #126" "${LOG}" || { echo "FAIL: PR #126 was not created"; exit 1; }
 grep -q "Review requested on PR #126 (reviewer: nahcnuj)" "${LOG}" || { echo "FAIL: the PR was not handed to the owner as reviewer"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: the run did not keep polling to the approval"; exit 1; }
 grep -q "filing a bug report issue" "${LOG}" && { echo "FAIL: a message-only round must not file a bug report when a later model finishes"; exit 1; }
@@ -89,7 +90,7 @@ ONELINE="$(git -C "${WORK}" log --oneline)"
 grep -q "mock commit from opencode/second" <<<"${ONELINE}" || { echo "FAIL: the second model's .commit-msg was not used"; exit 1; }
 grep -q "mock commit from opencode/talker" <<<"${ONELINE}" && { echo "FAIL: a message-only round was committed"; exit 1; }
 # init + implement = 2 commits from the branch tip.
-[[ "$(printf '%s\n' "${ONELINE}" | wc -l)" == "2" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
+[[ "$(printf "%s\n" "${ONELINE}" | wc -l)" == "3" ]] || { echo "FAIL: expected init + implement commits"; exit 1; }
 # The talker's message is what the driver consumes, never committed content.
 [[ ! -e "${WORK}/.commit-msg" ]] || { echo "FAIL: the talker's message survived into the commit"; exit 1; }
 
