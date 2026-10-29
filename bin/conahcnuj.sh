@@ -1090,8 +1090,8 @@ implement() {
       local_before="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
       head_before="${local_before}"
       remote_before=""
-      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
-        git -C "${workdir}" fetch origin "${branch_name}" >/dev/null 2>&1 || true
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]]; then
+        git -C "${workdir}" fetch origin "+refs/heads/${branch_name}:refs/remotes/origin/${branch_name}" >/dev/null 2>&1 || true
         if git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
           remote_before="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
         fi
@@ -1106,11 +1106,11 @@ implement() {
       local_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
       head_after="${local_after}"
       remote_after=""
-      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
-        git -C "${workdir}" fetch origin "${branch_name}" >/dev/null 2>&1 || true
-      fi
-      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
-        remote_after="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]]; then
+        git -C "${workdir}" fetch origin "+refs/heads/${branch_name}:refs/remotes/origin/${branch_name}" >/dev/null 2>&1 || true
+        if git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+          remote_after="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
+        fi
       fi
       if [[ -n "${remote_after}" ]]; then
         head_after="${remote_after}"
