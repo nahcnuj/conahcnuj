@@ -365,19 +365,21 @@ opencode_run() {
     else
       echo "opencode: mock no-op for ${model} (produces no changes)" >&2
     fi
-    # MOCK_OPENCODE_TODO lists the models that simulate the per-issue progress
-    # file. The first round of such a model creates TODO.md (and remembers it in
-    # MOCK_OPENCODE_STATE_DIR); the next round deletes it, standing in for an
-    # agent that starts the issue, then finishes and cleans up. The state file
-    # lives outside the work tree so it is never committed.
-    if [[ " ${MOCK_OPENCODE_TODO:-} " == *" ${model} "* && -d "${workdir}" && -w "${workdir}" ]]; then
+    # MOCK_OPENCODE_TODO (or MOCK_OPENCODE_TODO_JSONL) lists the models that
+    # simulate the per-issue progress file. The first round of such a model
+    # creates TODO.jsonl with an outstanding task (and remembers it in
+    # MOCK_OPENCODE_STATE_DIR); the next round empties it, standing in for an
+    # agent that starts the issue, then finishes. The driver must treat the
+    # empty file as done AND remove it before hand-off so it never reaches
+    # main. The state file lives outside the work tree so it is never committed.
+    if { [[ " ${MOCK_OPENCODE_TODO:-} " == *" ${model} "* ]] || [[ " ${MOCK_OPENCODE_TODO_JSONL:-} " == *" ${model} "* ]]; } && [[ -d "${workdir}" && -w "${workdir}" ]]; then
       local todo_state
       todo_state="${MOCK_OPENCODE_STATE_DIR:-${TMPDIR:-/tmp}}/conahcnuj-todo-${model//\//-}"
       mkdir -p "$(dirname "${todo_state}")" 2>/dev/null || true
       if [[ -f "${todo_state}" ]]; then
-        rm -f "${workdir}/TODO.md"
+        : > "${workdir}/TODO.jsonl"
       else
-        printf '# TODO\n' > "${workdir}/TODO.md"
+        printf '{"task":"mock task from %s"}\n' "${model}" > "${workdir}/TODO.jsonl"
         : > "${todo_state}"
       fi
     fi

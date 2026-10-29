@@ -677,8 +677,8 @@ gh_api_create_branch() {
 # Create a PR. Output: PR number. Args: owner repo title body head base [draft]
 # draft=true opens the PR as a draft, which is how the driver keeps an
 # unfinished issue from being presented as ready: while the coding agent's
-# per-issue TODO.md is still in the tree, the PR is created as a draft and only
-# marked ready once the file is gone (see bin/conahcnuj.sh).
+# per-issue TODO.jsonl still has an unfinished task line, the PR is created as a
+# draft and only marked ready once the file has no line (see bin/conahcnuj.sh).
 # The createPullRequest mutation requires the repository node id (it rejects
 # repositoryNameWithOwner), so this first resolves the id with one extra
 # GraphQL query. In test mode that consumes one extra mock line.

@@ -38,6 +38,9 @@ cat > "${TAPE}" <<'EOF'
 {"number": 14, "title": "test issue that cannot be implemented", "body": "dummy body", "labels": [], "state": "open"}
 {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
+{"data":{"repository":{"pullRequests":{"nodes":[]}}}}
+{"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
+{"data":{"createPullRequest":{"pullRequest":{"number":124}}}}
 {"number": 25}
 EOF
 

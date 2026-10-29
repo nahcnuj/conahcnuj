@@ -31,6 +31,8 @@
 #   --delete path     Delete path from the branch.
 #   --dry-run         Print what would be committed without calling the API
 #                     (no token/network needed; usable for offline tests).
+#   --allow-empty     Create a commit with no file changes. Used only to open
+#                     a draft PR before the first real implementation commit.
 #
 # Attribution trailer (optional): when CONAHCNUJ_COMMIT_MODEL is a
 # non-empty single-line value, the commit body gains a
@@ -72,6 +74,7 @@ auto_repo() {
 MESSAGE=""
 declare -a DELETE_PATHS=()
 TRACKED=false
+ALLOW_EMPTY=false
 DRY_RUN=false
 REPO=""
 BRANCH=""
@@ -102,6 +105,8 @@ while [[ $# -gt 0 ]]; do
       TRACKED=true; shift ;;
     --dry-run)
       DRY_RUN=true; shift ;;
+    --allow-empty)
+      ALLOW_EMPTY=true; shift ;;
     *)
       echo "Unknown option: ${1}" >&2
       exit 1 ;;
@@ -123,7 +128,7 @@ fi
 
 if [[ -z "${MESSAGE}" ]]; then
   echo "ERROR: -m/--message is required" >&2
-  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [-a] [--delete path] [options]" >&2
+  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [-a] [--delete path] [--allow-empty] [options]" >&2
   exit 1
 fi
 # No collection flag and no explicit deletions: commit staged changes like
@@ -286,8 +291,10 @@ for f in "${ADD_FILES[@]}"; do
 done
 
 if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-  echo "ERROR: nothing to commit (nothing staged; stage with git add or use -a)" >&2
-  exit 1
+  if [[ "${ALLOW_EMPTY}" != "true" ]]; then
+    echo "ERROR: nothing to commit (nothing staged; stage with git add or use -a)" >&2
+    exit 1
+  fi
 fi
 
 prepare_commit_message
@@ -359,7 +366,14 @@ if [[ -n "${COMMIT_BODY}" ]]; then
 else
   MESSAGE_FIELD="message:{headline:\"${EM}\"}"
 fi
-QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[${ADD_LIST}],deletions:[${DEL_LIST}]}}){commit{oid}}}"
+if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
+  # Empty commit: fileChanges is optional and omitting it creates a commit
+  # with no file changes (an "empty" commit), which is what lets a draft PR
+  # be opened before any real work exists.
+  QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\"}){commit{oid}}}"
+else
+  QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[${ADD_LIST}],deletions:[${DEL_LIST}]}}){commit{oid}}}"
+fi
 # Pass the body via file: inline -d breaks Windows' 32KB command-line limit
 # when committing large files.
 BODY_FILE="$(mktemp)"

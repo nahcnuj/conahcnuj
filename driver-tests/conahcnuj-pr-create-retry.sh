@@ -51,6 +51,8 @@ sed "s/OID_PLACEHOLDER/${OID}/" > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":125}}}}
+{}
+{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
@@ -75,7 +77,7 @@ echo "-----------------------------"
 [[ ${RC} -eq 0 ]] || { echo "FAIL: driver exited ${RC} (expected 0)"; exit 1; }
 
 grep -q "PR could not be created for conahcnuj/18-fix-racing-driver -> main; running an implementation round." "${LOG}" || { echo "FAIL: the driver did not recover from the PR creation failure"; exit 1; }
-grep -q "Created PR #125" "${LOG}" || { echo "FAIL: PR #125 was not created on the retry"; exit 1; }
+grep -q "Created draft PR #125" "${LOG}" || { echo "FAIL: PR #125 was not created on the retry"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 grep -q "filing a bug report issue" "${LOG}" && { echo "FAIL: a failed PR creation must not trigger the bug report"; exit 1; }
 
