@@ -28,7 +28,7 @@ if [[ -n "${ID}" && "${ID}" != "<"* ]]; then
 fi
 
 if [[ -f "${CACHE_FILE}" ]]; then
-  CACHED="$(tr -d '\n \t' < "${CACHE_FILE}")"
+  CACHED="$(tr -d '\n \t\r' < "${CACHE_FILE}")"
   if [[ "${CACHED}" =~ ^[0-9]+$ ]]; then
     printf '%s' "${CACHED}"
     exit 0
@@ -42,8 +42,31 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
-ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+# Best-effort authentication: an installation token raises the public API
+# rate limit and avoids the "offline?" failure mode. Missing/invalid keys
+# (offline tests, fresh clones) simply leave the request unauthenticated.
+TOKEN=""
+if [[ -f "${DIR}/get-token.sh" ]]; then
+  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+fi
+TOKEN="$(printf '%s' "${TOKEN}" | tr -d '\n \t\r')"
+
+CURL_AUTH=()
+if [[ -n "${TOKEN}" ]]; then
+  CURL_AUTH=(-H "Authorization: Bearer ${TOKEN}")
+fi
+
+if [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
+  LOOKUP="$(curl -fsSL \
+    "${CURL_AUTH[@]}" \
+    -H "Accept: application/vnd.github+json" \
+    "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+else
+  LOOKUP="$(curl -fsSL \
+    -H "Accept: application/vnd.github+json" \
+    "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+fi
+ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t\r' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
   echo "Set BOT_USER_ID to the bot account user ID" >&2
