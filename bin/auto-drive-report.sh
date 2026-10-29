@@ -114,30 +114,59 @@ extract_events() {
       line = $0
       sub(/\r$/, "", line)
 
+      # Skip shell source / trace lines that merely quote driver messages
+      # (e.g. `echo "Model ${model} completed the work." >&2`): they are not
+      # driver output and must not be counted as rounds or findings.
+      if (index(line, "${") > 0) next
+      if (index(line, ">&2") > 0) next
+
       if (index(line, "opencode: trying model ") > 0) {
-        print "model_try\t" trimmed(after(line, "opencode: trying model "))
+        cand = trimmed(after(line, "opencode: trying model "))
+        if (cand ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) {
+          print "model_try\t" cand
+        }
         next
       }
       if (index(line, "Model ") > 0) {
         rest = after(line, "Model ")
         if (index(rest, " completed the work.") > 0) {
-          print "model_done\t" trimmed(before(rest, " completed the work."))
+          model = trimmed(before(rest, " completed the work."))
+          tail = trimmed(substr(rest, index(rest, " completed the work.") + length(" completed the work.")))
+          if (model ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) {
+            print "model_done\t" model
+          }
           next
         }
         if (index(rest, " failed before completing the work: environment error") > 0) {
-          print "model_env\t" trimmed(before(rest, " failed before completing the work: environment error"))
+          model = trimmed(before(rest, " failed before completing the work: environment error"))
+          tail = trimmed(substr(rest, index(rest, " failed before completing the work: environment error") + length(" failed before completing the work: environment error")))
+          if (model ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) {
+            print "model_env\t" model
+          }
           next
         }
         if (index(rest, " failed before completing the work; handing off") > 0) {
-          print "model_fail\t" trimmed(before(rest, " failed before completing the work; handing off"))
+          model = trimmed(before(rest, " failed before completing the work; handing off"))
+          tail = trimmed(substr(rest, index(rest, " failed before completing the work; handing off") + length(" failed before completing the work; handing off")))
+          if (model ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) {
+            print "model_fail\t" model
+          }
           next
         }
         if (index(rest, " left the working tree unchanged and only wrote .commit-msg") > 0) {
-          print "model_nowork\t" trimmed(before(rest, " left the working tree unchanged and only wrote .commit-msg"))
+          model = trimmed(before(rest, " left the working tree unchanged and only wrote .commit-msg"))
+          tail = trimmed(substr(rest, index(rest, " left the working tree unchanged and only wrote .commit-msg") + length(" left the working tree unchanged and only wrote .commit-msg")))
+          if (model ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) {
+            print "model_nowork\t" model
+          }
           next
         }
         if (index(rest, " produced no complete work") > 0) {
-          print "model_incomplete\t" trimmed(before(rest, " produced no complete work"))
+          model = trimmed(before(rest, " produced no complete work"))
+          tail = trimmed(substr(rest, index(rest, " produced no complete work") + length(" produced no complete work")))
+          if (model ~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) {
+            print "model_incomplete\t" model
+          }
           next
         }
       }
