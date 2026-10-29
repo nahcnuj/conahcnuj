@@ -54,7 +54,9 @@ if [[ -f "${DIR}/get-token.sh" ]]; then
   TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null)"
   set -e
 fi
+set +e
 TOKEN="$(printf '%s' "${TOKEN}" | tr -d '\n \t\r')"
+set -e
 
 CURL_AUTH=()
 if [[ -n "${TOKEN}" ]]; then
@@ -73,6 +75,9 @@ else
     -H "Accept: application/vnd.github+json" \
     "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null)"
 fi
+set -e
+
+ID=""
 set +e
 ID="$(printf '%s' "${LOOKUP:-}" | tr -d '\n \t\r' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
 set -e
