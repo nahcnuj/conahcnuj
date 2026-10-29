@@ -1034,7 +1034,7 @@ persist_missing_model() {
 # base, so a message-only round there stays no work and still falls through to
 # the other models.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed remote_before="" remote_after="" branch_name=""
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed remote_before="" remote_after="" branch_name="" local_before="" local_after=""
   local dead_providers="" quota_providers="" failed_rounds=0 env_failed_rounds=0 quota_failed_rounds=0 ran_without_failure=0
   local model_list known_skipped=""
   local base_branch="${4:-}"
@@ -1087,10 +1087,11 @@ implement() {
       # (which made the driver retry every model until the time budget ran out).
       local branch_name=""
       branch_name="$(git -C "${workdir}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-      head_before="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
+      local_before="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
+      head_before="${local_before}"
       remote_before=""
-      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]]; then
-        git -C "${workdir}" fetch origin "+refs/heads/${branch_name}:refs/remotes/origin/${branch_name}" >/dev/null 2>&1 || true
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+        git -C "${workdir}" fetch origin "${branch_name}" >/dev/null 2>&1 || true
         if git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
           remote_before="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
         fi
@@ -1102,25 +1103,37 @@ implement() {
         run_failed="true"
       fi
       OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
-      head_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
+      local_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
+      head_after="${local_after}"
       remote_after=""
-      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]]; then
-        git -C "${workdir}" fetch origin "+refs/heads/${branch_name}:refs/remotes/origin/${branch_name}" >/dev/null 2>&1 || true
-        if git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
-          remote_after="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
-        fi
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+        git -C "${workdir}" fetch origin "${branch_name}" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
+        remote_after="$(git -C "${workdir}" rev-parse "origin/${branch_name}" 2>/dev/null || true)"
       fi
       if [[ -n "${remote_after}" ]]; then
         head_after="${remote_after}"
       fi
       committed="false"
-      if [[ -n "${head_after}" && "${head_after}" != "${head_before}" ]]; then
+      if [[ -n "${local_after}" && "${local_after}" != "${local_before}" ]]; then
+        committed="true"
+      elif [[ -n "${remote_after}" && "${remote_after}" != "${remote_before}" ]]; then
+        committed="true"
+      elif [[ -z "${remote_before}" && -n "${remote_after}" && "${remote_after}" != "${local_before}" ]]; then
+        committed="true"
+      elif [[ -n "${head_after}" && "${head_after}" != "${head_before}" ]]; then
         committed="true"
       fi
       # Sync the local tree to the commit the agent pushed, so the next round
       # (and the PR creation) see the committed state instead of stale scratch.
+      # Only reset to the remote tip when the remote actually advanced: a
+      # commit that only exists locally (e.g. a test-mode commit) must not be
+      # discarded by resetting to a stale origin tip.
       if [[ "${committed}" == "true" && -n "${branch_name}" && "${branch_name}" != "HEAD" ]] && git -C "${workdir}" rev-parse --verify -q "origin/${branch_name}" >/dev/null 2>&1; then
-        git -C "${workdir}" reset --hard "origin/${branch_name}" >/dev/null 2>&1 || true
+        if [[ -n "${remote_after}" && ( "${remote_after}" != "${remote_before}" || -z "${remote_before}" ) ]]; then
+          git -C "${workdir}" reset --hard "origin/${branch_name}" >/dev/null 2>&1 || true
+        fi
       fi
       wrote_message="false"
       if [[ -s "${workdir}/.commit-msg" ]]; then
