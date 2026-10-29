@@ -117,10 +117,7 @@ test_text_and_reasoning() {
 {"type":"step_finish","part":{"type":"step-finish","reason":"stop"}}
 EOF
     bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
-  assert_contains "${out}" ".oO⎜first thought" "reasoning rendered"
-  assert_contains "${out}" "⎜second thought" "second reasoning line"
-  assert_contains "${out}" "⎛" "thinking block top cap"
-  assert_contains "${out}" "⎝" "thinking block bottom cap"
+  [[ "${out}" == *$'   ⎛\n.oO⎜first thought\n   ⎜second thought\n   ⎝'* ]] || fail "reasoning block exact" "${out}"
   assert_contains "${out}" "  final answer" "text rendered"
   # Only the two content events open a block: step_start / step_finish carry no
   # content and must not produce a header.
@@ -511,6 +508,7 @@ test_stream_snapshot_older_than_printed() {
 {"type":"reasoning","part":{"id":"prt_o1","type":"reasoning","text":"thought"}}
 EOF
     bash "${RENDER}" --model "m" --dir "${tmp}/repo")"
+  [[ "${out}" == *$'   ⎛\n.oO⎜thought\n   ⎜more thought\n   ⎝'* ]] || fail "stale snapshot block exact" "${out}"
   [[ "$(printf '%s\n' "${out}" | grep -c 'thought')" == "2" ]] || fail "stale snapshot reprinted lines" "${out}"
   headers="$(printf '%s\n' "${out}" | grep -c '\[main\]' || true)"
   [[ "${headers}" == "1" ]] || fail "a stale snapshot re-opened the block (${headers} headers)" "${out}"
