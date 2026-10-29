@@ -32,6 +32,11 @@ run_e2e_model() {
   cp -a "${RUNNER_TEMP}/e2e-inst" "${slot_dir}/inst"
   cp -a "${RUNNER_TEMP}/e2e-fixture" "${slot_dir}/fixture"
 
+  # Default verdict: if this attempt is killed before it can write its own rc
+  # (timeout / signal), treat it as "timed out" rather than as missing data,
+  # so the final inconclusive check can still classify the run.
+  echo 124 > "${E2E_DIR}/results/r${round}-${slot}.rc"
+
   OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
     OPENCODE_DISABLE_AUTOUPDATE=true \
     OPENCODE_DISABLE_MODELS_FETCH=true \
