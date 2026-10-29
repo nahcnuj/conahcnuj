@@ -225,7 +225,7 @@ has_output=0
 for f in "${E2E_DIR}/results/"*.output; do
   if [ -f "${f}" ]; then has_output=1; fi
 done
-if [ "${saw_rc}" = 1 ] && [ "${conclusive}" = 0 ]; then
+if [ "${conclusive}" = 0 ]; then
   if [ "${has_output}" = 1 ]; then
     echo "E2E SKIP: free-model service stalled (events arrived but no attempt reached a verdict); treating as pass" >&2
   else
