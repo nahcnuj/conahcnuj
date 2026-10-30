@@ -63,12 +63,12 @@ opencode_get_models() {
 }
 
 
-# Resolve the effort variant to pass to opencode (--variant) in this run, if any.
+# Resolve the effort variant to pass to opencode in this run, if any.
 # Max effort mode only: CONAHCNUJ_MAX_EFFORT being non-empty (any value, i.e.
-# the --max-effort flag or a truthy env) or CONAHCNUJ_EFFORT=max enables
-# `--variant max`. Empty output means "use the model's default". Arbitrary
-# effort levels are intentionally not supported, so CONAHCNUJ_EFFORT accepts
-# only "max" (case-insensitive).
+# the --max-effort flag or a truthy env) or CONAHCNUJ_EFFORT=max enables the
+# V2 `provider/model#max` spelling. Empty output means "use the model's default".
+# Arbitrary effort levels are intentionally not supported, so CONAHCNUJ_EFFORT
+# accepts only "max" (case-insensitive).
 opencode_effort_variant() {
   local max_effort="${CONAHCNUJ_MAX_EFFORT:-}"
   max_effort="${max_effort#"${max_effort%%[![:space:]]*}"}"
@@ -287,16 +287,16 @@ opencode_run() {
   export GH_TOKEN
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
-    local mock_variant_arg=""
+    local mock_model="${model}"
     local _mv
     _mv="$(opencode_effort_variant 2>/dev/null || true)"
     if [[ -n "${_mv}" ]]; then
-      mock_variant_arg=" --variant ${_mv}"
+      mock_model="${model}#${_mv}"
     fi
     if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --auto --format json --model %s --dir %s%s --session %s %s\n' "${model}" "${workdir}" "${mock_variant_arg}" "${session_id}" "${prompt}"
+      printf '(cd %s && opencode run --auto --format json --model %s --session %s %s)\n' "${workdir}" "${mock_model}" "${session_id}" "${prompt}"
     else
-      printf 'opencode run --auto --format json --model %s --dir %s%s --title conahcnuj %s\n' "${model}" "${workdir}" "${mock_variant_arg}" "${prompt}"
+      printf '(cd %s && opencode run --auto --format json --model %s --title conahcnuj %s)\n' "${workdir}" "${mock_model}" "${prompt}"
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
@@ -415,7 +415,7 @@ opencode_run() {
           export MOCK_COMMIT_MSG_FILE="${mock_msgfile}"
           # The alias body expands at git-alias execution time, not here.
           # shellcheck disable=SC2016
-          git add -A && git -c commit.gpgsign=false -c 'alias.vc=!git commit -q -F "$MOCK_COMMIT_MSG_FILE"' vc
+          git add -A && git -c commit.gpgsign=false commit -q -F "$MOCK_COMMIT_MSG_FILE"
         ) >/dev/null 2>&1 || true
         rm -f "${mock_msgfile}" "${workdir}/.commit-msg"
       else
@@ -454,16 +454,19 @@ opencode_run() {
   fi
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
-  args=(run --auto --print-logs --thinking --format json --model "${model}" --dir "${workdir}")
+  local model_arg="${model}"
   local _effort_variant
   _effort_variant="$(opencode_effort_variant 2>/dev/null || true)"
   if [[ -n "${_effort_variant}" ]]; then
-    args+=(--variant "${_effort_variant}")
+    model_arg="${model}#${_effort_variant}"
   fi
+  args=(run --auto --print-logs --thinking --format json --model "${model_arg}")
   # --print-logs defaults to INFO, which is ~30 lines of boot/permission
-  # chatter per model and buries the rendered log. WARN keeps the diagnostics
-  # that matter without the noise; override to DEBUG when hunting a problem.
-  args+=(--log-level "${CONAHCNUJ_OPENCODE_LOG_LEVEL:-WARN}")
+  # chatter per model and buries the rendered log. warn keeps the diagnostics
+  # that matter without the noise; override to debug when hunting a problem.
+  # V2 only accepts lowercase log levels, so normalize.
+  local log_level="${CONAHCNUJ_OPENCODE_LOG_LEVEL:-warn}"
+  args+=(--log-level "${log_level,,}")
   if [[ -n "${session_id}" ]]; then
     args+=(--session "${session_id}")
   else
@@ -503,7 +506,7 @@ opencode_run() {
   err_file="${output_file}.err"
   rate_aborted="false"
   if mkfifo "${out_fifo}" "${err_fifo}" 2>/dev/null; then
-    "${executable[@]}" "${args[@]}" < "${prompt_file}" >"${out_fifo}" 2>"${err_fifo}" &
+    ( cd "${workdir}" && exec "${executable[@]}" "${args[@]}" < "${prompt_file}" >"${out_fifo}" 2>"${err_fifo}" ) &
     local opencode_pid=$!
     ( tee "${output_file}" <"${out_fifo}" | "${render[@]}" >&2 ) &
     consumer_pid=$!
@@ -524,7 +527,7 @@ opencode_run() {
     wait "${consumer_pid}" "${err_pid}" 2>/dev/null || true
     rm -f "${out_fifo}" "${err_fifo}"
   else
-    "${executable[@]}" "${args[@]}" < "${prompt_file}" | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
+    ( cd "${workdir}" && exec "${executable[@]}" "${args[@]}" < "${prompt_file}" ) | tee "${output_file}" | "${render[@]}" >&2 || status="${PIPESTATUS[0]}"
   fi
 
   # Only a failed round is classified: a round that ended fine may still carry

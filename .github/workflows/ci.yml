@@ -224,7 +224,7 @@ jobs:
           restore-keys: |
             npm-${{ runner.os }}-
 
-      # @types/node + @opencode-ai/plugin from npm (pinned lockfile).
+      # @types/node + @opencode/plugin from npm (pinned lockfile).
       # NOTE: plain `cd`, not `npm --prefix`: native npm on Windows
       # ignores an msys-style absolute prefix.
       - name: Typecheck plugin
@@ -348,7 +348,7 @@ jobs:
           cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<'EOF'
           {
             "$schema": "https://opencode.ai/config.json",
-            "model": "opencode/mimo-v2.5-free"
+            "model": "opencode/mimo-v2.6-flash-free"
           }
           EOF
 

@@ -6,7 +6,7 @@ import {
   isDirectApiCommitCommand,
   isGitCommitCommand,
   isGitCommitInvocation,
-} from "./gh-app-commit"
+} from "./gh-app-commit.js"
 
 function assertEqual(actual: unknown, expected: unknown, msg?: string): void {
   if (actual !== expected) {

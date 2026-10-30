@@ -35,9 +35,9 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `CONAHCNUJ_POLL_CONDITIONS_MIN` | `15` | 制約ポーリングの最短間隔（秒） |
 | `CONAHCNUJ_POLL_CONDITIONS_MAX` | `300` | 制約ポーリングの最長間隔（秒） |
 | `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer（`Co-Authored-By: <値>`。プラグインが `provider (model/effort)` を設定）。未設定なら trailer なし |
-| `CONAHCNUJ_MAX_EFFORT` | 未設定 | 非空で max effort モード（opencode に `--variant max` を渡す）。`--max-effort` フラグでも有効 |
+| `CONAHCNUJ_MAX_EFFORT` | 未設定 | 非空で max effort モード（opencode に `provider/model#max` を渡す）。`--max-effort` フラグでも有効 |
 | `CONAHCNUJ_EFFORT` | 未設定 | `max` で max effort モードを有効にする（issue-driver の `effort` 入力から設定） |
-| `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level` |
+| `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `warn` | opencode の `--log-level`（V2 は小文字のみ） |
 | `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow 名（カンマ区切り、空で無効）。issue driver の job 名（`Attempt to resolve issue`）と auto-merge の job 名（`enable`）も除外し、reusable workflow として他リポジトリから実行され workflow 名が呼び出し側になる場合も待たない |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | 最初のプロンプトへ同梱する作業ツリーファイル（スペース区切り）。空文字で同梱を無効化 |
 | `CONAHCNUJ_MISSING_MODELS_FILE` | `<gh-app>/missing-models` | 永久に使えない（deprecated / 削除済み）モデルの記録先。ラウンド前に読み、判明したモデルを追記する |

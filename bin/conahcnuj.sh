@@ -50,7 +50,8 @@
 #                            (model/effort)) or builds the same shape from
 #                            the model id it recorded
 #   CONAHCNUJ_OPENCODE_LOG_LEVEL  opencode --log-level for the run
-#                            (default: WARN; DEBUG to debug a failing model)
+#                            (default: warn; debug to debug a failing model;
+#                            V2 only accepts lowercase, the driver lowercases)
 #   CONAHCNUJ_CONTEXT_FILES  space-separated checkout files whose contents are
 #                            collected into the prompt alongside the issue
 #                            (default: README.md AGENTS.md; empty sends none)

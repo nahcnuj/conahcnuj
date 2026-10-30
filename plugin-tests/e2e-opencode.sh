@@ -32,10 +32,14 @@ run_e2e_model() {
   cp -a "${RUNNER_TEMP}/e2e-inst" "${slot_dir}/inst"
   cp -a "${RUNNER_TEMP}/e2e-fixture" "${slot_dir}/fixture"
 
+  # run_e2e_model already runs in its own background subshell, so changing
+  # cwd here is local to this attempt and keeps the background pid pointing at
+  # timeout (the TERM/INT trap must reach opencode, not an extra wrapper).
+  cd "${slot_dir}/fixture"
   OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
     OPENCODE_DISABLE_AUTOUPDATE=true \
     OPENCODE_DISABLE_MODELS_FETCH=true \
-    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
+    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --title e2e \
     "Commit the staged changes with message e2e test. Execute the necessary commands." \
     > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" &
   opid=$!
@@ -55,18 +59,18 @@ run_e2e_model() {
   echo "=== ${model}: last lines ==="
   echo "${TEXT}" | tail -5
   echo "=== ${model}: tool diagnostics ==="
-  echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // "?")"'
+  echo "${JSONL}" | jq -r 'select(.type=="tool_use") | "\(.part.tool) status=\(.part.state.status) exit=\(.part.state.metadata.metadata.exit // .part.state.metadata.exit // "-") :: \(.part.state.input.command // .part.state.input.filePath // .part.state.input.path // "?")"'
   echo "=== ${model}: opencode rc=${rc}$( [ "${rc}" = 124 ] && echo " (timeout: exceeded ${E2E_ATTEMPT_TIMEOUT}s)" ) ==="
   echo "=== ${model}: stderr ==="
   cat "${slot_dir}/err.log" || true
 
-  # Bad: a bash call that concluded with an unexplained failure -
+  # Bad: a shell call that concluded with an unexplained failure -
   # neither success (0), nor the sandbox norm (2: no remote), nor a
   # git vc/api-commit.sh call failing due to missing remote/token
   # (exit 1 is expected). Calls with no exit (null) never concluded
   # and are benign: the model often interrupts a long command, and a
   # hook-blocked `git commit` likewise never executes.
-  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 1 and .exit != 2) | [.cmd, .exit] | @tsv' || true)"
+  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and (.part.tool=="bash" or .part.tool=="shell")) | {cmd: .part.state.input.command, exit: (.part.state.metadata.metadata.exit // .part.state.metadata.exit)} | select(.exit != null and .exit != 0 and .exit != 1 and .exit != 2) | [.cmd, .exit] | @tsv' || true)"
 
   # Record the raw exit status and whether this attempt emitted anything.
   # The orchestrator needs both to tell a regression from a service
@@ -89,7 +93,7 @@ run_e2e_model() {
 }
 
 MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
-if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
 # Skip models the repository has recorded as permanently unavailable
 # (gh-app/missing-models, the same committed list the driver reads). Trying a
 # dead model wastes a parallel slot and its timeout dominates the round (#209).
@@ -102,7 +106,7 @@ if [ -f "${E2E_MISSING_MODELS}" ]; then
     printf '%s\n' "${E2E_SKIP_MODELS}" > "${E2E_SKIP_FILE}"
     MODELS="$(printf '%s\n' "${MODELS}" | grep -vxF -f "${E2E_SKIP_FILE}" || true)"
     rm -f "${E2E_SKIP_FILE}"
-    if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+    if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
   fi
 fi
 echo "Available models:"

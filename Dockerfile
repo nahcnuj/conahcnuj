@@ -33,8 +33,8 @@ RUN apt-get update \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# opencode, installed the same way CI does (free models need no API key).
-RUN curl -fsSL https://opencode.ai/install | bash
+# opencode v2, installed the same way CI does (free models need no API key).
+RUN curl -fsSL https://opencode.ai/v2/install | bash
 
 # The driver, its libraries and the gh-app scripts. Layout mirrors the repo so
 # the driver resolves ../lib and ../gh-app relative to /opt/conahcnuj/bin.

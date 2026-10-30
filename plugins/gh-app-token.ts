@@ -1,10 +1,11 @@
-import type { Plugin } from "@opencode-ai/plugin"
+import type { Plugin } from "@opencode/plugin"
 import { createSign } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
-const GH_APP_DIR = path.join(__dirname, "..", "gh-app")
+const GH_APP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "gh-app")
 const TOKEN_CACHE_FILE = path.join(GH_APP_DIR, "token.cache")
 const CREDENTIAL_HELPER_SH = path.join(GH_APP_DIR, "git-credential-helper.sh")
 
@@ -405,7 +406,7 @@ import {
   API_COMMIT_SCRIPT,
   isDirectApiCommitCommand,
   isGitCommitCommand,
-} from "./lib/gh-app-commit"
+} from "./lib/gh-app-commit.js"
 
 interface ShellIdentity {
   botName: string
@@ -563,8 +564,10 @@ function rememberModel(
 }
 
 function labelForSession(sessionID: string | undefined): string {
-  const id = sessionID || latestSessionID
-  const seen = id ? seenModels.get(id) : undefined
+  let seen = sessionID ? seenModels.get(sessionID) : undefined
+  if (!seen) {
+    seen = latestSessionID ? seenModels.get(latestSessionID) : undefined
+  }
   if (!seen) {
     return ""
   }
@@ -584,7 +587,7 @@ function redirectToVerifiedCommit(
   args: unknown,
   botName: string
 ): void {
-  if (tool !== "bash") {
+  if (tool !== "bash" && tool !== "shell") {
     return
   }
   const cmd = parseBashCommand(args)
@@ -605,7 +608,7 @@ function redirectToVerifiedCommit(
   }
 }
 
-export const GhAppTokenPlugin: Plugin = async () => {
+export const GhAppTokenPlugin: any = async (input: any, options?: any) => {
   const botUserId = await resolveBotUserId(config.APP_SLUG)
   const botName = `${config.APP_SLUG}[bot]`
   const botEmail = `${botUserId}+${config.APP_SLUG}[bot]@users.noreply.github.com`
@@ -617,21 +620,19 @@ export const GhAppTokenPlugin: Plugin = async () => {
   const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
 
   return {
-    "chat.message": async (input) => {
-      const model = input.model
+    "chat.message": async (input: any) => {
+      const model = input?.model
       if (model && !matchesSessionModel(model.providerID, model.modelID)) {
         return
       }
-      // The ids come with the model on this message; an absent effort leaves
-      // the one already recorded alone.
       rememberModel(input.sessionID, {
         ...(model ? { provider: model.providerID, model: model.modelID } : {}),
-        effort: input.variant,
+        effort: input?.variant,
       })
     },
-    "chat.params": async (input) => {
-      const model = input.model
-      if (!matchesSessionModel(model.providerID, model.id)) {
+    "chat.params": async (input: any) => {
+      const model = input?.model
+      if (!model || !matchesSessionModel(model.providerID, model.id)) {
         return
       }
       rememberModel(input.sessionID, {
@@ -639,28 +640,30 @@ export const GhAppTokenPlugin: Plugin = async () => {
         model: model.id,
       })
     },
-    "shell.env": async (input, output) => {
-      await injectShellEnv(output.env, { botName, botEmail, vcCmd })
+    "shell.env": async (input: any, output: any) => {
+      const env = output.env as Record<string, string>
+      await injectShellEnv(env, { botName, botEmail, vcCmd })
       // An explicit value (the user, or a caller that already chose one) wins.
-      if (!output.env.CONAHCNUJ_COMMIT_MODEL) {
-        const label = labelForSession(input.sessionID)
+      if (!env.CONAHCNUJ_COMMIT_MODEL) {
+        const label = labelForSession(input?.sessionID)
         if (label) {
-          output.env.CONAHCNUJ_COMMIT_MODEL = label
+          env.CONAHCNUJ_COMMIT_MODEL = label
         }
       }
     },
     // Rules up front, so a model in any repository commits with `git vc`
     // without having to trip the hook below first, and reaches for `gh`
     // directly without re-issuing `GH_TOKEN` by hand.
-    "experimental.chat.system.transform": async (_input, output) => {
+    "experimental.chat.system.transform": async (_input: any, output: any) => {
       for (const rules of [COMMIT_RULES, GITHUB_RULES, SHELL_RULES]) {
         if (!output.system.includes(rules)) {
           output.system.push(rules)
         }
       }
     },
-    "tool.execute.before": async (input, output) => {
+    "tool.execute.before": async (input: any, output: any) => {
       redirectToVerifiedCommit(input.tool, output.args, botName)
     },
   }
 }
+

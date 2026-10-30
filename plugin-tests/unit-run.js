@@ -1,8 +1,8 @@
 // Unit tests for the opencode plugin, driven entirely through the hooks.
 // This file IS the test suite (unit.sh compiles the real plugin, then runs it);
 // it is not a separate test runner.
-// opencode calls (tool.execute.before, shell.env, the system-prompt
-// transform, chat.message / chat.params). plugin-tests/unit.sh compiles the real
+// opencode v2 calls (shell create.before, tool execute.before, session
+// context). plugin-tests/unit.sh compiles the real
 // plugins/gh-app-token.ts unchanged into ./.unit/out/, so the code under
 // test here IS the production source: this suite keeps no copy and no
 // re-export of it, and there is nothing that could drift out of sync with
@@ -26,6 +26,7 @@ const { createVerify, generateKeyPairSync } = require("node:crypto")
 const fs = require("node:fs")
 const os = require("node:os")
 const path = require("node:path")
+const { pathToFileURL } = require("node:url")
 
 const PLUGIN_MODULE = "./.unit/out/gh-app-token.js"
 const STAGE_DIR = path.join(__dirname, ".unit")
@@ -88,14 +89,13 @@ function stage(config = {}, botCache = BOT_ID) {
 
 // Fresh module load: the plugin reads app.env and keeps its state (in-memory
 // token, seen models) at import time, so each fixture change starts here.
-function loadPlugin() {
-  const resolved = require.resolve(PLUGIN_MODULE)
-  delete require.cache[resolved]
-  return require(PLUGIN_MODULE)
+async function loadPlugin() {
+  const url = pathToFileURL(path.resolve(__dirname, PLUGIN_MODULE)).href
+  return await import(url + "?t=" + Date.now())
 }
 
 async function freshHooks() {
-  return loadPlugin().GhAppTokenPlugin({})
+  return (await loadPlugin()).GhAppTokenPlugin({})
 }
 
 // --- test registry ----------------------------------------------------------
@@ -186,8 +186,8 @@ function assertJwt(jwt, issuer) {
 
 // --- the module / plugin surface -------------------------------------------
 
-test("module: exports the plugin factory and nothing else", () => {
-  const mod = loadPlugin()
+test("module: exports the plugin factory and nothing else", async () => {
+  const mod = await loadPlugin()
   // opencode's loader treats every export as a plugin, so a second export
   // would be loaded as a second plugin.
   assert.deepStrictEqual(Object.keys(mod), ["GhAppTokenPlugin"])
@@ -336,16 +336,24 @@ test("redirects: reading or mentioning the script keeps working", async () => {
   await assertAllowed(API_COMMIT_ALLOWED_COMMANDS)
 })
 
-test("hook: only bash commands are inspected, and they need a command string", async () => {
+test("hook: only shell commands are inspected, and they need a command string", async () => {
   stage()
   const plugin = await freshHooks()
   assert.strictEqual(await redirect(plugin, "read", { filePath: "gh-app/api-commit.sh" }), null)
   assert.strictEqual(await redirect(plugin, "edit", { filePath: "x" }), null)
+  assert.strictEqual(await redirect(plugin, "shell", { command: "git status" }), null)
   assert.strictEqual(await redirect(plugin, "bash", {}), null)
   assert.strictEqual(await redirect(plugin, "bash", { command: 42 }), null)
   assert.strictEqual(await redirect(plugin, "bash", "git commit"), null)
   assert.strictEqual(await redirect(plugin, "bash", undefined), null)
   assert.strictEqual(await redirect(plugin, "bash", null), null)
+})
+
+test("hook: the shell tool is redirected exactly like bash", async () => {
+  stage()
+  const plugin = await freshHooks()
+  const message = await redirect(plugin, "shell", { command: 'git commit -m "x"' })
+  assert.ok(message !== null && message.includes("git vc"), `shell was not redirected: ${message}`)
 })
 
 // --- shell.env contract -----------------------------------------------------
@@ -734,7 +742,7 @@ test("app.env: the example file is used when app.env does not exist", async () =
 test("app.env: without either file the plugin refuses to load", async () => {
   stage()
   fs.rmSync(APP_ENV)
-  assert.throws(loadPlugin, /Missing required gh-app config: APP_SLUG/)
+  await assert.rejects(loadPlugin(), /Missing required gh-app config: APP_SLUG/)
 })
 
 test("app.env: comments, blanks and unusable keys never satisfy the config", async () => {
@@ -753,7 +761,7 @@ test("app.env: comments, blanks and unusable keys never satisfy the config", asy
       "APP_SLUG=",
     ].join("\n")
   )
-  assert.throws(loadPlugin, /Missing required gh-app config: APP_SLUG/)
+  await assert.rejects(loadPlugin(), /Missing required gh-app config: APP_SLUG/)
 })
 
 test("app.env: quotes are stripped and ${HOME} expands in values", async () => {
@@ -902,11 +910,11 @@ test("chat hooks: the session model and variant become one commit trailer label"
     await plugin["shell.env"]({ cwd: ".", sessionID: "s3" }, output)
     assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (g/med ium)")
 
-    // A message without any model produces no label at all.
+    // A context event without a model leaves the last accepted label in place.
     await plugin["chat.message"]({ sessionID: "s4", variant: "medium" }, { message: {}, parts: [] })
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s4" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, undefined)
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (g/med ium)")
 
     // An explicit label (the caller already chose one) is never overwritten.
     output = { env: { CONAHCNUJ_COMMIT_MODEL: "custom" } }
@@ -960,14 +968,14 @@ test("chat hooks: CONAHCNUJ_SESSION_MODEL keeps side models out of the label", a
     await plugin["shell.env"]({ cwd: ".", sessionID: "b" }, output)
     assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (fledge/low)")
 
-    // ...but never a different model id.
+    // ...but never a different model id: the last accepted label stays.
     await plugin["chat.message"](
       { sessionID: "c", model: { providerID: "xai", modelID: "other" }, variant: "low" },
       { message: {}, parts: [] }
     )
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "c" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, undefined)
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (fledge/low)")
   } finally {
     if (saved === undefined) {
       delete process.env.CONAHCNUJ_SESSION_MODEL
