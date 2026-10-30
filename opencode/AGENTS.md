@@ -48,7 +48,7 @@
   コマンドの有無は `Get-Command` で確認し、空白を含むパスは引用符で囲むこと。
   ファイルの読み取りは read ツール、検索は grep/glob ツールを優先すること。
   シェルコマンドが避けられない場合は PowerShell の同等コマンドや
-  node/python を使うこと。コマンドが存在するか分からないときは先に確認すること。
+  node を使うこと。コマンドが存在するか分からないときは先に確認すること。
 - **`/dev/null` は Unix の null デバイスであり、Windows の PowerShell には
   存在しません。** PowerShell では `$null`（例: `2>$null`）や `Out-Null` を
   使ってください。`/dev/null` や `2>/dev/null` を PowerShell で使うと
