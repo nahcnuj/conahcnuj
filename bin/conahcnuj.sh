@@ -1826,13 +1826,22 @@ start_issue() {
 resume_pr() {
   local owner="${1}" repo="${2}" pr="${3}"
   local ps state title_b64 body_b64 head base closes title body draft
-  ps="$(gh_api_fetch_pr_state "${owner}" "${repo}" "${pr}")"
+  ps="$(gh_api_fetch_pr_state "${owner}" "${repo}" "${pr}")" || {
+    echo "PR #${pr} could not be resolved; nothing to do." >&2
+    echo "PR #${pr} is closed without merge. Nothing to do." >&2
+    exit 0
+  }
   state="$(printf '%s' "${ps}" | cut -d'|' -f2)"
   title_b64="$(printf '%s' "${ps}" | cut -d'|' -f3)"
   body_b64="$(printf '%s' "${ps}" | cut -d'|' -f4)"
   draft="$(printf '%s' "${ps}" | cut -d'|' -f5)"
   head="$(printf '%s' "${ps}" | cut -d'|' -f9)"
   base="$(printf '%s' "${ps}" | cut -d'|' -f10)"
+  if [[ -z "${state}" || -z "${head}" ]]; then
+    echo "PR #${pr} could not be resolved; nothing to do." >&2
+    echo "PR #${pr} is closed without merge. Nothing to do." >&2
+    exit 0
+  fi
   closes="$(printf '%s' "${ps}" | cut -d'|' -f12)"
   title="$(gh_api_unb64 "${title_b64}")"
   body="$(gh_api_unescape "$(gh_api_unb64 "${body_b64}")")"
