@@ -238,6 +238,22 @@ $content = Get-NormalizedText $SrcGitVc
 Write-NormalizedText (Join-Path $DstBinDir $GitVcName) $content
 Write-Host "  copied $GitVcName to $DstBinDir"
 
+# Make the deployed entrypoints executable on Unix-like systems (and under
+# Git Bash on Windows): PowerShell's Write-NormalizedText does not carry
+# the executable bit, so a freshly installed `git-vc`/`conahcnuj` would
+# otherwise fail with "Permission denied" (exit 126) when invoked directly.
+foreach ($entrypoint in @($BinName, $GitVcName)) {
+    $target = Join-Path $DstBinDir $entrypoint
+    if (-not (Test-Path -LiteralPath $target)) { continue }
+    $chmod = Get-Command chmod -ErrorAction SilentlyContinue
+    if ($chmod) {
+        & $chmod +x $target
+    } elseif (Test-Path -LiteralPath "C:/Program Files/Git/bin/bash.exe") {
+        $unixTarget = $target -replace '\\', '/'
+        & "C:/Program Files/Git/bin/bash.exe" -c "chmod +x '$unixTarget'"
+    }
+}
+
 Write-Host ""
 Write-Host "Done. Restart opencode to load the plugin (plugins/*.ts is auto-loaded)."
 Write-Host "Add $DstBinDir to your PATH to use 'conahcnuj' command."
