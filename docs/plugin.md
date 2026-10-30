@@ -12,7 +12,7 @@ unsigned コミットを塞ぐプラグインです。ファイルは `plugins/g
 
 ## フック
 
-### `shell.env` - シェルへの注入
+### `ctx.shell.hook("create.before")` - シェルへの注入
 
 セッションが起動するすべてのシェルに次を注入します。
 
@@ -30,7 +30,7 @@ unsigned コミットを塞ぐプラグインです。ファイルは `plugins/g
 | `commit.gpgsign` | `false` |
 | `alias.vc` | `!"<BASH_EXE>" "<gh-app>/api-commit.sh"`（[git vc](#git-vc)） |
 
-### `experimental.chat.system.transform` - システムプロンプトへの規則注入
+### `ctx.session.hook("context")` - システムプロンプトへの規則注入
 
 全セッションのシステムプロンプトへ 1 行ずつの規則を追加します（重複しません）。
 
@@ -40,21 +40,22 @@ unsigned コミットを塞ぐプラグインです。ファイルは `plugins/g
   使えばよい。エージェントが `GH_TOKEN` を自分で export したり
   `gh-app/get-token.sh` を実行してトークンを取り直したりしない。
 
-### `tool.execute.before` - `git commit` のブロック
+### `ctx.tool.hook("execute.before")` - `git commit` のブロック
 
-bash ツールが `git commit`（`git.exe commit`、`-C <dir> commit` も含む）を呼ぼうと
-すると、`Commits must have verified signatures` でブロックされる旨と代替手段
+シェルツール（V2 の `shell`、V1 互換の `bash`）が `git commit`
+（`git.exe commit`、`-C <dir> commit` も含む）を呼ぼうとすると、
+`Commits must have verified signatures` でブロックされる旨と代替手段
 （`git vc -m "<メッセージ>" [-a]`）を示すエラーで失敗させます。他の git サブコマンドは
 通します。
 
-### `chat.message` / `chat.params` - モデルラベルの記録
+### `ctx.session.hook("context")` - モデルラベルの記録
 
-セッションのモデルの表示名と effort（variant）を組み合わせた 1 行ラベル
-（例: `Grok 4.7 (medium)`）を記録し、`CONAHCNUJ_MODEL_LABEL_FILE` が設定されていれば
-そのファイルへ 1 行で書き込みます（パスはシステムの temp ディレクトリ配下に
-限定）。`CONAHCNUJ_SESSION_MODEL` が設定されているときは、そのモデル
-（`provider/model`）だけを記録します。ドライバはこのファイルを
-`provider (model/effort)`（例: `xai (grok-4.7/medium)`）の形で、そのまま
+`context` イベントの `event.model`（`providerID` / `id` / 任意の `variant`）から、
+モデルと effort を組み合わせた 1 行ラベル（例: `xai (grok-4.7/medium)`）を
+記録します。`CONAHCNUJ_MODEL_LABEL_FILE` が設定されていればそのファイルへ
+1 行で書き込みます（パスはシステムの temp ディレクトリ配下に限定）。
+`CONAHCNUJ_SESSION_MODEL` が設定されているときは、そのモデル
+（`provider/model`）だけを記録します。ドライバはこの値をそのまま
 `CONAHCNUJ_COMMIT_MODEL` として [api-commit.sh](cli.md#api-commitsh) に渡します。
 
 ## `git vc`

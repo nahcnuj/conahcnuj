@@ -224,7 +224,7 @@ jobs:
           restore-keys: |
             npm-${{ runner.os }}-
 
-      # @types/node + @opencode-ai/plugin from npm (pinned lockfile).
+      # @types/node + @opencode/plugin from npm (pinned lockfile).
       # NOTE: plain `cd`, not `npm --prefix`: native npm on Windows
       # ignores an msys-style absolute prefix.
       - name: Typecheck plugin

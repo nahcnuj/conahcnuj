@@ -1,13 +1,12 @@
 name: Install opencode
 description: >
-  Install the v1 opencode release this repository is built on. The
-  opencode.ai/install endpoint now serves the rewritten v2 CLI, whose run
-  flags (--dir) and plugin API differ from the v1 line the plugin, driver
-  and e2e tests target, so the latest v1 release is resolved via the
-  authenticated GitHub CLI (avoids the shared-runner api.github.com rate
-  limit) and that exact version is installed. Adds the opencode and
-  conahcnuj bin dirs to PATH. Requires a prior actions/checkout step so
-  the action can be referenced as ./.github/actions/install-opencode.
+  Install the v2 opencode release this repository is built on. The v2
+  installer is served from opencode.ai/v2/install (the v1 endpoint refuses
+  v2 versions), so the latest v2 release is resolved via the authenticated
+  GitHub CLI (avoids the shared-runner api.github.com rate limit) and that
+  exact version is installed. Adds the opencode and conahcnuj bin dirs to
+  PATH. Requires a prior actions/checkout step so the action can be
+  referenced as ./.github/actions/install-opencode.
 
 runs:
   using: composite
@@ -17,9 +16,9 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        TAG="$(gh release view --repo anomalyco/opencode --json tagName --jq .tagName)"
+        TAG="$(gh release list --repo anomalyco/opencode --limit 50 --json tagName --jq '[.[] | select(.tagName|test("^v2\\.[0-9]+\\.[0-9]+$"))][0].tagName')"
         VER="${TAG#v}"
         test -n "$VER"
-        curl -fsSL https://opencode.ai/install | bash -s -- --version "$VER"
+        curl -fsSL https://opencode.ai/v2/install | bash -s -- --version "$VER"
         echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"

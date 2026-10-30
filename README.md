@@ -57,12 +57,13 @@ opencode プラグインの仕組みは [docs/plugin.md](docs/plugin.md) を参�
 1. `gh-app/get-token.sh` が GitHub App の秘密鍵で JWT を署名し、インストール
    トークン（1 時間有効）を取得する。有効期限内はキャッシュ
    (`gh-app/token.cache`) を返す。
-2. opencode プラグイン `plugins/gh-app-token.ts` が `shell.env` フックで
-   `GH_TOKEN` と `GIT_CONFIG_*`（bot 名義 + `alias.vc`）を注入する。
-3. `experimental.chat.system.transform` フックで「コミットは `git vc`」「`gh` は
+2. opencode v2 プラグイン `plugins/gh-app-token.ts` が
+   `ctx.shell.hook("create.before")` で `GH_TOKEN` と `GIT_CONFIG_*`
+   （bot 名義 + `alias.vc`）を注入する。
+3. `ctx.session.hook("context")` で「コミットは `git vc`」「`gh` は
    `GH_TOKEN` で認証済みなので自分で export しない」という規則を常時注入し、
-   `tool.execute.before` で `git commit` / `api-commit.sh` の直接実行を検知して
-   `git vc` へ誘導する。
+   `ctx.tool.hook("execute.before")` で `git commit` / `api-commit.sh` の直接実行を
+   検知して `git vc` へ誘導する。
 
 ## Verified コミット (`git vc`)
 

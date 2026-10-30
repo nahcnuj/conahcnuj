@@ -1,8 +1,8 @@
 // Unit tests for the opencode plugin, driven entirely through the hooks.
 // This file IS the test suite (unit.sh compiles the real plugin, then runs it);
 // it is not a separate test runner.
-// opencode calls (tool.execute.before, shell.env, the system-prompt
-// transform, chat.message / chat.params). plugin-tests/unit.sh compiles the real
+// opencode v2 calls (shell create.before, tool execute.before, session
+// context). plugin-tests/unit.sh compiles the real
 // plugins/gh-app-token.ts unchanged into ./.unit/out/, so the code under
 // test here IS the production source: this suite keeps no copy and no
 // re-export of it, and there is nothing that could drift out of sync with
@@ -26,6 +26,7 @@ const { createVerify, generateKeyPairSync } = require("node:crypto")
 const fs = require("node:fs")
 const os = require("node:os")
 const path = require("node:path")
+const { pathToFileURL } = require("node:url")
 
 const PLUGIN_MODULE = "./.unit/out/gh-app-token.js"
 const STAGE_DIR = path.join(__dirname, ".unit")
@@ -88,14 +89,53 @@ function stage(config = {}, botCache = BOT_ID) {
 
 // Fresh module load: the plugin reads app.env and keeps its state (in-memory
 // token, seen models) at import time, so each fixture change starts here.
-function loadPlugin() {
-  const resolved = require.resolve(PLUGIN_MODULE)
-  delete require.cache[resolved]
-  return require(PLUGIN_MODULE)
+async function loadPlugin() {
+  const url = pathToFileURL(path.resolve(__dirname, PLUGIN_MODULE)).href
+  return await import(url + "?t=" + Date.now())
 }
 
 async function freshHooks() {
-  return loadPlugin().GhAppTokenPlugin({})
+  const plugin = (await loadPlugin()).default
+  const state = { shellHooks: {}, toolHooks: {}, sessionHooks: {} }
+  const register = (bucket) => async (name, cb) => { bucket[name] = cb }
+  const ctx = {
+    location: { directory: process.cwd(), project: { id: "p" } },
+    options: {},
+    shell: { hook: register(state.shellHooks) },
+    tool: { hook: register(state.toolHooks), transform: async () => {} },
+    session: { hook: register(state.sessionHooks) },
+    agent: {}, aisdk: {}, command: {}, credential: {}, event: {}, experimental: {}, integration: {}, mcp: {}, model: {}, permission: {}, plugin: {}, provider: {}, reference: {}, rpc: {}, skill: {}, storage: {}, vcs: {}, websearch: {}, worktree: {},
+  }
+  await plugin.setup(ctx)
+  const sessionContext = async (sessionID, model) => {
+    const event = { sessionID: sessionID || "s", model: model || {}, system: [], messages: [], options: {}, agent: "a", tools: {} }
+    if (state.sessionHooks.context) await state.sessionHooks.context(event)
+    return event
+  }
+  return {
+    state,
+    plugin,
+    "shell.env": async (input, output) => {
+      const event = { command: "", cwd: (input && input.cwd) || ".", timeout: 0, shell: "", env: output.env }
+      if (state.shellHooks["create.before"]) await state.shellHooks["create.before"](event)
+    },
+    "tool.execute.before": async (input, output) => {
+      const event = { tool: input.tool, sessionID: (input && input.sessionID) || "s", agent: "a", messageID: "m", id: "c", input: output.args }
+      if (state.toolHooks["execute.before"]) await state.toolHooks["execute.before"](event)
+    },
+    "experimental.chat.system.transform": async (input, output) => {
+      const event = { sessionID: (input && input.sessionID) || "s", model: (input && input.model) || {}, system: output.system, messages: [], options: {}, agent: "a", tools: {} }
+      if (state.sessionHooks.context) await state.sessionHooks.context(event)
+    },
+    "chat.message": async (input) => {
+      const model = input.model ? { providerID: input.model.providerID, id: input.model.modelID, variant: input.variant } : {}
+      await sessionContext(input.sessionID, model)
+    },
+    "chat.params": async (input) => {
+      const model = input.model ? { providerID: input.model.providerID, id: input.model.id } : {}
+      await sessionContext(input.sessionID, model)
+    },
+  }
 }
 
 // --- test registry ----------------------------------------------------------
@@ -186,22 +226,20 @@ function assertJwt(jwt, issuer) {
 
 // --- the module / plugin surface -------------------------------------------
 
-test("module: exports the plugin factory and nothing else", () => {
-  const mod = loadPlugin()
+test("module: exports the plugin factory and nothing else", async () => {
+  const mod = await loadPlugin()
   // opencode's loader treats every export as a plugin, so a second export
   // would be loaded as a second plugin.
-  assert.deepStrictEqual(Object.keys(mod), ["GhAppTokenPlugin"])
+  assert.deepStrictEqual(Object.keys(mod), ["default"])
 })
 
 test("plugin: exposes exactly the hooks opencode and the driver rely on", async () => {
   const plugin = await freshHooks()
-  assert.deepStrictEqual(Object.keys(plugin).sort(), [
-    "chat.message",
-    "chat.params",
-    "experimental.chat.system.transform",
-    "shell.env",
-    "tool.execute.before",
-  ])
+  assert.strictEqual(plugin.plugin.id, "gh-app-token")
+  assert.strictEqual(typeof plugin.plugin.setup, "function")
+  assert.deepStrictEqual(Object.keys(plugin.state.shellHooks), ["create.before"])
+  assert.deepStrictEqual(Object.keys(plugin.state.toolHooks), ["execute.before"])
+  assert.deepStrictEqual(Object.keys(plugin.state.sessionHooks), ["context"])
 })
 
 // --- git commit redirects ---------------------------------------------------
@@ -336,16 +374,24 @@ test("redirects: reading or mentioning the script keeps working", async () => {
   await assertAllowed(API_COMMIT_ALLOWED_COMMANDS)
 })
 
-test("hook: only bash commands are inspected, and they need a command string", async () => {
+test("hook: only shell commands are inspected, and they need a command string", async () => {
   stage()
   const plugin = await freshHooks()
   assert.strictEqual(await redirect(plugin, "read", { filePath: "gh-app/api-commit.sh" }), null)
   assert.strictEqual(await redirect(plugin, "edit", { filePath: "x" }), null)
+  assert.strictEqual(await redirect(plugin, "shell", { command: "git status" }), null)
   assert.strictEqual(await redirect(plugin, "bash", {}), null)
   assert.strictEqual(await redirect(plugin, "bash", { command: 42 }), null)
   assert.strictEqual(await redirect(plugin, "bash", "git commit"), null)
   assert.strictEqual(await redirect(plugin, "bash", undefined), null)
   assert.strictEqual(await redirect(plugin, "bash", null), null)
+})
+
+test("hook: the shell tool is redirected exactly like bash", async () => {
+  stage()
+  const plugin = await freshHooks()
+  const message = await redirect(plugin, "shell", { command: 'git commit -m "x"' })
+  assert.ok(message !== null && message.includes("git vc"), `shell was not redirected: ${message}`)
 })
 
 // --- shell.env contract -----------------------------------------------------
@@ -734,7 +780,7 @@ test("app.env: the example file is used when app.env does not exist", async () =
 test("app.env: without either file the plugin refuses to load", async () => {
   stage()
   fs.rmSync(APP_ENV)
-  assert.throws(loadPlugin, /Missing required gh-app config: APP_SLUG/)
+  await assert.rejects(loadPlugin(), /Missing required gh-app config: APP_SLUG/)
 })
 
 test("app.env: comments, blanks and unusable keys never satisfy the config", async () => {
@@ -753,7 +799,7 @@ test("app.env: comments, blanks and unusable keys never satisfy the config", asy
       "APP_SLUG=",
     ].join("\n")
   )
-  assert.throws(loadPlugin, /Missing required gh-app config: APP_SLUG/)
+  await assert.rejects(loadPlugin(), /Missing required gh-app config: APP_SLUG/)
 })
 
 test("app.env: quotes are stripped and ${HOME} expands in values", async () => {
@@ -794,7 +840,7 @@ test("system prompt: the git vc, GitHub-auth and shell rules are appended once a
   // (commit, GitHub-auth, shell-portability).
   assert.strictEqual(output.system.length, 4)
   assert.strictEqual(output.system[0], "existing rule")
-  const rules = output.system[1]
+  const rules = output.system[1].text
   assert.ok(!/[\r\n]/.test(rules), "commit rules must be a single line")
   assert.ok(rules.includes("`git vc`"), rules)
   assert.ok(rules.includes("`git commit`"), rules)
@@ -815,7 +861,7 @@ test("system prompt: the git vc, GitHub-auth and shell rules are appended once a
   // The GitHub-auth rule exists for issue #210: the agent re-issued a token
   // (`export GH_TOKEN=$(bash gh-app/get-token.sh)`) because nothing told it the
   // plugin already injects GH_TOKEN.
-  const githubRules = output.system[2]
+  const githubRules = output.system[2].text
   assert.ok(!/[\r\n]/.test(githubRules), "GitHub-auth rules must be a single line")
   assert.ok(githubRules.includes("`GH_TOKEN`"), githubRules)
   assert.ok(githubRules.includes("run `gh ...`"), githubRules)
@@ -823,7 +869,7 @@ test("system prompt: the git vc, GitHub-auth and shell rules are appended once a
   assert.ok(githubRules.includes("do not run `gh-app/get-token.sh`"), githubRules)
   // The shell rule states the actual environment instead of guessing; the
   // model stops retrying commands that do not exist on this platform.
-  const shellRules = output.system[3]
+  const shellRules = output.system[3].text
   assert.ok(!/[\r\n]/.test(shellRules), "shell rules must be a single line")
   assert.ok(shellRules.includes(process.platform), shellRules)
   // The "fallback to PowerShell" guidance must be platform-gated (issue #702):
@@ -902,11 +948,11 @@ test("chat hooks: the session model and variant become one commit trailer label"
     await plugin["shell.env"]({ cwd: ".", sessionID: "s3" }, output)
     assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (g/med ium)")
 
-    // A message without any model produces no label at all.
+    // A context event without a model leaves the last accepted label in place.
     await plugin["chat.message"]({ sessionID: "s4", variant: "medium" }, { message: {}, parts: [] })
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "s4" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, undefined)
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (g/med ium)")
 
     // An explicit label (the caller already chose one) is never overwritten.
     output = { env: { CONAHCNUJ_COMMIT_MODEL: "custom" } }
@@ -960,14 +1006,14 @@ test("chat hooks: CONAHCNUJ_SESSION_MODEL keeps side models out of the label", a
     await plugin["shell.env"]({ cwd: ".", sessionID: "b" }, output)
     assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (fledge/low)")
 
-    // ...but never a different model id.
+    // ...but never a different model id: the last accepted label stays.
     await plugin["chat.message"](
       { sessionID: "c", model: { providerID: "xai", modelID: "other" }, variant: "low" },
       { message: {}, parts: [] }
     )
     output = { env: {} }
     await plugin["shell.env"]({ cwd: ".", sessionID: "c" }, output)
-    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, undefined)
+    assert.strictEqual(output.env.CONAHCNUJ_COMMIT_MODEL, "xai (fledge/low)")
   } finally {
     if (saved === undefined) {
       delete process.env.CONAHCNUJ_SESSION_MODEL

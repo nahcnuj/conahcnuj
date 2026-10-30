@@ -2,8 +2,9 @@
 # Max effort mode behaviour (offline).
 #
 # `--max-effort` / CONAHCNUJ_MAX_EFFORT / CONAHCNUJ_EFFORT=max must make the
-# driver pass `--variant max` to opencode (highest effort), while a normal run
-# must not carry that flag, so effort never decreases. No secrets, no network.
+# driver pass the V2 `provider/model#max` suffix to opencode (highest effort),
+# while a normal run must use the bare model, so effort never decreases. No
+# secrets, no network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,10 +53,11 @@ trap 'rm -rf "${tmp}"' EXIT
 export CONAHCNUJ_MAX_EFFORT="1"
 unset CONAHCNUJ_EFFORT
 out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/m" 2>/dev/null)"
-[[ "${out}" == *"--variant max"* ]] || { echo "FAIL: max mode did not pass --variant max"; echo "${out}" | head -1; exit 1; }
+[[ "${out}" == *"--model opencode/m#max"* ]] || { echo "FAIL: max mode did not pass model#max"; echo "${out}" | head -1; exit 1; }
 
 unset CONAHCNUJ_MAX_EFFORT CONAHCNUJ_EFFORT
 out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/m" 2>/dev/null)"
-[[ "${out}" != *"--variant"* ]] || { echo "FAIL: normal mode unexpectedly passed --variant"; echo "${out}" | head -1; exit 1; }
+[[ "${out}" == *"--model opencode/m "* ]] || { echo "FAIL: normal mode did not use the bare model"; echo "${out}" | head -1; exit 1; }
+[[ "${out}" != *"#max"* ]] || { echo "FAIL: normal mode unexpectedly passed #max"; echo "${out}" | head -1; exit 1; }
 
 echo "opencode_run (max effort variant) passed"

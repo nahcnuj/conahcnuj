@@ -2,9 +2,9 @@
 # Plugin runtime smoke test, end to end from install.ps1:
 # install to a temp dir, stage the INSTALLED files (not the repo files),
 # compile the installed plugin, load it against the installed gh-app dir
-# (fake app.env overlaid), and assert the shell.env contract (GIT_CONFIG
-# identity + alias.vc), the system-prompt commit rules and the
-# tool.execute.before redirects (git commit / api-commit.sh) via
+# (fake app.env overlaid), and assert the shell create.before contract
+# (GIT_CONFIG identity + alias.vc), the session context commit rules and
+# the tool execute.before redirects (git commit / api-commit.sh) via
 # smoke-run.js.
 # Needs node/npm (typescript from plugins/package.json) and pwsh/powershell
 # for install.ps1. No secrets, no GitHub network.
@@ -59,8 +59,8 @@ cat > "${STAGE}/src/tsconfig.json" <<'EOF'
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
@@ -76,7 +76,7 @@ EOF
 #    the tsconfig dir, which no longer reaches plugins/node_modules).
 mkdir -p "${STAGE}/node_modules"
 cp -r "${PLUGINS_DIR}/node_modules/@types" "${STAGE}/node_modules/"
-cp -r "${PLUGINS_DIR}/node_modules/@opencode-ai" "${STAGE}/node_modules/"
+cp -r "${PLUGINS_DIR}/node_modules/@opencode" "${STAGE}/node_modules/"
 "${PLUGINS_DIR}/node_modules/.bin/tsc" -p "${STAGE}/src"
 
 node "${HERE}/smoke-run.js" conahcnuj 331119074

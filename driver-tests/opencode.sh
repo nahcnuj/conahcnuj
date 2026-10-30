@@ -144,8 +144,8 @@ test_opencode_run() {
   tmp="$(mktemp -d)"
   local out
   out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "more ctx")"
-  [[ "${out}" == *"opencode run --auto --format json --model opencode/mimo-v2.5-free"* ]]
-  [[ "${out}" == *"--dir ${tmp}"* ]]
+  [[ "${out}" == *"opencode run --standalone --auto --format json --model opencode/mimo-v2.5-free"* ]]
+  [[ "${out}" == *"(cd ${tmp} &&"* ]]
   [[ "${out}" == *"Test Issue"* ]]
   [[ "${out}" == *"more ctx"* ]]
   # A mock change file is written (the driver relies on working-tree changes),
@@ -213,12 +213,14 @@ EOF
   [[ "${args}" == *"--model opencode/second"* ]]
   [[ "${args}" == *"--session ses_parsed"* ]]
   # Thinking and a quiet log level are part of a readable log: --thinking makes
-  # the model show its reasoning, --log-level WARN drops the INFO boot chatter.
+  # the model show its reasoning, --log-level warn drops the INFO boot chatter.
+  # V2 only accepts lowercase log levels, so DEBUG is normalized.
   [[ "${args}" == *"--thinking"* ]]
-  [[ "${args}" == *"--log-level WARN"* ]]
+  [[ "${args}" == *"--standalone"* ]]
+  [[ "${args}" == *"--log-level warn"* ]]
   CONAHCNUJ_OPENCODE_LOG_LEVEL=DEBUG opencode_run "Issue" "Body" "${tmp}" "opencode/third" >/dev/null || rc=$?
   args="$(cat "${OPENCODE_ARGS_FILE}")"
-  [[ "${args}" == *"--log-level DEBUG"* ]]
+  [[ "${args}" == *"--log-level debug"* ]]
   PATH="${old_path}"
   rm -rf "${tmp}"
   unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID

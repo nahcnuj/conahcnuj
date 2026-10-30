@@ -297,15 +297,25 @@ function emit(tag, raw,  v, n, a, i, ends_nl) {
   # The file-oriented arguments the tool-specific captions name (✅ Read
   # <path>); the field() start argument keeps state.output / state.title /
   # state.metadata from being shadowed by the tool's own argument object.
-  emit("filepath", field(i, "filePath"))
+  # V2 renamed filePath to path for edits, so read either spelling.
+  _filepath = field(i, "filePath")
+  if (_filepath == "") _filepath = field(i, "path")
+  emit("filepath", _filepath)
   emit("pattern", field(i, "pattern"))
   emit("oldstr", field(i, "oldString"))
   emit("newstr", field(i, "newString"))
   emit("output", field(s, "output", after))
-  emit("exit", field(field(s, "metadata", after), "exit"))
+  # V1 puts the exit status and diff directly in state.metadata; V2 nests the
+  # provider metadata one level deeper and reports edits as files[].patch.
+  _meta = field(s, "metadata", after)
+  _exit = field(_meta, "exit")
+  if (_exit == "") _exit = field(field(_meta, "metadata"), "exit")
+  emit("exit", _exit)
   # The diff an edit tool reports in its metadata, so a successful edit can
   # show what it rewrote.
-  emit("diff", field(field(s, "metadata", after), "diff"))
+  _diff = field(_meta, "diff")
+  if (_diff == "") _diff = field(field(field(_meta, "metadata"), "files"), "patch")
+  emit("diff", _diff)
   emit("toolerror", field(s, "error", after))
   emit("errmsg", field(field(e, "data"), "message"))
   emit("errname", field(e, "name"))
@@ -314,6 +324,9 @@ function emit(tag, raw,  v, n, a, i, ends_nl) {
   # inside part for text/reasoning events, so read both.
   _topid = field($0, "id")
   if (_topid == "") _topid = field(p, "id")
+  # V2 also exposes the stable part id even when part.id is a provider call id.
+  _partid = field(p, "partID")
+  if (_partid != "") _topid = _partid
   emit("id", _topid)
 }
 AWK
@@ -697,7 +710,7 @@ render_block_tool() {
   local pid="${F[id]}" tool="${F[tool]}" code is_cmd=false label
   local prev_out="" prev_err="" prev_verdict="false" prev_fed="false" fed="false"
   [[ -z "${tool:-}" ]] && tool="tool"
-  [[ "${tool}" == "bash" || -n "${F[command]}" ]] && is_cmd="true"
+  [[ "${tool}" == "bash" || "${tool}" == "shell" || -n "${F[command]}" ]] && is_cmd="true"
   local status="${F[status]}"
   code="${F[exit]}"
   case "${code}" in

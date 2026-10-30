@@ -51,8 +51,8 @@ jobs:
           set -e
           out="${RUNNER_TEMP}/opencode-gh-auth.jsonl"
           err="${RUNNER_TEMP}/opencode-gh-auth.err"
-          opencode run --format json --model opencode/mimo-v2.5-free --dir "$GITHUB_WORKSPACE" \
-            "Run the command \`gh auth status\` and report whether it succeeded." \
+          (cd "$GITHUB_WORKSPACE" && opencode run --standalone --format json --model opencode/mimo-v2.5-free \
+            "Run the command \`gh auth status\` and report whether it succeeded.") \
             > "$out" 2> "$err" || true
           echo "=== stdout ==="
           cat "$out" 2>/dev/null || true

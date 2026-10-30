@@ -1,8 +1,9 @@
 {
   "private": true,
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.31",
+    "@opencode/plugin": "^2.2.3",
     "@types/node": "26.6.2",
     "typescript": "5.9.2"
-  }
+  },
+  "type": "module"
 }
