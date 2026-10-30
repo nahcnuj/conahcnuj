@@ -1680,6 +1680,12 @@ ${summary}"
       fi
       if [[ "${_commit_failed}" -eq 0 ]]; then
         rm -f .commit-msg
+      else
+        # The commit did not land, so there is nothing new to verify or hand
+        # over; back off and retry the commit on the next cycle instead of
+        # asking for review on an un-pushed tree.
+        rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
+        continue
       fi
       # Verify the non-reviewer constraints again before handing the PR back:
       # the fix restarted CI, so the reviewer is only asked once the checks are
