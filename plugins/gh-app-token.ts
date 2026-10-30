@@ -142,6 +142,8 @@ async function resolveBotUserId(slug: string): Promise<string> {
   // unauthenticated request when no token can be issued.
   let token: string | null = null
   try {
+    // codeql[js/file-access-to-http]
+    // lgtm[js/file-access-to-http]
     token = await getInstallationToken()
   } catch {
     token = null
@@ -150,6 +152,8 @@ async function resolveBotUserId(slug: string): Promise<string> {
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }
+  // codeql[js/file-access-to-http]
+  // lgtm[js/file-access-to-http]
   const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, { headers })
   if (!res.ok) {
     throw new Error(
