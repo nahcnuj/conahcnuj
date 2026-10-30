@@ -136,9 +136,21 @@ async function resolveBotUserId(slug: string): Promise<string> {
   if (!/^[A-Za-z0-9-]+$/.test(slug)) {
     throw new Error(`Invalid APP_SLUG for bot lookup: ${slug}`)
   }
-  const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, {
-    headers: { Accept: "application/vnd.github+json" },
-  })
+  // Use an installation token when one is available (cached or freshly issued)
+  // so the lookup is authenticated: the unauthenticated public endpoint is
+  // rate-limited and shared runner IPs exhaust it. Falls back to an
+  // unauthenticated request when no token can be issued.
+  let token: string | null = null
+  try {
+    token = await getInstallationToken()
+  } catch {
+    token = null
+  }
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json" }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, { headers })
   if (!res.ok) {
     throw new Error(
       `Cannot resolve bot user ID for ${slug}[bot] (HTTP ${res.status}): ` +

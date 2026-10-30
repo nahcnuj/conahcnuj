@@ -42,8 +42,43 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
-ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+# Resolve an installation token when the App credentials are available, so the
+# lookup is authenticated (the unauthenticated public endpoint is rate-limited
+# and shared runner IPs exhaust it). Falls back to an unauthenticated request
+# when no token can be issued (offline / no key), keeping the script usable
+# without credentials.
+TOKEN=""
+if [[ -n "${APP_ID:-}" && -n "${INSTALLATION_ID:-}" && -n "${PRIVATE_KEY_PATH:-}" ]]; then
+  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+fi
+
+lookup() {
+  local auth="${1:-}"
+  if [[ -n "${auth}" ]]; then
+    curl -fsSL \
+      -H "Authorization: Bearer ${auth}" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true
+  else
+    curl -fsSL \
+      -H "Accept: application/vnd.github+json" \
+      "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true
+  fi
+}
+
+# Try the authenticated request first (when a token is available), then fall
+# back to the unauthenticated public endpoint. Stop at the first that yields an id.
+ID=""
+if [[ -n "${TOKEN}" ]]; then
+  LOOKUP="$(lookup "${TOKEN}")"
+  ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+fi
+if [[ -z "${ID}" ]]; then
+  LOOKUP="$(lookup "")"
+  ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+fi
+
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
   echo "Set BOT_USER_ID to the bot account user ID" >&2
