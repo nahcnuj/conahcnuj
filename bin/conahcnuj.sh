@@ -294,6 +294,31 @@ verify_repo_alignment() {
   fi
 }
 
+# Verify that the GitHub App is installed on the target repository before the
+# run starts. Committing goes through createCommitOnBranch, which needs the
+# installation to cover the repository; without it every commit fails with
+# "Resource not accessible by integration" and the run can never resolve the
+# item. Like verify_repo_alignment this is a configuration error, so it stops
+# before the bug-report trap is registered and files no report. Best-effort:
+# only a definitive 404 (app not installed) blocks the run.
+verify_app_installation() {
+  local target="${1}" owner repo jwt http_code
+  [[ -n "${target}" ]] || return 0
+  owner="${target%%/*}"
+  repo="${target#*/}"
+  [[ -n "${owner}" && -n "${repo}" && "${owner}" != "${repo}" ]] || return 0
+  jwt="$(bash "${HERE}/../gh-app/get-token.sh" --print-jwt 2>/dev/null || true)"
+  [[ -n "${jwt}" ]] || return 0
+  http_code="$(curl -s -o /dev/null -w "%{http_code}"     -H "Authorization: Bearer ${jwt}"     -H "Accept: application/vnd.github+json"     "https://api.github.com/repos/${owner}/${repo}/installation" 2>/dev/null || true)"
+  if [[ "${http_code}" == "404" ]]; then
+    echo "ERROR: the GitHub App is not installed on ${owner}/${repo}." >&2
+    echo "       Install the app on that repository (Settings -> GitHub Apps ->" >&2
+    echo "       conahcnuj -> Repository access) before running the driver;" >&2
+    echo "       Verified commits and pushes need the installation's write access." >&2
+    exit 1
+  fi
+}
+
 # True when the overall time budget is exhausted. Split out from check_timeout
 # so drive() can word the exhaustion differently once the PR is with the
 # reviewer: running out of time while waiting for a human is not a driver
@@ -462,7 +487,6 @@ commit_changes() {
   # GitHub API as a malformed JSON string.
   message="$(head -n 1 .commit-msg | tr -d '\000' | sed '1s/^\xEF\xBB\xBF//' | sanitize_text)"
   message="${message%$'\r'}"
-  rm -f .commit-msg
   if [[ -z "${message}" ]]; then
     echo "ERROR: .commit-msg is empty; the coding agent must write a commit message." >&2
     return 1
@@ -477,9 +501,17 @@ commit_changes() {
     else
       git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
     fi
+    rm -f .commit-msg
     return 0
   fi
-  bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
+  # Keep .commit-msg around until the commit actually lands, so a failed
+  # createCommitOnBranch (network, permissions, ...) leaves the message in
+  # place and the next loop can retry instead of silently losing it.
+  if ! bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"; then
+    echo "ERROR: commit creation failed; leaving .commit-msg and the working tree in place for retry." >&2
+    return 1
+  fi
+  rm -f .commit-msg
   local branch
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git fetch origin "${branch}" >/dev/null 2>&1 || true
@@ -1495,10 +1527,11 @@ drive() {
     # may commit. It keeps polling the PR instead of crashing over files it was
     # never asked to commit.
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
-      # After committing our own fix, wait for CI to re-run instead of
-      # immediately trying to implement (which would fail if nothing changed).
-      continue
+      if commit_changes; then
+        # After committing our own fix, wait for CI to re-run instead of
+        # immediately trying to implement (which would fail if nothing changed).
+        continue
+      fi
     fi
 
     # The PR is a draft exactly while the per-issue TODO.md is present: the
@@ -1525,8 +1558,9 @@ drive() {
       # committed: a failed round can leave a dirty tree without a .commit-msg,
       # and the driver must not crash on it (it never invents a message).
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
-        produced_change="true"
+        if commit_changes; then
+          produced_change="true"
+        fi
       fi
       if [[ "${produced_change}" != "true" ]]; then
         echo "No changes could be produced to open the PR; backing off before retrying." >&2
@@ -1562,8 +1596,9 @@ drive() {
       # Same rule as the other rounds: only a dirty tree WITH a .commit-msg is
       # committed; a failed round never crashes the driver.
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
-        todo_change="true"
+        if commit_changes; then
+          todo_change="true"
+        fi
       fi
       if [[ "${todo_change}" != "true" ]]; then
         echo "No model produced a change to finish the issue; backing off before retrying." >&2
@@ -1639,10 +1674,13 @@ ${summary}"
       # .commit-msg (a provider outage mid-round is what filed issue #251):
       # there is nothing the driver may commit, and refusing must not abort the
       # run.
+      _commit_failed=0
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
+        commit_changes || _commit_failed=1
       fi
-      rm -f .commit-msg
+      if [[ "${_commit_failed}" -eq 0 ]]; then
+        rm -f .commit-msg
+      fi
       # Verify the non-reviewer constraints again before handing the PR back:
       # the fix restarted CI, so the reviewer is only asked once the checks are
       # green again (and the branch still merges), exactly as on the first
@@ -1698,8 +1736,9 @@ ${summary}"
       # Same rule as the feedback round: a dirty tree without a .commit-msg is
       # no commit, never a crash; back off and re-check instead.
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
-        produced_change="true"
+        if commit_changes; then
+          produced_change="true"
+        fi
       fi
       if [[ "${produced_change}" != "true" ]]; then
         echo "No model completed work for the failing constraints; backing off before re-checking." >&2
@@ -1773,7 +1812,7 @@ start_issue() {
     fi
     rm -f .branch-name
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
+      commit_changes || true
     fi
     if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
       echo "No PR could be created; backing off before retrying." >&2
@@ -1791,7 +1830,7 @@ start_issue() {
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
   elif workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
-    commit_changes
+    commit_changes || true
   else
     if ! implement "${title}" "${body}" "" "${default_branch}"; then
       echo "ERROR: could not implement issue #${num} with any available model." >&2
@@ -1801,7 +1840,7 @@ start_issue() {
     # stable instead of renaming it mid-flight: the PR number must not change.
     rm -f .branch-name
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
+      commit_changes || true
     fi
   fi
 
@@ -1925,6 +1964,7 @@ main() {
   # the report, and filing an issue for it would only add noise (#309).
   if [[ "${TEST_MODE}" != "1" ]]; then
     verify_repo_alignment "${repo_info}"
+    verify_app_installation "${repo_info}"
   fi
 
   # File a bug report issue when the run terminates abnormally. Registered only
