@@ -345,6 +345,10 @@ jobs:
           # Seed the bot-ID cache: the public lookup shares runner IPs and
           # gets rate-limited; the ID itself is immutable public info.
           printf '331119074' > "$RUNNER_TEMP/e2e-inst/gh-app/bot-id.cache"
+          # Seed a dummy installation token so GH_TOKEN is non-empty: otherwise
+          # models spend the whole attempt hunting for the (absent) private key
+          # instead of running `git vc`, and the session times out.
+          printf '9999999999|e2e-dummy-token' > "$RUNNER_TEMP/e2e-inst/gh-app/token.cache"
           cat > "$RUNNER_TEMP/e2e-inst/opencode.json" <<'EOF'
           {
             "$schema": "https://opencode.ai/config.json",

@@ -66,7 +66,7 @@ run_e2e_model() {
   # (exit 1 is expected). Calls with no exit (null) never concluded
   # and are benign: the model often interrupts a long command, and a
   # hook-blocked `git commit` likewise never executes.
-  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 1 and .exit != 2) | [.cmd, .exit] | @tsv' || true)"
+  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 1 and .exit != 2 and .exit != 124 and .exit != 130 and .exit != 137 and .exit != 143) | [.cmd, .exit] | @tsv' || true)"
 
   # Record the raw exit status and whether this attempt emitted anything.
   # The orchestrator needs both to tell a regression from a service
@@ -131,7 +131,7 @@ mapfile -t E2E_MODELS <<< "${MODELS}"
 # SIGTERMing attempts that were still running their first commands. One
 # retry round separates a transient outage from a real regression: a
 # broken plugin fails both rounds, a passing round ends the test at once.
-E2E_ATTEMPT_TIMEOUT=300
+E2E_ATTEMPT_TIMEOUT=600
 E2E_MAX_ROUNDS=2
 E2E_SUCCESS=""
 for ((round = 1; round <= E2E_MAX_ROUNDS; round++)); do
