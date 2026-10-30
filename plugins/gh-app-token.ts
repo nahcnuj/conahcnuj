@@ -136,20 +136,17 @@ async function resolveBotUserId(slug: string): Promise<string> {
   if (!/^[A-Za-z0-9-]+$/.test(slug)) {
     throw new Error(`Invalid APP_SLUG for bot lookup: ${slug}`)
   }
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json" }
-  if (
-    config.APP_ID &&
-    config.INSTALLATION_ID &&
-    config.PRIVATE_KEY_PATH &&
-    /^\d+$/.test(config.INSTALLATION_ID) &&
-    fs.existsSync(resolvePrivateKeyPath(config.PRIVATE_KEY_PATH))
-  ) {
-    try {
-      const token = await fetchInstallationToken(config, path.join(GH_APP_DIR, "token.cache"))
-      headers.Authorization = `Bearer ${token}`
-    } catch {
-      // Fall through to the unauthenticated lookup.
-    }
+  let token: string | null = null
+  try {
+    token = await fetchInstallationToken(config, TOKEN_CACHE_FILE)
+  } catch {
+    token = null
+  }
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
   }
   const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, {
     headers,

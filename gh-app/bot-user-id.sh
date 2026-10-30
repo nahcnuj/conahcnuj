@@ -47,13 +47,24 @@ if [[ -n "${APP_ID:-}" && "${APP_ID}" != "<"* && -n "${INSTALLATION_ID:-}" && "$
   TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
 fi
 
-CURL_AUTH=()
-if [[ -n "${TOKEN}" ]]; then
-  CURL_AUTH=(-H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json")
-fi
+lookup_id() {
+  local use_auth="${1}"
+  local args=(-fsSL -H "Accept: application/vnd.github+json")
+  if [[ "${use_auth}" == "yes" && -n "${TOKEN}" ]]; then
+    args+=(-H "Authorization: Bearer ${TOKEN}")
+  fi
+  local lookup
+  lookup="$(curl "${args[@]}" "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+  printf '%s' "${lookup}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p'
+}
 
-LOOKUP="$(curl -fsSL "${CURL_AUTH[@]}" "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
-ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+ID=""
+if [[ -n "${TOKEN}" ]]; then
+  ID="$(lookup_id yes)"
+fi
+if [[ -z "${ID}" ]]; then
+  ID="$(lookup_id no)"
+fi
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
   echo "Set BOT_USER_ID to the bot account user ID" >&2
