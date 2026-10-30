@@ -88,8 +88,9 @@ owner/repo/branch は自動検出なのでどのリポジトリでも動きま�
 プラグインのロード時に `<APP_SLUG>[bot]` のユーザー ID を解決します:
 
 1. `gh-app/bot-id.cache`（不変・無期限）
-2. 公開 API `GET /users/<slug>%5Bbot%5D`（認証不要。slug は
-   `^[A-Za-z0-9-]+$` のみ許可）→ 成功したらキャッシュへ
+2. GitHub API `GET /users/<slug>%5Bbot%5D`（slug は `^[A-Za-z0-9-]+$` のみ許可）→
+   成功したらキャッシュへ。App の鍵があればインストールトークンで認証し、
+   無ければ公開 API にフォールバックする
 
 どちらも不可だとプラグインのロードが失敗します。オフラインでロードするなら、
 配置済みの `<配置先>/gh-app/bot-id.cache` に ID（数字だけ）を書いておく。

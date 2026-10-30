@@ -61,8 +61,9 @@ stdout: username=x-access-token
 
 - スコープは `--local`（git リポジトリ内）。リポジトリ外では `--global` に
   落ちて WARNING を出す
-- bot ID が未キャッシュなら公開 API を叩くため初回はネットワークが必要
-  （[bot-user-id.sh](#bot-user-idsh)）
+- bot ID が未キャッシュなら GitHub API を叩くため初回はネットワークが必要。
+  App の鍵があればインストールトークンで認証し、無ければ公開 API に
+  フォールバックする（[bot-user-id.sh](#bot-user-idsh)）
 - ドライバは起動時に自動でこれを実行する（`CONAHCNUJ_TEST_MODE=1` では除く）
 - 設定後は `git ls-remote https://github.com/<owner>/<repo>.git HEAD` で疎通確認
 
@@ -72,8 +73,10 @@ bot アカウントのユーザー ID を **stdout へ（改行なし）** 出�
 
 1. `app.env` の `BOT_USER_ID`（プレースホルダ値は無効扱い）
 2. `gh-app/bot-id.cache`（不変のため無期限）
-3. 公開 API `GET {GH_APP_API_BASE}/users/<APP_SLUG>%5Bbot%5D`（認証不要）→
-   成功したらキャッシュへ保存
+3. GitHub API `GET {GH_APP_API_BASE}/users/<APP_SLUG>%5Bbot%5D` →
+   成功したらキャッシュへ保存。App の鍵が設定されていれば
+   [get-token.sh](#get-tokensh) のインストールトークンで認証し（CI ランナーの
+   共有 IP でもレート制限に当たりにくい）、無ければ公開 API を使う
 
 いずれも不可なら、`BOT_USER_ID` を設定すべき旨（`gh api users/<slug>%5Bbot%5D
 --jq .id` の形式）を stderr へ出して exit 1。`APP_ID` は fallback にしない。

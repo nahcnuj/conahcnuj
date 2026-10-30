@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Print the bot account user ID (<slug>[bot]) for noreply email attribution.
 # Order: BOT_USER_ID from app.env when set to a real value, then the
-# persistent cache (bot IDs are immutable), then the public GitHub API
-# (no auth needed). Exits non-zero with guidance when none works.
+# persistent cache (bot IDs are immutable), then the GitHub API
+# (authenticated with the App's installation token when the key is
+# configured, so CI runner IP rate limits do not block the lookup; an
+# unauthenticated fallback is tried afterwards). Exits non-zero with
+# guidance when none works.
 # APP_ID is never a fallback: it is the App's own ID and never attributes
 # commits to the bot account.
 set -euo pipefail
@@ -42,8 +45,36 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
-ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+# Best-effort installation token: the App key is configured in real runs
+# (including CI), and an authenticated request has a far higher rate limit
+# than the unauthenticated public lookup. Missing/invalid keys simply leave
+# TOKEN empty and fall through to the public lookup below.
+TOKEN=""
+if [[ -n "${APP_ID:-}" && "${APP_ID}" != "<"* \
+   && -n "${INSTALLATION_ID:-}" && "${INSTALLATION_ID}" != "<"* \
+   && -n "${PRIVATE_KEY_PATH:-}" && "${PRIVATE_KEY_PATH}" != "<"* ]]; then
+  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+fi
+
+lookup_id() {
+  local use_auth="${1}"
+  local args=(-fsSL -H "Accept: application/vnd.github+json")
+  if [[ "${use_auth}" == "yes" && -n "${TOKEN}" ]]; then
+    args+=(-H "Authorization: Bearer ${TOKEN}")
+  fi
+  local lookup
+  lookup="$(curl "${args[@]}" "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+  printf '%s' "${lookup}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p'
+}
+
+ID=""
+if [[ -n "${TOKEN}" ]]; then
+  ID="$(lookup_id yes)"
+fi
+if [[ -z "${ID}" ]]; then
+  ID="$(lookup_id no)"
+fi
+
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
   echo "Set BOT_USER_ID to the bot account user ID" >&2
