@@ -323,27 +323,27 @@ API="${API_BASE}/repos/${REPO}"
 
 # 2) Current HEAD sha of the branch (|| true: a missing branch must fall
 #    through to the branch-creation handling instead of tripping set -e).
-HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
+HEAD_JSON="$(curl -fsSL 2>/dev/null -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
 HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
 if [[ -z "${HEAD_SHA}" ]]; then
   # 2b) The remote does not have the branch yet. Create the ref from the default
   #     branch head (no commits pushed), the same thing a first
   #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
   #     followed by a commit needs no extra option.
-  _default_resp="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}")" || { echo "ERROR: cannot read repository metadata for ${REPO}" >&2; exit 1; }
+  _default_resp="$(curl -fsSL 2>/dev/null -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}")" || { echo "ERROR: cannot read repository metadata for ${REPO}" >&2; exit 1; }
   DEFAULT_BRANCH="$(printf '%s' "${_default_resp}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
     exit 1
   fi
-  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")" || { echo "ERROR: cannot read branch ${DEFAULT_BRANCH} of ${REPO}" >&2; exit 1; }
+  BASE_JSON="$(curl -fsSL 2>/dev/null -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")" || { echo "ERROR: cannot read branch ${DEFAULT_BRANCH} of ${REPO}" >&2; exit 1; }
   BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
   if [[ -z "${BASE_SHA}" ]]; then
     echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
     exit 1
   fi
   BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  if ! curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null; then
+  if ! curl -fsSL 2>/dev/null -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null; then
     echo "ERROR: cannot create branch ${BRANCH} in ${REPO}" >&2
     exit 1
   fi
@@ -382,7 +382,7 @@ BODY_FILE="$(mktemp)"
 trap 'rm -f "${BODY_FILE:-}"' EXIT
 printf '%s' "{\"query\":\"$(json_escape "${QUERY}")\"}" > "${BODY_FILE}"
 
-if ! RESP="$(curl -fsSL -X POST \
+if ! RESP="$(curl -fsSL 2>/dev/null -X POST \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   --data-binary "@${BODY_FILE}" \

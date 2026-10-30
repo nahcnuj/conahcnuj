@@ -109,7 +109,7 @@ if [[ "${1:-}" == "--print-jwt" ]]; then
 fi
 
 # 3) Exchange JWT for an installation access token
-if ! RESP="$(curl -fsSL \
+if ! RESP="$(curl -fsSL 2>/dev/null \
   -X POST \
   -H "Authorization: Bearer ${JWT}" \
   -H "Accept: application/vnd.github+json" \
