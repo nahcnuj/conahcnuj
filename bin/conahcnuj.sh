@@ -462,6 +462,9 @@ commit_changes() {
   # GitHub API as a malformed JSON string.
   message="$(head -n 1 .commit-msg | tr -d '\000' | sed '1s/^\xEF\xBB\xBF//' | sanitize_text)"
   message="${message%$'\r'}"
+  # Consume .commit-msg up front so a failed commit is never retried in a
+  # tight loop: the change stays in the working tree for the next round to
+  # pick up instead (issue #700).
   rm -f .commit-msg
   if [[ -z "${message}" ]]; then
     echo "ERROR: .commit-msg is empty; the coding agent must write a commit message." >&2
@@ -473,17 +476,26 @@ commit_changes() {
   if [[ "${TEST_MODE}" == "1" ]]; then
     git config commit.gpgsign false
     if [[ -n "${CONAHCNUJ_COMMIT_MODEL:-}" ]] && ! printf '%s\n' "${message}" | grep -qiE '^[[:space:]]*co-authored-by:'; then
-      git commit -q -m "${message}" -m "Co-Authored-By: ${CONAHCNUJ_COMMIT_MODEL}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+      if git commit -q -m "${message}" -m "Co-Authored-By: ${CONAHCNUJ_COMMIT_MODEL}" 2>/dev/null; then
+        return 0
+      fi
     else
-      git commit -q -m "${message}" 2>/dev/null || echo "WARNING: nothing to commit (test mode)" >&2
+      if git commit -q -m "${message}" 2>/dev/null; then
+        return 0
+      fi
     fi
+    echo "WARNING: commit failed (test mode); leaving changes uncommitted." >&2
+    return 1
+  fi
+  if bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"; then
+    local branch
+    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    git fetch origin "${branch}" >/dev/null 2>&1 || true
+    git reset --hard "origin/${branch}" >/dev/null 2>&1 || true
     return 0
   fi
-  bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
-  local branch
-  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  git fetch origin "${branch}" >/dev/null 2>&1 || true
-  git reset --hard "origin/${branch}" >/dev/null 2>&1 || true
+  echo "WARNING: commit via git vc failed; leaving changes uncommitted." >&2
+  return 1
 }
 
 # --- bug reporting ----------------------------------------------------------
@@ -1495,10 +1507,12 @@ drive() {
     # may commit. It keeps polling the PR instead of crashing over files it was
     # never asked to commit.
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
-      # After committing our own fix, wait for CI to re-run instead of
-      # immediately trying to implement (which would fail if nothing changed).
-      continue
+      if commit_changes; then
+        # After committing our own fix, wait for CI to re-run instead of
+        # immediately trying to implement (which would fail if nothing changed).
+        continue
+      fi
+      echo "WARNING: leftover commit failed; continuing without it." >&2
     fi
 
     # The PR is a draft exactly while the per-issue TODO.md is present: the
@@ -1525,8 +1539,11 @@ drive() {
       # committed: a failed round can leave a dirty tree without a .commit-msg,
       # and the driver must not crash on it (it never invents a message).
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
-        produced_change="true"
+        if commit_changes; then
+          produced_change="true"
+        else
+          echo "WARNING: commit failed while opening the PR; leaving changes uncommitted." >&2
+        fi
       fi
       if [[ "${produced_change}" != "true" ]]; then
         echo "No changes could be produced to open the PR; backing off before retrying." >&2
@@ -1562,8 +1579,11 @@ drive() {
       # Same rule as the other rounds: only a dirty tree WITH a .commit-msg is
       # committed; a failed round never crashes the driver.
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
-        todo_change="true"
+        if commit_changes; then
+          todo_change="true"
+        else
+          echo "WARNING: commit failed while finishing the issue; leaving changes uncommitted." >&2
+        fi
       fi
       if [[ "${todo_change}" != "true" ]]; then
         echo "No model produced a change to finish the issue; backing off before retrying." >&2
@@ -1640,7 +1660,7 @@ ${summary}"
       # there is nothing the driver may commit, and refusing must not abort the
       # run.
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
+        commit_changes || echo "WARNING: commit failed while addressing feedback; leaving changes uncommitted." >&2
       fi
       rm -f .commit-msg
       # Verify the non-reviewer constraints again before handing the PR back:
@@ -1698,8 +1718,11 @@ ${summary}"
       # Same rule as the feedback round: a dirty tree without a .commit-msg is
       # no commit, never a crash; back off and re-check instead.
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-        commit_changes
-        produced_change="true"
+        if commit_changes; then
+          produced_change="true"
+        else
+          echo "WARNING: commit failed while fixing constraints; leaving changes uncommitted." >&2
+        fi
       fi
       if [[ "${produced_change}" != "true" ]]; then
         echo "No model completed work for the failing constraints; backing off before re-checking." >&2
@@ -1773,7 +1796,7 @@ start_issue() {
     fi
     rm -f .branch-name
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
+      commit_changes || echo "WARNING: commit failed while opening the PR; leaving changes uncommitted." >&2
     fi
     if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
       echo "No PR could be created; backing off before retrying." >&2
@@ -1791,7 +1814,7 @@ start_issue() {
     echo "Branch ${branch} already has commits; skipping implement and opening the PR." >&2
   elif workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
     echo "Working tree has uncommitted changes; committing them as the implementation." >&2
-    commit_changes
+    commit_changes || echo "WARNING: commit failed; leaving changes uncommitted." >&2
   else
     if ! implement "${title}" "${body}" "" "${default_branch}"; then
       echo "ERROR: could not implement issue #${num} with any available model." >&2
@@ -1801,7 +1824,7 @@ start_issue() {
     # stable instead of renaming it mid-flight: the PR number must not change.
     rm -f .branch-name
     if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
-      commit_changes
+      commit_changes || echo "WARNING: commit failed; leaving changes uncommitted." >&2
     fi
   fi
 
