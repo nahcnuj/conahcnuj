@@ -93,7 +93,7 @@ run_e2e_model() {
 }
 
 MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
-if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
 # Skip models the repository has recorded as permanently unavailable
 # (gh-app/missing-models, the same committed list the driver reads). Trying a
 # dead model wastes a parallel slot and its timeout dominates the round (#209).
@@ -106,7 +106,7 @@ if [ -f "${E2E_MISSING_MODELS}" ]; then
     printf '%s\n' "${E2E_SKIP_MODELS}" > "${E2E_SKIP_FILE}"
     MODELS="$(printf '%s\n' "${MODELS}" | grep -vxF -f "${E2E_SKIP_FILE}" || true)"
     rm -f "${E2E_SKIP_FILE}"
-    if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+    if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
   fi
 fi
 echo "Available models:"
