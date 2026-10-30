@@ -95,47 +95,7 @@ async function loadPlugin() {
 }
 
 async function freshHooks() {
-  const plugin = (await loadPlugin()).default
-  const state = { shellHooks: {}, toolHooks: {}, sessionHooks: {} }
-  const register = (bucket) => async (name, cb) => { bucket[name] = cb }
-  const ctx = {
-    location: { directory: process.cwd(), project: { id: "p" } },
-    options: {},
-    shell: { hook: register(state.shellHooks) },
-    tool: { hook: register(state.toolHooks), transform: async () => {} },
-    session: { hook: register(state.sessionHooks) },
-    agent: {}, aisdk: {}, command: {}, credential: {}, event: {}, experimental: {}, integration: {}, mcp: {}, model: {}, permission: {}, plugin: {}, provider: {}, reference: {}, rpc: {}, skill: {}, storage: {}, vcs: {}, websearch: {}, worktree: {},
-  }
-  await plugin.setup(ctx)
-  const sessionContext = async (sessionID, model) => {
-    const event = { sessionID: sessionID || "s", model: model || {}, system: [], messages: [], options: {}, agent: "a", tools: {} }
-    if (state.sessionHooks.context) await state.sessionHooks.context(event)
-    return event
-  }
-  return {
-    state,
-    plugin,
-    "shell.env": async (input, output) => {
-      const event = { command: "", cwd: (input && input.cwd) || ".", timeout: 0, shell: "", env: output.env }
-      if (state.shellHooks["create.before"]) await state.shellHooks["create.before"](event)
-    },
-    "tool.execute.before": async (input, output) => {
-      const event = { tool: input.tool, sessionID: (input && input.sessionID) || "s", agent: "a", messageID: "m", id: "c", input: output.args }
-      if (state.toolHooks["execute.before"]) await state.toolHooks["execute.before"](event)
-    },
-    "experimental.chat.system.transform": async (input, output) => {
-      const event = { sessionID: (input && input.sessionID) || "s", model: (input && input.model) || {}, system: output.system, messages: [], options: {}, agent: "a", tools: {} }
-      if (state.sessionHooks.context) await state.sessionHooks.context(event)
-    },
-    "chat.message": async (input) => {
-      const model = input.model ? { providerID: input.model.providerID, id: input.model.modelID, variant: input.variant } : {}
-      await sessionContext(input.sessionID, model)
-    },
-    "chat.params": async (input) => {
-      const model = input.model ? { providerID: input.model.providerID, id: input.model.id } : {}
-      await sessionContext(input.sessionID, model)
-    },
-  }
+  return (await loadPlugin()).GhAppTokenPlugin({})
 }
 
 // --- test registry ----------------------------------------------------------
@@ -230,16 +190,18 @@ test("module: exports the plugin factory and nothing else", async () => {
   const mod = await loadPlugin()
   // opencode's loader treats every export as a plugin, so a second export
   // would be loaded as a second plugin.
-  assert.deepStrictEqual(Object.keys(mod), ["default"])
+  assert.deepStrictEqual(Object.keys(mod), ["GhAppTokenPlugin"])
 })
 
 test("plugin: exposes exactly the hooks opencode and the driver rely on", async () => {
   const plugin = await freshHooks()
-  assert.strictEqual(plugin.plugin.id, "gh-app-token")
-  assert.strictEqual(typeof plugin.plugin.setup, "function")
-  assert.deepStrictEqual(Object.keys(plugin.state.shellHooks), ["create.before"])
-  assert.deepStrictEqual(Object.keys(plugin.state.toolHooks), ["execute.before"])
-  assert.deepStrictEqual(Object.keys(plugin.state.sessionHooks), ["context"])
+  assert.deepStrictEqual(Object.keys(plugin).sort(), [
+    "chat.message",
+    "chat.params",
+    "experimental.chat.system.transform",
+    "shell.env",
+    "tool.execute.before",
+  ])
 })
 
 // --- git commit redirects ---------------------------------------------------
@@ -840,7 +802,7 @@ test("system prompt: the git vc, GitHub-auth and shell rules are appended once a
   // (commit, GitHub-auth, shell-portability).
   assert.strictEqual(output.system.length, 4)
   assert.strictEqual(output.system[0], "existing rule")
-  const rules = output.system[1].text
+  const rules = output.system[1]
   assert.ok(!/[\r\n]/.test(rules), "commit rules must be a single line")
   assert.ok(rules.includes("`git vc`"), rules)
   assert.ok(rules.includes("`git commit`"), rules)
@@ -861,7 +823,7 @@ test("system prompt: the git vc, GitHub-auth and shell rules are appended once a
   // The GitHub-auth rule exists for issue #210: the agent re-issued a token
   // (`export GH_TOKEN=$(bash gh-app/get-token.sh)`) because nothing told it the
   // plugin already injects GH_TOKEN.
-  const githubRules = output.system[2].text
+  const githubRules = output.system[2]
   assert.ok(!/[\r\n]/.test(githubRules), "GitHub-auth rules must be a single line")
   assert.ok(githubRules.includes("`GH_TOKEN`"), githubRules)
   assert.ok(githubRules.includes("run `gh ...`"), githubRules)
@@ -869,7 +831,7 @@ test("system prompt: the git vc, GitHub-auth and shell rules are appended once a
   assert.ok(githubRules.includes("do not run `gh-app/get-token.sh`"), githubRules)
   // The shell rule states the actual environment instead of guessing; the
   // model stops retrying commands that do not exist on this platform.
-  const shellRules = output.system[3].text
+  const shellRules = output.system[3]
   assert.ok(!/[\r\n]/.test(shellRules), "shell rules must be a single line")
   assert.ok(shellRules.includes(process.platform), shellRules)
   // The "fallback to PowerShell" guidance must be platform-gated (issue #702):

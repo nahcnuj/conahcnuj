@@ -564,8 +564,10 @@ function rememberModel(
 }
 
 function labelForSession(sessionID: string | undefined): string {
-  const id = sessionID || latestSessionID
-  const seen = id ? seenModels.get(id) : undefined
+  let seen = sessionID ? seenModels.get(sessionID) : undefined
+  if (!seen) {
+    seen = latestSessionID ? seenModels.get(latestSessionID) : undefined
+  }
   if (!seen) {
     return ""
   }
@@ -606,73 +608,62 @@ function redirectToVerifiedCommit(
   }
 }
 
-const plugin: Plugin.Plugin = {
-  id: "gh-app-token",
-  async setup(ctx) {
-    const botUserId = await resolveBotUserId(config.APP_SLUG)
-    const botName = `${config.APP_SLUG}[bot]`
-    const botEmail = `${botUserId}+${config.APP_SLUG}[bot]@users.noreply.github.com`
-    const ghAppDir = GH_APP_DIR.replace(/\\/g, "/")
-    const apiCommitSh = `${ghAppDir}/api-commit.sh`
-    const bashExe = config.BASH_EXE.replace(/\\/g, "/")
-    // `git vc` (verified-commit): commit staged changes, or `-a` for tracked.
-    // owner/repo/branch are auto-detected, so it works in any repo.
-    const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
+export const GhAppTokenPlugin: any = async (input: any, options?: any) => {
+  const botUserId = await resolveBotUserId(config.APP_SLUG)
+  const botName = `${config.APP_SLUG}[bot]`
+  const botEmail = `${botUserId}+${config.APP_SLUG}[bot]@users.noreply.github.com`
+  const ghAppDir = GH_APP_DIR.replace(/\\/g, "/")
+  const apiCommitSh = `${ghAppDir}/api-commit.sh`
+  const bashExe = config.BASH_EXE.replace(/\\/g, "/")
+  // `git vc` (verified-commit): commit staged changes, or `-a` for tracked.
+  // owner/repo/branch are auto-detected, so it works in any repo.
+  const vcCmd = `!"${bashExe}" "${apiCommitSh}"`
 
-    await ctx.shell.hook("create.before", async (event) => {
-      const env = event.env as Record<string, string>
+  return {
+    "chat.message": async (input: any) => {
+      const model = input?.model
+      if (model && !matchesSessionModel(model.providerID, model.modelID)) {
+        return
+      }
+      rememberModel(input.sessionID, {
+        ...(model ? { provider: model.providerID, model: model.modelID } : {}),
+        effort: input?.variant,
+      })
+    },
+    "chat.params": async (input: any) => {
+      const model = input?.model
+      if (!model || !matchesSessionModel(model.providerID, model.id)) {
+        return
+      }
+      rememberModel(input.sessionID, {
+        provider: model.providerID,
+        model: model.id,
+      })
+    },
+    "shell.env": async (input: any, output: any) => {
+      const env = output.env as Record<string, string>
       await injectShellEnv(env, { botName, botEmail, vcCmd })
       // An explicit value (the user, or a caller that already chose one) wins.
       if (!env.CONAHCNUJ_COMMIT_MODEL) {
-        const label = labelForSession(undefined)
+        const label = labelForSession(input?.sessionID)
         if (label) {
           env.CONAHCNUJ_COMMIT_MODEL = label
         }
       }
-    })
-
-    await ctx.tool.hook("execute.before", async (event) => {
-      redirectToVerifiedCommit(event.tool, event.input, botName)
-    })
-
+    },
     // Rules up front, so a model in any repository commits with `git vc`
-    // without having to trip the hook above first, and reaches for `gh`
-    // directly without re-issuing `GH_TOKEN` by hand. V2 exposes the model on
-    // the same context event, so the commit trailer label is recorded here too.
-    await ctx.session.hook("context", async (event) => {
+    // without having to trip the hook below first, and reaches for `gh`
+    // directly without re-issuing `GH_TOKEN` by hand.
+    "experimental.chat.system.transform": async (_input: any, output: any) => {
       for (const rules of [COMMIT_RULES, GITHUB_RULES, SHELL_RULES]) {
-        const already = event.system.some(
-          (part: { text?: string }) => part?.text === rules
-        )
-        if (!already) {
-          event.system.push({ type: "text", text: rules })
+        if (!output.system.includes(rules)) {
+          output.system.push(rules)
         }
       }
-      const model = event.model as { providerID?: unknown; id?: unknown; variant?: unknown }
-      const providerID = model?.providerID != null ? String(model.providerID) : ""
-      const modelID = model?.id != null ? String(model.id) : ""
-      const variant = model?.variant != null ? String(model.variant) : ""
-      if (providerID || modelID) {
-        if (matchesSessionModel(providerID, modelID)) {
-          // An absent effort leaves the one already recorded alone.
-          const patch: { provider: string; model: string; effort?: string } = {
-            provider: providerID,
-            model: modelID,
-          }
-          if (variant) {
-            patch.effort = variant
-          }
-          rememberModel(String(event.sessionID ?? ""), patch)
-        }
-      }
-      // Shell creation reads the latest remembered model; rememberModel has
-      // already updated latestSessionID.
-    })
-
-    return () => {
-      // no resources
-    }
-  },
+    },
+    "tool.execute.before": async (input: any, output: any) => {
+      redirectToVerifiedCommit(input.tool, output.args, botName)
+    },
+  }
 }
 
-export default plugin
