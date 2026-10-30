@@ -39,7 +39,7 @@ run_e2e_model() {
   OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
     OPENCODE_DISABLE_AUTOUPDATE=true \
     OPENCODE_DISABLE_MODELS_FETCH=true \
-    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --standalone --auto --format json --model "${model}" --title e2e \
+    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --title e2e \
     "Commit the staged changes with message e2e test. Execute the necessary commands." \
     > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" &
   opid=$!

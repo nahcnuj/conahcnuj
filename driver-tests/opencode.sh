@@ -144,7 +144,7 @@ test_opencode_run() {
   tmp="$(mktemp -d)"
   local out
   out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.6-flash-free" "more ctx")"
-  [[ "${out}" == *"opencode run --standalone --auto --format json --model opencode/mimo-v2.6-flash-free"* ]]
+  [[ "${out}" == *"opencode run --auto --format json --model opencode/mimo-v2.6-flash-free"* ]]
   [[ "${out}" == *"(cd ${tmp} &&"* ]]
   [[ "${out}" == *"Test Issue"* ]]
   [[ "${out}" == *"more ctx"* ]]
@@ -216,7 +216,6 @@ EOF
   # the model show its reasoning, --log-level warn drops the INFO boot chatter.
   # V2 only accepts lowercase log levels, so DEBUG is normalized.
   [[ "${args}" == *"--thinking"* ]]
-  [[ "${args}" == *"--standalone"* ]]
   [[ "${args}" == *"--log-level warn"* ]]
   CONAHCNUJ_OPENCODE_LOG_LEVEL=DEBUG opencode_run "Issue" "Body" "${tmp}" "opencode/third" >/dev/null || rc=$?
   args="$(cat "${OPENCODE_ARGS_FILE}")"

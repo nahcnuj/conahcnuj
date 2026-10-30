@@ -54,7 +54,7 @@ jobs:
           MODEL="$(opencode models 2>/dev/null | head -1 || true)"
           if [ -z "$MODEL" ]; then MODEL="opencode/mimo-v2.6-flash-free"; fi
           echo "Using model: $MODEL"
-          (cd "$GITHUB_WORKSPACE" && opencode run --standalone --format json --model "$MODEL" \
+          (cd "$GITHUB_WORKSPACE" && opencode run --format json --model "$MODEL" \
             "Run the command \`gh auth status\` and report whether it succeeded.") \
             > "$out" 2> "$err" || true
           echo "=== stdout ==="

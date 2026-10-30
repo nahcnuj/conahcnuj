@@ -294,9 +294,9 @@ opencode_run() {
       mock_model="${model}#${_mv}"
     fi
     if [[ -n "${session_id}" ]]; then
-      printf '(cd %s && opencode run --standalone --auto --format json --model %s --session %s %s)\n' "${workdir}" "${mock_model}" "${session_id}" "${prompt}"
+      printf '(cd %s && opencode run --auto --format json --model %s --session %s %s)\n' "${workdir}" "${mock_model}" "${session_id}" "${prompt}"
     else
-      printf '(cd %s && opencode run --standalone --auto --format json --model %s --title conahcnuj %s)\n' "${workdir}" "${mock_model}" "${prompt}"
+      printf '(cd %s && opencode run --auto --format json --model %s --title conahcnuj %s)\n' "${workdir}" "${mock_model}" "${prompt}"
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
@@ -460,7 +460,7 @@ opencode_run() {
   if [[ -n "${_effort_variant}" ]]; then
     model_arg="${model}#${_effort_variant}"
   fi
-  args=(run --standalone --auto --print-logs --thinking --format json --model "${model_arg}")
+  args=(run --auto --print-logs --thinking --format json --model "${model_arg}")
   # --print-logs defaults to INFO, which is ~30 lines of boot/permission
   # chatter per model and buries the rendered log. warn keeps the diagnostics
   # that matter without the noise; override to debug when hunting a problem.
