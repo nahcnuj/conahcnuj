@@ -38,8 +38,11 @@ Windows のみです。配置せずに `bash bin/conahcnuj.sh` / `bash gh-app/*.
    ```sh
    git clone <repo>.git
    cd <repo>
-   powershell -ExecutionPolicy Bypass -File install.ps1
+   pwsh -ExecutionPolicy Bypass -File install.ps1
    ```
+
+   PowerShell 7 (`pwsh`) が無い Windows では `powershell` に読み替える
+   （Linux / macOS には `powershell` コマンドは無いので `pwsh` を使う）。
 
 2. `~/.config/opencode/gh-app/app.env` に `APP_ID` / `INSTALLATION_ID` /
    `PRIVATE_KEY_PATH` / `APP_SLUG` / `BASH_EXE` を設定する。

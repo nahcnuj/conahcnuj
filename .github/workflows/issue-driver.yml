@@ -51,11 +51,6 @@ on:
         description: Issue or pull request number to continue
         required: true
         type: number
-      effort:
-        description: 'Effort variant to use (e.g. "max"); empty uses the model default'
-        required: false
-        type: string
-        default: ""
   # Another repository drives one of its issues or pull requests by calling
   # this workflow. The job `if` below runs whenever `inputs.number` is set, and
   # the driver checkout follows this file (`job.workflow_repository` at

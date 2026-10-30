@@ -11,7 +11,7 @@ GitHub App「conahcnuj」のインストールトークンを発行し、`gh` CL
 - 設定値（APP_ID / BOT_USER_ID / INSTALLATION_ID / APP_SLUG / PRIVATE_KEY_PATH / BASH_EXE）は**ハードコードしない**。必ず `gh-app/app.env`（または `app.env.example`）から読み取る。`BOT_USER_ID` は bot アカウント（`<slug>[bot]`）のユーザー ID。
 - 秘密鍵（`.pem`）をリポジトリへコミットしない。`app.env` は `.gitignore` 済み。
 - 変数展開はシェルスクリプト内で常にブレース付き `${var}` を使う。`$var` は使わない。
-- Windows で `bash` の素コマンドは WSL（`C:\Windows\System32\bash.exe`）に解決されることがある。スクリプト・プラグインで bash を起動するときは必ず `BASH_EXE`（`C:/Program Files/Git/bin/bash.exe`）を使う。
+- Windows で `bash` の素コマンドは WSL（`C:\Windows\System32\bash.exe`）に解決されることがある。スクリプト・プラグインで bash を起動するときは必ず `BASH_EXE`（`C:/Program Files/Git/bin/bash.exe`）を使う。Windows 環境では PowerShell を使うこと（bash の素コマンドを直接呼ばない）。
 - 作業後に opencode を再起動しないとプラグイン変更は反映されない（プラグインは起動時ロード）。
 - ドライバの整形ログ（`lib/opencode-render.sh`）は truncate しない。行数・桁数で省略せず、モデルが書いた行もコマンドが出力した行も全文が出る（`CONAHCNUJ_RENDER_MAX_LINES` / `CONAHCNUJ_RENDER_MAX_COLS` に相当する省略は行わない。両変数は廃止済み）。このログは run の唯一の記録で、異常終了時はその一部がバグ報告に載るため、省略は「モデルがそう言わなかったこと」と区別できない穴になる。
 - コーディングエージェントへのプロンプトに指示を積み増さない。`opencode_agent_contract` が伝えるのは「この issue／PR を owner の Approve まで導く・エージェントの担当は作業ツリーの変更と `git vc` でのコミット、ブランチ・push・PR・レビュー依頼はドライバ」だけにする（禁止コマンドの一覧や「これは成果物ではない」「やっても no work」といった注意は書かない）。実際に禁止と注意を並べた長い contract を入れたとき、エージェントがそれを任務と誤解してコミットメッセージだけ出して終わるので、_owner のレビューで「エージェントの仕事を邪魔している」と弾かれる_（`driver-tests/opencode.sh` がプロンプトに禁止コマンド列と「counts as no work」が現れないことを検証する）。決定論的に収集できる情報（issue／PR の本文・未解決レビュースレッド・`README.md` / `AGENTS.md` 等）は指示ではなく**材料**なので、契約とは別に `Collected context:` というデータのブロックとして同梱する。例外はレビュースレッドへの返信で、これだけはエージェント自身が行う（ドライバは投稿しない）。契約には足さず、フィードバック対応ラウンドの追加コンテキストで「修正を `git vc` でコミットした後、各スレッドへ返信する」と comment id・返信エンドポイントを添える。
@@ -121,7 +121,7 @@ bash gh-app/api-commit.sh -m "message" -a --dry-run   # owner/repo/branch 自動
 
 - `install.ps1` や `plugins/` を変更したら、実機のグローバル設定（`~/.config/opencode/`）にも反映が必要：
   ```powershell
-  powershell -ExecutionPolicy Bypass -File install.ps1
+  pwsh -ExecutionPolicy Bypass -File install.ps1
   ```
   その後 opencode を再起動。CI（`install-test` / `lint-ps`）にも同じ検証がある。
   `bin/`・`lib/` を変更したら `conahcnuj` 本体（既定 `~/.local/bin/conahcnuj`）と

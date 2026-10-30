@@ -384,12 +384,33 @@ const LINE_CONTINUATION_AVAILABLE =
   process.platform === "win32"
     ? "PowerShell uses a backtick (`) for line continuation, not a backslash (\\)"
     : "a backslash (\\) continues a command onto the next line"
+// On Windows PowerShell 5.1 `&&` is not a valid statement separator, so a
+// command chained with `&&` fails with "The token '&&' is not a valid
+// statement separator in this version.". Chain with `;` (or run the
+// commands separately) instead. Issue #1516.
+const STATEMENT_SEPARATOR_AVAILABLE =
+  process.platform === "win32"
+    ? "on this PowerShell `&&` is NOT a valid statement separator and fails with \"The token '&&' is not a valid statement separator in this version.\"; chain commands with `;` or run them separately instead of `&&`"
+    : "`&&` is a valid statement separator here and may be used to chain commands"
+const POWERSHELL_USE =
+  process.platform === "win32"
+    ? "On Windows, use PowerShell (the shell this session runs in) for shell commands: prefer PowerShell cmdlets and built-ins, check availability with Get-Command before relying on a command, and quote paths that contain spaces."
+    : "On this platform, use the shell's own commands or node/python; check availability with command -v before relying on a command."
+const SHELL_EQUIVALENTS =
+  process.platform === "win32"
+    ? "use PowerShell equivalents or node"
+    : "use the shell's own commands or node/python"
+const NODE_AVAILABLE =
+  "Node and npm are on PATH (the plugin adds the directory of the node binary opencode runs on), so use `node`/`npm` directly instead of searching the filesystem for them."
 const SHELL_RULES = [
   `Shell environment: this session runs on ${SHELL_PLATFORM} (${process.platform}) in ${SHELL_NAME}; ${HEAD_TAIL_GREP_AVAILABLE}.`,
   `Null device: ${NULL_DEVICE_AVAILABLE}.`,
   `Line continuation: ${LINE_CONTINUATION_AVAILABLE}.`,
+  `Statement separator: ${STATEMENT_SEPARATOR_AVAILABLE}.`,
   "First determine the OS and shell you are actually running in before relying on any command, and re-check availability if they differ from the above.",
-  "Read files with the read tool and search with the grep/glob tools instead; if a shell command is unavoidable, use PowerShell equivalents or node/python.",
+  `Read files with the read tool and search with the grep/glob tools instead; if a shell command is unavoidable, ${SHELL_EQUIVALENTS}.`,
+  POWERSHELL_USE,
+  NODE_AVAILABLE,
 ].join(" ")
 
 import {
@@ -453,6 +474,22 @@ async function injectShellEnv(
     const present = current.split(path.delimiter).some((e) => norm(e) === norm(usrBin))
     if (!present) {
       const next = current ? `${usrBin}${path.delimiter}${current}` : usrBin
+      env.PATH = next
+    }
+  }
+
+  // Node (and npm, which ships beside it) may not be on PATH in the agent's
+  // shell even though opencode itself runs on it (e.g. when node is managed
+  // by fnm/nvm and only activated for opencode's own process). Inject the
+  // directory of the node binary opencode is running on so the agent can use
+  // `node`/`npm` without searching the filesystem. No-op when absent.
+  const nodeDir = path.dirname(process.execPath)
+  if (nodeDir && fs.existsSync(nodeDir)) {
+    const current = env.PATH || env.Path || process.env.PATH || ""
+    const norm = (v: string) => v.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+    const present = current.split(path.delimiter).some((e) => norm(e) === norm(nodeDir))
+    if (!present) {
+      const next = current ? `${nodeDir}${path.delimiter}${current}` : nodeDir
       env.PATH = next
     }
   }

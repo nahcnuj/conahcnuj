@@ -884,6 +884,12 @@ render_block_tool() {
   label="${F[title]}"
   [[ -n "${label}" ]] || label="${F[command]}"
   [[ -n "${label}" ]] || label="${tool}"
+  # A command never recaps its own name in the verdict line: the group header
+  # (or the `$ <command>` caption outside GitHub Actions) already carries it,
+  # and the result is shown on the next header line (🟢/🔴).
+  if [[ "${is_cmd}" == "true" ]]; then
+    label=""
+  fi
   [[ "${fed}" == "true" ]] && print_newline
   # Close the collapsible group BEFORE the verdict line so the result (✅/❌️)
   # stays visible even when GitHub Actions collapses the command's group; the
@@ -893,17 +899,19 @@ render_block_tool() {
       echo '::endgroup::'
       GROUP_DEPTH=$((GROUP_DEPTH - 1))
     fi
+    # On GitHub Actions the group header already carries the command name, so
+    # never recap it in the verdict line after ::endgroup:: (success stays
+    # silent, failure keeps only the result sign/exit code).
+    label=""
   fi
   if [[ "${timed_out}" == "true" ]]; then
-    printf '❌️ %s (timed out)\n' "${label}"
+    printf '❌️ (timed out)\n'
   elif [[ "${status}" == "error" ]] || { [[ -n "${code}" ]] && [[ "${code}" != "0" ]]; }; then
     if [[ -n "${code}" ]]; then
-      printf '❌️ %s (exit %s)\n' "${label}" "${code}"
+      printf '❌️ (exit %s)\n' "${code}"
     else
-      printf '❌️ %s\n' "${label}"
+      printf '❌️\n'
     fi
-  else
-    printf '✅ %s\n' "${label}"
   fi
   # Remember this command's exit code so the next header (the model name) can
   # show whether the previous command succeeded (🟢) or failed (🔴).

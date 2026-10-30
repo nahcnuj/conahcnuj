@@ -2,9 +2,9 @@
 # opencode user-level config directory.
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File install.ps1                # -> $HOME/.config/opencode
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -Destination C:\path\to\dir
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -InstallPath C:\path\to\bin
+#   pwsh -ExecutionPolicy Bypass -File install.ps1                # -> $HOME/.config/opencode
+#   pwsh -ExecutionPolicy Bypass -File install.ps1 -Destination C:\path\to\dir
+#   pwsh -ExecutionPolicy Bypass -File install.ps1 -InstallPath C:\path\to\bin
 #
 # Deploys two gh-app trees:
 #   - <Destination>/gh-app/...          used by the opencode plugin (resolves
@@ -188,6 +188,66 @@ function Install-GlobalAgentsMd {
     Write-Host "  merged conahcnuj rules into AGENTS.md (personal rules kept)"
 }
 
+# Make OpenCode use a shell that accepts `&&` as a statement separator.
+# On Windows the default (PowerShell 5.1) rejects `&&` outright
+# ("The token '&&' is not a valid statement separator in this version.").
+# PowerShell 7+ (pwsh) accepts `&&` and matches the shell-portability rules
+# the plugin injects. Only override a missing or a known-broken
+# (powershell 5.1) value so a deliberate user choice survives.
+function Set-OpencodeShell {
+    param([string]$ConfigDir)
+    if ($env:OS -match "Windows") {
+        $shell = "cmd"
+        if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+            $shell = "pwsh"
+        }
+    } else {
+        $shell = "bash"
+    }
+    $candidates = @("opencode.jsonc", "opencode.json")
+    $path = $null
+    foreach ($name in $candidates) {
+        $p = Join-Path $ConfigDir $name
+        if (Test-Path -LiteralPath $p) { $path = $p; break }
+    }
+    if (-not $path) {
+        $path = Join-Path $ConfigDir "opencode.jsonc"
+    }
+    $content = ""
+    if (Test-Path -LiteralPath $path) {
+        $content = Get-NormalizedText $path
+    }
+    $trimmed = $content.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        $trimmed = "{}"
+    }
+    $existingShell = $null
+    if ($trimmed -match '"shell"\s*:\s*"([^"]*)"') {
+        $existingShell = $Matches[1]
+    }
+    if ($existingShell -ne $null -and $existingShell -ne "powershell") {
+        Write-Host "  opencode shell already '$existingShell' (left unchanged)"
+        return
+    }
+    if ($trimmed -match '"shell"\s*:') {
+        $updated = $trimmed -replace '"shell"\s*:\s*"[^"]*"', "`"shell`": `"$shell`""
+    } else {
+        $idx = $trimmed.LastIndexOf("}")
+        if ($idx -lt 0) {
+            $updated = "{`n  `"shell`": `"$shell`"`n}"
+        } else {
+            $before = $trimmed.Substring(0, $idx).TrimEnd()
+            if ($before.EndsWith(",") -or $before.EndsWith("{")) {
+                $updated = $before + "`n  `"shell`": `"$shell`"`n" + $trimmed.Substring($idx)
+            } else {
+                $updated = $before + ",`n  `"shell`": `"$shell`"`n" + $trimmed.Substring($idx)
+            }
+        }
+    }
+    Write-NormalizedText $path $updated
+    Write-Host "  set opencode shell to $shell in $(Split-Path $path -Leaf) (avoids the '&&' statement-separator error)"
+}
+
 # 1. gh-app for the opencode plugin (config destination).
 Write-Host "Deploying gh-app to $DstGhAppConfig"
 Deploy-GhApp $DstGhAppConfig
@@ -211,6 +271,9 @@ if (Test-Path -LiteralPath $LegacyHelper) {
 
 # 3. global opencode rules (opencode/AGENTS.md -> <Destination>/AGENTS.md)
 Install-GlobalAgentsMd $Destination
+
+# 3b. opencode default shell (so `&&` works on Windows).
+Set-OpencodeShell $Destination
 
 # 4. driver runtime beside the binary (gh-app + lib).
 Write-Host "Deploying gh-app to $DstGhAppBin"

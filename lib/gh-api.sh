@@ -715,11 +715,30 @@ gh_api_create_pr() {
   gh_api_json_num "${json}" "number"
 }
 
-# Mark a draft PR ready for review, the undo of creating it as a draft. REST:
-# POST /repos/{owner}/{repo}/pulls/{number}/ready_for_review. Args: owner repo pr
+# Mark a draft PR ready for review, the undo of creating it as a draft. The REST
+# endpoint (POST /repos/{owner}/{repo}/pulls/{number}/ready_for_review) returns
+# 404 for installation (GitHub App) tokens, so this goes through the
+# markPullRequestReadyForReview GraphQL mutation, which needs the PR node id
+# (resolved with one extra query). Args: owner repo pr
 gh_api_ready_pr() {
-  local owner="${1}" repo="${2}" number="${3}"
-  gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/ready_for_review" >/dev/null
+  local owner="${1}" repo="${2}" number="${3}" id_json pr_id query
+  local id_query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { id } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    id_json="$(gh_api_read_line)"
+  else
+    id_json="$(gh_api_graphql "${id_query}")"
+  fi
+  pr_id="$(gh_api_json_str "${id_json}" "id")"
+  if [[ -z "${pr_id}" ]]; then
+    echo "ERROR: could not resolve the node id of PR #${number} to mark it ready for review." >&2
+    return 1
+  fi
+  query="mutation { markPullRequestReadyForReview(input: {pullRequestId: \"${pr_id}\"}) { pullRequest { isDraft } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    gh_api_read_line >/dev/null
+  else
+    gh_api_graphql "${query}" >/dev/null
+  fi
 }
 
 # Convert a PR back to draft. There is no REST endpoint for this, so it goes
