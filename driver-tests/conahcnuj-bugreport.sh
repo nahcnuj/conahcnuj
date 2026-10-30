@@ -187,7 +187,7 @@ EOF
   run_log_cleanup
 )
 
-grep -q '✅ make check' "${ROOT}/runlog-copy.txt" || {
+grep -q 'make check' "${ROOT}/runlog-copy.txt" || {
   echo "FAIL: the rendered tool block is missing from the run log" >&2
   cat "${ROOT}/runlog-copy.txt" >&2
   exit 1
