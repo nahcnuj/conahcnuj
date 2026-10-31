@@ -132,7 +132,7 @@ cat > "${CHILD}" <<'EOF'
 #!/usr/bin/env bash
 trap 'printf "term\n" >> "${DRIVER_RELAUNCH_MARKER}"; exit 143' TERM
 printf 'ready\n' > "${DRIVER_RELAUNCH_READY}"
-sleep 30
+sleep 5
 EOF
 chmod +x "${CHILD}"
 WSLPATH_M_OUT="${CHILD}"

@@ -311,7 +311,7 @@ test_opencode_run_timeout() {
   mkdir -p "${tmp}/bin"
   cat > "${tmp}/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
-sleep 5
+sleep 2
 EOF
   chmod +x "${tmp}/bin/opencode"
   PATH="${tmp}/bin:${PATH}"
