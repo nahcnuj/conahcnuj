@@ -119,7 +119,7 @@ chmod +x "${CHILD}"
 WSLPATH_M_OUT="${CHILD}"
 export DRIVER_RELAUNCH_MARKER="${ROOT}/normal.txt"
 RC=0
-( driver_relaunch alpha beta ) || RC=$?
+( trap - EXIT; driver_relaunch alpha beta ) || RC=$?
 [[ ${RC} -eq 7 ]] || { echo "FAIL: driver_relaunch exit ${RC} (expected the child's 7)" >&2; exit 1; }
 grep -q 'args:alpha beta' "${DRIVER_RELAUNCH_MARKER}" || { echo "FAIL: child arguments were not passed through" >&2; exit 1; }
 echo "driver_relaunch (child exit status + args) passed"
@@ -132,7 +132,11 @@ cat > "${CHILD}" <<'EOF'
 #!/usr/bin/env bash
 trap 'printf "term\n" >> "${DRIVER_RELAUNCH_MARKER}"; exit 143' TERM
 printf 'ready\n' > "${DRIVER_RELAUNCH_READY}"
-sleep 5
+# Sleep in the background and wait on it so a TERM delivered to this shell
+# is handled promptly (a foreground `sleep` would defer the trap until the
+# sleep finishes, hanging the caller for the full duration).
+sleep 2 &
+wait $!
 EOF
 chmod +x "${CHILD}"
 WSLPATH_M_OUT="${CHILD}"
@@ -141,7 +145,7 @@ export DRIVER_RELAUNCH_MARKER="${ROOT}/signal.txt"
 : > "${DRIVER_RELAUNCH_MARKER}"
 rm -f "${DRIVER_RELAUNCH_READY}"
 set -m
-( driver_relaunch ) &
+( trap - EXIT; driver_relaunch ) &
 DRV=$!
 set +m
 i=0
