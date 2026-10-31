@@ -113,6 +113,7 @@ PR_BODY_SYNCED_FILE="${PR_BODY_SYNCED_FILE:-$(mktemp)}"
 # assignment. log_review_handoff words its final line after it, so the run log
 # never claims a review request the run could not verify.
 REVIEW_HANDOFF_CONFIRMED="true"
+REVIEW_REQUEST_FORBIDDEN="false"
 
 # What collect_initial_context gathered for this run (unresolved review threads
 # of a resumed PR, the orientation files of the checkout). The issue / PR body
@@ -1431,12 +1432,22 @@ constraint_fix_context() {
 request_review_from_owner() {
   local owner="${1}" repo="${2}" pr="${3}" requested="" read_state="answered"
   REVIEW_HANDOFF_CONFIRMED="true"
+  REVIEW_REQUEST_FORBIDDEN="false"
   if request_review_with_retry "${owner}" "${repo}" "${pr}" "${owner}"; then
     echo "Assigned ${owner} as reviewer on PR #${pr}." >&2
     return 0
   fi
   if request_review_with_retry "${owner}" "${repo}" "${pr}"; then
     echo "Review requested on PR #${pr} (${owner} is not assignable; asked for review instead)." >&2
+    return 0
+  fi
+  # A review request the app is not permitted to make (HTTP 403,
+  # "Resource not accessible by integration") is not a lost hand-off: the app
+  # simply lacks the pull_requests:write permission. The PR is still complete
+  # and waits for a human, so warn and finish instead of filing a bug report.
+  if [[ "${REVIEW_REQUEST_FORBIDDEN}" == "true" ]]; then
+    REVIEW_HANDOFF_CONFIRMED="false"
+    echo "WARNING: no review request on PR #${pr} was accepted because the app is not permitted to request reviewers (HTTP 403); the PR is complete and waits for a human, so the run ends here instead of filing a bug report for an unverifiable hand-off." >&2
     return 0
   fi
   # Reading the PR back is the only remaining evidence. Its answer has to be
@@ -1464,10 +1475,27 @@ request_review_from_owner() {
 # gh_api_call's "-> <status>: <body>" reaches the run log: without it a failed
 # hand-off explains nothing in the bug report. Args: owner repo pr [reviewer]
 request_review_with_retry() {
-  local owner="${1}" repo="${2}" pr="${3}" reviewer="${4:-}" attempt
+  local owner="${1}" repo="${2}" pr="${3}" reviewer="${4:-}" attempt err_file
   for attempt in 1 2; do
-    if gh_api_request_review "${owner}" "${repo}" "${pr}" "${reviewer}" >/dev/null; then
-      return 0
+    err_file="$(mktemp 2>/dev/null || true)"
+    if [[ -n "${err_file}" && -f "${err_file}" ]]; then
+      if gh_api_request_review "${owner}" "${repo}" "${pr}" "${reviewer}" 2>"${err_file}" >/dev/null; then
+        cat "${err_file}" >&2 2>/dev/null || true
+        rm -f "${err_file}" 2>/dev/null || true
+        return 0
+      fi
+      cat "${err_file}" >&2 2>/dev/null || true
+      if grep -Eq '403|Resource not accessible|Forbidden' "${err_file}" 2>/dev/null; then
+        REVIEW_REQUEST_FORBIDDEN="true"
+      fi
+      rm -f "${err_file}" 2>/dev/null || true
+    else
+      if gh_api_request_review "${owner}" "${repo}" "${pr}" "${reviewer}" >/dev/null; then
+        return 0
+      fi
+    fi
+    if [[ "${GH_API_LAST_HTTP_CODE:-}" == "403" ]]; then
+      REVIEW_REQUEST_FORBIDDEN="true"
     fi
     if [[ "${attempt}" -eq 1 ]]; then
       echo "Review request on PR #${pr} reported a failure; retrying once." >&2
