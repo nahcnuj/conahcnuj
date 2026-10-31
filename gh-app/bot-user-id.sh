@@ -2,7 +2,9 @@
 # Print the bot account user ID (<slug>[bot]) for noreply email attribution.
 # Order: BOT_USER_ID from app.env when set to a real value, then the
 # persistent cache (bot IDs are immutable), then the public GitHub API
-# (no auth needed). Exits non-zero with guidance when none works.
+# (no auth needed, but an installation token is used when available to
+# avoid unauthenticated rate limits). Exits non-zero with guidance when none
+# works.
 # APP_ID is never a fallback: it is the App's own ID and never attributes
 # commits to the bot account.
 set -euo pipefail
@@ -28,7 +30,7 @@ if [[ -n "${ID}" && "${ID}" != "<"* ]]; then
 fi
 
 if [[ -f "${CACHE_FILE}" ]]; then
-  CACHED="$(tr -d '\n \t' < "${CACHE_FILE}")"
+  CACHED="$(tr -d '\n \t\r' < "${CACHE_FILE}")"
   if [[ "${CACHED}" =~ ^[0-9]+$ ]]; then
     printf '%s' "${CACHED}"
     exit 0
@@ -42,8 +44,34 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
-ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+# Prefer an installation token when one is obtainable: the unauthenticated
+# endpoint is subject to the shared 60/hour rate limit on api.github.com.
+TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+if [[ -z "${TOKEN}" ]]; then
+  TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+fi
+
+AUTH_ARGS=()
+if [[ -n "${TOKEN}" ]]; then
+  AUTH_ARGS=(-H "Authorization: Bearer ${TOKEN}")
+fi
+
+if [[ ${#AUTH_ARGS[@]} -gt 0 ]]; then
+  LOOKUP="$(curl -fsSL "${AUTH_ARGS[@]}" \
+    -H "Accept: application/vnd.github+json" \
+    "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+else
+  LOOKUP="$(curl -fsSL \
+    -H "Accept: application/vnd.github+json" \
+    "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+fi
+
+# REST answers pretty-printed, so read with optional whitespace (issue #136).
+ID="$(printf '%s' "${LOOKUP}" |
+  grep -oE '"id"[[:space:]]*:[[:space:]]*[0-9]+' |
+  head -n 1 |
+  grep -oE '[0-9]+$' || true)"
+
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
   echo "Set BOT_USER_ID to the bot account user ID" >&2
