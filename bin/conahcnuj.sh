@@ -323,6 +323,10 @@ time_budget_exhausted() {
 
 check_timeout() {
   if time_budget_exhausted; then
+    if [[ "${EVER_HANDED_OFF:-false}" == "true" ]]; then
+      echo "PR: the time budget is exhausted; the PR is complete and waits for a human." >&2
+      exit 0
+    fi
     echo "ERROR: time budget (${MAX_DURATION}s) exhausted while waiting. Exiting." >&2
     exit 1
   fi
@@ -1116,11 +1120,12 @@ persist_missing_model() {
 # base, so a message-only round there stays no work and still falls through to
 # the other models.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed opencode_rc
   local dead_providers="" quota_providers="" failed_rounds=0 env_failed_rounds=0 quota_failed_rounds=0 ran_without_failure=0
   local model_list known_skipped=""
   local base_branch="${4:-}"
   ENVIRONMENT_DOWN="0"
+  TIME_BUDGET_EXHAUSTED="0"
   workdir="$(pwd)"
   echo "Implementing with available models..." >&2
   OPENCODE_USED_MODELS=""
@@ -1162,8 +1167,13 @@ implement() {
       fi
       run_failed="false"
       head_before="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
-      if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
+      opencode_rc=0
+      CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}" || opencode_rc=$?
+      if [[ "${opencode_rc}" -ne 0 ]]; then
         run_failed="true"
+        if [[ "${opencode_rc}" -eq 124 ]]; then
+          TIME_BUDGET_EXHAUSTED="1"
+        fi
       fi
       OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
       head_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
@@ -1236,6 +1246,9 @@ implement() {
         fi
       fi
     done
+    if [[ "${TIME_BUDGET_EXHAUSTED:-0}" == "1" ]]; then
+      break
+    fi
   done
   echo "ERROR: no available model completed the work (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
   if [[ "${failed_rounds}" -gt 0 && "$((env_failed_rounds + quota_failed_rounds))" -eq "${failed_rounds}" ]]; then
@@ -1509,7 +1522,7 @@ log_review_handoff() {
 # review, then keeps polling for the verdict (addressing new feedback, waiting
 # otherwise) and exits once the PR is approved.
 drive() {
-  local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}" initial_draft="${9:-false}"
+  local owner="${1}" repo="${2}" pr="${3}" branch="${4}" base="${5}" title="${6}" body="${7}" closes="${8}" initial_draft="${9:-false}" initial_handed_off="${10:-false}"
   local last_sig=""
   # Whether the PR is currently a draft. The driver keeps it in sync with the
   # per-issue TODO.md: created as a draft while the file exists, marked ready
@@ -1522,6 +1535,13 @@ drive() {
   # asks again until new review feedback makes it work a fresh round: the job is
   # to take the PR to the owner's approval, not to stop at the request.
   local handed_off="false"
+  # A resumed PR that already carries a review (CHANGES_REQUESTED/COMMENTED/
+  # APPROVED) was handed off by an earlier run even though this process has not
+  # requested a review yet. Remember that so running out of time while working
+  # that feedback ends cleanly as "waiting for a human" instead of filing a
+  # bogus bug report (issue #749: the budget ran out mid-feedback and the run
+  # exited 1 even though the PR was already with the owner).
+  EVER_HANDED_OFF="${initial_handed_off}"
 
   while true; do
     # The budget expired. Once the PR is with the reviewer, that is simply a
@@ -1529,7 +1549,7 @@ drive() {
     # trigger starts the next run and the merge workflow chains off the
     # approval); before the hand-off it is a real failure worth a bug report.
     if time_budget_exhausted; then
-      if [[ "${handed_off}" == "true" ]]; then
+      if [[ "${handed_off}" == "true" || "${EVER_HANDED_OFF:-false}" == "true" ]]; then
         echo "PR #${pr}: the time budget is exhausted while waiting for the reviewer's decision; the PR is complete and waits for a human." >&2
         exit 0
       fi
@@ -1693,6 +1713,9 @@ ${summary}"
         commit_changes
       fi
       rm -f .commit-msg
+      if [[ "${TIME_BUDGET_EXHAUSTED:-0}" == "1" ]]; then
+        check_timeout
+      fi
       # Verify the non-reviewer constraints again before handing the PR back:
       # the fix restarted CI, so the reviewer is only asked once the checks are
       # green again (and the branch still merges), exactly as on the first
@@ -1703,6 +1726,7 @@ ${summary}"
       fi
       request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
       log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
+      EVER_HANDED_OFF="true"
       if [[ "${CI_MODE}" == "true" ]]; then
         echo "CI mode: review requested; ending the run." >&2
         exit 0
@@ -1749,6 +1773,9 @@ ${summary}"
       if implement "${title}" "${body}" "${fix_context}" "${base}"; then
         produced_change="true"
       fi
+      if [[ "${TIME_BUDGET_EXHAUSTED:-0}" == "1" ]]; then
+        check_timeout
+      fi
       # Same rule as the feedback round: a dirty tree without a .commit-msg is
       # no commit, never a crash; back off and re-check instead.
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
@@ -1767,6 +1794,7 @@ ${summary}"
     # run does not end here; the next loop iteration waits for the verdict.
     request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
     log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
+    EVER_HANDED_OFF="true"
     if [[ "${CI_MODE}" == "true" ]]; then
       echo "CI mode: review requested; ending the run." >&2
       exit 0
@@ -1868,12 +1896,13 @@ start_issue() {
 
 resume_pr() {
   local owner="${1}" repo="${2}" pr="${3}"
-  local ps state title_b64 body_b64 head base closes title body draft
+  local ps state title_b64 body_b64 head base closes title body draft decision initial_handed_off="false"
   ps="$(gh_api_fetch_pr_state "${owner}" "${repo}" "${pr}")"
   state="$(printf '%s' "${ps}" | cut -d'|' -f2)"
   title_b64="$(printf '%s' "${ps}" | cut -d'|' -f3)"
   body_b64="$(printf '%s' "${ps}" | cut -d'|' -f4)"
   draft="$(printf '%s' "${ps}" | cut -d'|' -f5)"
+  decision="$(printf '%s' "${ps}" | cut -d'|' -f8)"
   head="$(printf '%s' "${ps}" | cut -d'|' -f9)"
   base="$(printf '%s' "${ps}" | cut -d'|' -f10)"
   closes="$(printf '%s' "${ps}" | cut -d'|' -f12)"
@@ -1918,7 +1947,12 @@ resume_pr() {
   # TODO.md gate has to lift the draft; an empty field (older payload) is not a
   # draft.
   [[ "${draft}" == "true" ]] || draft="false"
-  drive "${owner}" "${repo}" "${pr}" "${head}" "${base}" "${title}" "${body}" "${closes}" "${draft}"
+  # An existing review means an earlier run already handed the PR to the owner,
+  # so the time budget running out is a human wait, not a driver failure.
+  case "${decision}" in
+    CHANGES_REQUESTED|COMMENTED|APPROVED) initial_handed_off="true" ;;
+  esac
+  drive "${owner}" "${repo}" "${pr}" "${head}" "${base}" "${title}" "${body}" "${closes}" "${draft}" "${initial_handed_off}"
 }
 
 main() {
