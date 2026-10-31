@@ -6,9 +6,110 @@ branding:
   icon: 'command'
   color: 'gray-dark'
 
+# Composite actions cannot read the `secrets` context (GitHub withholds it),
+# so the caller must pass the App secrets explicitly as inputs. `setup.yml`
+# does exactly that; a direct `uses:` step passes the APP_ID /
+# INSTALLATION_ID / PRIVATE_KEY secrets through `with:`.
+inputs:
+  app-id:
+    description: 'GitHub App ID'
+    required: true
+  installation-id:
+    description: 'GitHub App installation ID'
+    required: true
+  private-key:
+    description: 'GitHub App private key (PEM)'
+    required: true
+
 runs:
   using: composite
   steps:
-    - name: conahcnuj
+    # Getting started step 3: APP_ID / INSTALLATION_ID / PRIVATE_KEY are
+    # registered as repository secrets and passed in as inputs (APP_SLUG is
+    # public and optional). The private key is staged outside the work tree,
+    # like issue-driver.yml, so `git add -A` can never pick it up.
+    - name: Check required inputs and stage app.env
       shell: bash
-      run: exit 255
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        INSTALLATION_ID: ${{ inputs.installation-id }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${APP_ID}" ]]; then echo "::error::Missing app-id input (pass secrets.APP_ID). See Getting started step 3." >&2; exit 1; fi
+        if [[ -z "${INSTALLATION_ID}" ]]; then echo "::error::Missing installation-id input (pass secrets.INSTALLATION_ID). See Getting started step 3." >&2; exit 1; fi
+        if [[ -z "${PRIVATE_KEY}" ]]; then echo "::error::Missing private-key input (pass secrets.PRIVATE_KEY). See Getting started step 3." >&2; exit 1; fi
+        PEM_PATH="${RUNNER_TEMP}/conahcnuj-app.pem"
+        cat > "${PEM_PATH}" <<EOF
+        ${PRIVATE_KEY}
+        EOF
+        chmod 600 "${PEM_PATH}"
+        mkdir -p "${ACTION_PATH}/gh-app"
+        cat > "${ACTION_PATH}/gh-app/app.env" <<EOF
+        APP_ID="${APP_ID}"
+        INSTALLATION_ID="${INSTALLATION_ID}"
+        PRIVATE_KEY_PATH="${PEM_PATH}"
+        BASH_EXE="/usr/bin/bash"
+        EOF
+        echo "Required inputs are present and app.env is staged."
+
+    # Getting started steps 1-3: the App exists, is installed on this
+    # repository, and the inputs can sign a JWT and exchange it for an
+    # installation token.
+    - name: Verify App installation token
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        bash "${ACTION_PATH}/gh-app/get-token.sh" >/dev/null
+        echo "App installation token acquired successfully."
+        echo "- App secrets and installation: OK" >> "${GITHUB_STEP_SUMMARY}"
+
+    - name: Verify App slug
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        SLUG="$(bash "${ACTION_PATH}/gh-app/app-slug.sh")"
+        if [[ -z "${SLUG}" ]]; then echo "::error::Could not resolve the App slug." >&2; exit 1; fi
+        printf 'APP_SLUG="%s"\n' "${SLUG}" >> "${ACTION_PATH}/gh-app/app.env"
+        echo "App slug resolved: ${SLUG}"
+        echo "- App slug: ${SLUG}" >> "${GITHUB_STEP_SUMMARY}"
+
+    - name: Verify bot user id
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        BOT_ID="$(bash "${ACTION_PATH}/gh-app/bot-user-id.sh")"
+        echo "Bot user id resolved: ${BOT_ID}"
+        echo "- Bot user id: ${BOT_ID}" >> "${GITHUB_STEP_SUMMARY}"
+
+    # Getting started step 4: owner-approved auto-merge is optional, so a
+    # disabled setting is a warning rather than a failure.
+    - name: Check auto-merge setting
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        ALLOW="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.allow_auto_merge' 2>/dev/null || echo 'unknown')"
+        echo "allow_auto_merge=${ALLOW}"
+        if [[ "${ALLOW}" == "true" ]]; then
+          echo "- Allow auto-merge: enabled" >> "${GITHUB_STEP_SUMMARY}"
+        else
+          echo "::warning::Auto-merge is not enabled (Settings -> General -> Pull Requests -> Allow auto-merge). Enable it if you use owner-approved auto-merge."
+          echo "- Allow auto-merge: not enabled (optional)" >> "${GITHUB_STEP_SUMMARY}"
+        fi
+
+    # Readiness means every check above passed; reaching this step is success.
+    - name: Setup complete
+      shell: bash
+      run: |
+        echo "conahcnuj setup verified: ready to run." >> "${GITHUB_STEP_SUMMARY}"
+        exit 0

@@ -10,6 +10,7 @@
 | `weekly-self-improvement.yml` | Weekly auto-drive self-improvement | schedule（月曜） | 直近の auto-drive 実行ログを解析し、findings を Project とドライバへ引き渡す |
 | `auto-merge.yml` | Owner-approved auto-merge | owner が approve | 再利用 workflow を呼び出してマージ |
 | `owner-approved-auto-merge.yml` | Owner-approved auto-merge | `workflow_call` | マージ処理本体（他リポジトリからも利用可） |
+| `setup.yml` | conahcnuj setup | `workflow_call` / 手動 | リポジトリが conahcnuj を実行できる状態か検証する |
 | `pages.yml` | Docs to GitHub Pages | push to main / 手動 | `docs/` を GitHub Pages へ配信 |
 
 ## CI（`ci.yml`）
@@ -190,6 +191,52 @@ jobs:
 
 CI 側の docs ジョブ（`Build docs site`）は同じビルドを PR でも検証しますが、
 必須チェックには入っていません。
+
+## セットアップの検証（`action.yml` + `setup.yml`）
+
+リポジトリ直下の `action.yml` は、リポジトリが conahcnuj を実行できる状態かを
+README の Getting started の手順に沿って検証する composite action です。準備が
+できていれば正常終了（exit 0）します。
+
+チェック内容:
+
+1. repo secrets `APP_ID` / `INSTALLATION_ID` / `PRIVATE_KEY` が揃っている
+2. App の秘密鍵で JWT を署名し、インストールトークンを取得できる（App が作成済み
+   で対象リポジトリにインストールされている）
+3. App の slug と bot ユーザー ID を解決できる
+4. **Allow auto-merge** が有効か（owner-approved auto-merge を使う場合のみ必要。
+   無効でも warning で、失敗にはしない）
+
+`setup.yml` はこの action を `workflow_call` で呼ぶ再利用 workflow です。他リポジトリ
+からは次のように呼び出せます（`APP_ID` / `INSTALLATION_ID` / `PRIVATE_KEY` を
+渡す。同一 organization / enterprise なら `secrets: inherit`）:
+
+```yaml
+jobs:
+  setup:
+    uses: nahcnuj/conahcnuj/.github/workflows/setup.yml@main
+    with:
+      environment: conahcnuj
+    secrets: inherit
+```
+
+`setup.yml` の `environment` 入力（必須）で secrets を持つ environment を指定します。
+composite action は `secrets` context を読めないため、
+action へは必ず入力として渡します（`setup.yml` も同じ）。action だけを通常の
+workflow step として使うこともできます:
+
+```yaml
+steps:
+  - uses: nahcnuj/conahcnuj@main
+    with:
+      app-id: ${{ secrets.APP_ID }}
+      installation-id: ${{ secrets.INSTALLATION_ID }}
+      private-key: ${{ secrets.PRIVATE_KEY }}
+```
+
+`issue-driver.yml` / `owner-approved-auto-merge.yml` 自体は再利用 workflow として
+このリポジトリに置かれているので、利用側に複製する必要はありません（呼び出し方は
+上の各節を参照）。`setup.yml` が、それらを動かす前提の設定を検証します。
 
 ## 関連ページ
 

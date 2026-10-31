@@ -339,6 +339,7 @@ declare -A SEEN_PARTS=()
 # new instead of printing its block over from the top. Keyed by part id; an
 # event without one keeps the stateless one-shot rendering.
 declare -A PART_TEXT=()   # text / reasoning streamed so far
+declare -A PART_STYLE=()  # reasoning style: "basic" or "expanded"
 declare -A PART_OUT=()    # command output streamed so far
 declare -A PART_ERR=()    # tool error message streamed so far
 declare -A PART_MODE=()   # tool shape: "true" executes commands, "false" does not
@@ -348,6 +349,8 @@ declare -A PART_FED=()    # the feed (output / error) has started for this part
 # Whether the log's last line is half-written: streamed parts keep growing one
 # and glue their continuation onto it instead of starting a new line.
 OPENLINE=0
+OPEN_THINKING=0
+OPEN_THINKING_STYLE="expanded"
 # Exit code of the most recently completed command: empty when none has run
 # yet, 0 for success, non-zero for failure. Drives the ●/🟢/🔴 marker on the
 # next header.
@@ -436,6 +439,22 @@ render_status_marker() {
     0) printf '🟢' ;;
     *) printf '🔴' ;;
   esac
+}
+
+# Close an open thinking block (print its lower hook) before a new header or
+# at end of stream. Safe to call when no thinking block is open.
+close_thinking() {
+  [[ "${OPEN_THINKING}" == "1" ]] || return 0
+  if [[ "${OPENLINE}" == "1" ]]; then
+    printf '\n'
+    OPENLINE=0
+  fi
+  if [[ "${OPEN_THINKING_STYLE}" == "basic" ]]; then
+    printf '   ⎩\n'
+  else
+    printf '   ⎝\n'
+  fi
+  OPEN_THINKING=0
 }
 
 # --- context header ---------------------------------------------------------
@@ -528,6 +547,7 @@ close_line() {
 }
 
 render_header() {
+  close_thinking
   # A part that streams can leave its last line half-written; a header starts
   # a new line of the log, so close the open one first.
   close_line
@@ -649,6 +669,48 @@ stream_delta() {
   STREAM_KIND="revise"
 }
 
+# Transform a reasoning part's raw text into its rendered body: the first
+# line carries the opening hook glyph and the rest carry the middle piece.
+transform_reasoning_body() {
+  local raw="${1:-}" style="${2:-expanded}"
+  local first_prefix rest_prefix
+  if [[ "${style}" == "basic" ]]; then
+    first_prefix="🤖 ⎨ "
+    rest_prefix="   ⎜ "
+  else
+    first_prefix=".oO⎜ "
+    rest_prefix="   ⎜ "
+  fi
+  [[ -n "${raw}" ]] || return 0
+  local had_nl=0 body="${raw}"
+  if [[ "${body}" == *$'\n' ]]; then
+    had_nl=1
+    body="${body%$'\n'}"
+  fi
+  local out="" line first=1
+  while IFS= read -r line; do
+    if [[ "${first}" == "1" ]]; then
+      out="${out}${first_prefix}${line}"
+      first=0
+    else
+      out="${out}"$'\n'"${rest_prefix}${line}"
+    fi
+  done <<< "${body}"
+  if [[ "${had_nl}" == "1" ]]; then
+    out="${out}"$'\n'
+  fi
+  printf '%s' "${out}"
+}
+
+render_upper_hook() {
+  local style="${1:-expanded}"
+  if [[ "${style}" == "basic" ]]; then
+    printf '   ⎧\n'
+  else
+    printf '   ⎛\n'
+  fi
+}
+
 # Assistant text and reasoning read the same way: the header says which step
 # this is, the body is just the model's words, printed in full -- and, for a
 # part id that streams, printed only as the words arrive.
@@ -679,6 +741,72 @@ render_block_text() {
       ;;
   esac
   PART_TEXT[${pid}]="${F[text]}"
+}
+
+render_block_reasoning() {
+  local pid="${F[id]}" prev transformed style="expanded"
+  local raw="${F[text]}"
+  if [[ -n "${pid}" && -n "${PART_STYLE[${pid}]:-}" ]]; then
+    style="${PART_STYLE[${pid}]}"
+  else
+    local _tmp="${raw%$'\n'}"
+    if [[ "${_tmp}" != *$'\n'* ]]; then
+      style="basic"
+    else
+      style="expanded"
+    fi
+  fi
+  if [[ -z "${pid}" ]]; then
+    [[ -n "${raw}" ]] || return 0
+    render_header
+    render_upper_hook "${style}"
+    local _saved_indent="${INDENT}"
+    INDENT=""
+    render_stream "$(transform_reasoning_body "${raw}" "${style}")"
+    INDENT="${_saved_indent}"
+    OPEN_THINKING=1
+    OPEN_THINKING_STYLE="${style}"
+    return 0
+  fi
+  prev="${PART_TEXT[${pid}]:-}"
+  if [[ -z "${prev}" ]]; then
+    [[ -n "${raw}" ]] || return 0
+    render_header
+    render_upper_hook "${style}"
+    transformed="$(transform_reasoning_body "${raw}" "${style}")"
+    local _saved_indent="${INDENT}"
+    INDENT=""
+    render_stream "${transformed}"
+    INDENT="${_saved_indent}"
+    PART_TEXT[${pid}]="${transformed}"
+    PART_STYLE[${pid}]="${style}"
+    OPEN_THINKING=1
+    OPEN_THINKING_STYLE="${style}"
+    return 0
+  fi
+  transformed="$(transform_reasoning_body "${raw}" "${style}")"
+  stream_delta "${prev}" "${transformed}"
+  case "${STREAM_KIND}" in
+    append)
+      local _saved_indent="${INDENT}"
+      INDENT=""
+      render_stream "${STREAM_TAIL}"
+      INDENT="${_saved_indent}"
+      ;;
+    stale) return 0 ;;
+    revise)
+      render_header
+      render_upper_hook "${style}"
+      local _saved_indent="${INDENT}"
+      INDENT=""
+      render_stream "${transformed}"
+      INDENT="${_saved_indent}"
+      ;;
+  esac
+  PART_TEXT[${pid}]="${transformed}"
+  PART_STYLE[${pid}]="${style}"
+  OPEN_THINKING=1
+  OPEN_THINKING_STYLE="${style}"
 }
 
 # A tool call. Command execution keeps the `$ <command>` shape and streams
@@ -989,7 +1117,8 @@ render_event() {
     return 0
   fi
   case "${F[type]}" in
-    text | reasoning) render_block_text ;;
+    text) render_block_text ;;
+    reasoning) render_block_reasoning ;;
     tool_use) render_block_tool ;;
     error) render_block_error ;;
     *)
@@ -1020,7 +1149,7 @@ render_event() {
 # Safety net: a group left open must never outlive the renderer (a signal or
 # an early exit mid-command would otherwise hide the rest of the GitHub
 # Actions log).
-trap close_open_groups EXIT
+trap 'close_thinking; close_open_groups' EXIT
 
 while IFS= read -r render_line || [[ -n "${render_line}" ]]; do
   render_event "${render_line}"

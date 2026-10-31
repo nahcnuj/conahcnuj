@@ -291,7 +291,7 @@ EOF
   local out
   out="$(cat "${log}")"
   [[ "${out}" == *"opencode/first@"* ]] || { echo "FAIL: no model header"; echo "${out}" >&2; exit 1; }
-  [[ "${out}" == *"  thinking about it"* ]] || { echo "FAIL: reasoning not rendered"; echo "${out}" >&2; exit 1; }
+  [[ "${out}" == *"🤖 ⎨ thinking about it"* ]] || { echo "FAIL: reasoning not rendered"; echo "${out}" >&2; exit 1; }
   [[ "${out}" == *'$ make check'* ]] || { echo "FAIL: command not rendered"; echo "${out}" >&2; exit 1; }
   [[ "${out}" == *'exit 2'* ]] || { echo "FAIL: failure verdict missing"; echo "${out}" >&2; exit 1; }
   [[ "${out}" == *"  all done"* ]] || { echo "FAIL: final text not rendered"; echo "${out}" >&2; exit 1; }

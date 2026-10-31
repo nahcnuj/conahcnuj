@@ -31,8 +31,6 @@
 #   --delete path     Delete path from the branch.
 #   --dry-run         Print what would be committed without calling the API
 #                     (no token/network needed; usable for offline tests).
-#   --allow-empty     Create a commit with no file changes. Used only to open
-#                     a draft PR before the first real implementation commit.
 #
 # Attribution trailer (optional): when CONAHCNUJ_COMMIT_MODEL is a
 # non-empty single-line value, the commit body gains a
@@ -128,7 +126,7 @@ fi
 
 if [[ -z "${MESSAGE}" ]]; then
   echo "ERROR: -m/--message is required" >&2
-  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [-a] [--delete path] [--allow-empty] [options]" >&2
+  echo "Usage: bash gh-app/api-commit.sh [-m <message>] [-a] [--delete path] [options]" >&2
   exit 1
 fi
 # No collection flag and no explicit deletions: commit staged changes like
@@ -325,26 +323,26 @@ API="${API_BASE}/repos/${REPO}"
 
 # 2) Current HEAD sha of the branch (|| true: a missing branch must fall
 #    through to the branch-creation handling instead of tripping set -e).
-HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" || true)"
+HEAD_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/git/refs/heads/${BRANCH}" 2>/dev/null || true)"
 HEAD_SHA="$(printf '%s' "${HEAD_JSON}" | tr -d '\n \t' | sed -n 's/.*"object":{"sha":"\([^"]*\)".*/\1/p')"
 if [[ -z "${HEAD_SHA}" ]]; then
   # 2b) The remote does not have the branch yet. Create the ref from the default
   #     branch head (no commits pushed), the same thing a first
   #     `git push -u origin <branch>` would do, so `git switch -c <branch>`
   #     followed by a commit needs no extra option.
-  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')"
+  DEFAULT_BRANCH="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}" 2>/dev/null | tr -d '\n \t' | sed -n 's/.*"default_branch":"\([^"]*\)".*/\1/p')" || true
   if [[ -z "${DEFAULT_BRANCH}" ]]; then
     echo "ERROR: cannot determine default branch of ${REPO}" >&2
     exit 1
   fi
-  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}")"
+  BASE_JSON="$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "${API}/branches/${DEFAULT_BRANCH}" 2>/dev/null)" || true
   BASE_SHA="$(printf '%s' "${BASE_JSON}" | tr -d '\n \t' | sed -n 's/.*"commit":{"sha":"\([^"]*\)".*/\1/p')"
   if [[ -z "${BASE_SHA}" ]]; then
     echo "ERROR: cannot determine head of ${DEFAULT_BRANCH}" >&2
     exit 1
   fi
   BODY="{\"ref\":\"refs/heads/${BRANCH}\",\"sha\":\"${BASE_SHA}\"}"
-  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null
+  curl -fsSL -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -d "${BODY}" "${API}/git/refs" >/dev/null 2>&1 || { echo "ERROR: failed to create branch ${BRANCH}" >&2; exit 1; }
   echo "Created branch ${BRANCH} from ${DEFAULT_BRANCH}" >&2
   HEAD_SHA="${BASE_SHA}"
 fi
@@ -385,7 +383,7 @@ RESP="$(curl -fsSL -X POST \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   --data-binary "@${BODY_FILE}" \
-  "${GRAPHQL}")"
+  "${GRAPHQL}" 2>/dev/null)" || true
 COMMIT_SHA="$(printf '%s' "${RESP}" | tr -d '\n \t' | sed -n 's/.*"createCommitOnBranch":{"commit":{"oid":"\([^"]*\)".*/\1/p')"
 if [[ -z "${COMMIT_SHA}" ]]; then
   echo "ERROR: commit creation failed: ${RESP}" >&2

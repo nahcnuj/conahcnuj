@@ -177,7 +177,7 @@ opencode_round_is_environment() {
     signals+=$'\n'"$(grep -E 'level=ERROR' "${err_file}" 2>/dev/null || true)"
   fi
   printf '%s\n' "${signals}" |
-    grep -Evi 'model .*is unavailable|has been deprecated|model not found|no such model|unknown model|does not exist' |
+    grep -Evi 'model .*is unavailable|has been deprecated|model not found|no such model|unknown model|does not exist|not (available|supported)|requires authentication|no endpoints' |
     grep -Evi 'rate limit|rate_limit|too many requests|please try again later|quota exceeded|usage limit|resource_exhausted|(^|[^0-9])429([^0-9]|$)' |
     grep -Evi 'spending.limit|out of credits|exceeded your current quota|insufficient (credits|quota|funds)|payment required|billing|delinquent' |
     grep -Eiq 'token refresh failed|invalid_grant|cannot connect to api|unable to connect|was there a typo in the url|transport error|fetch failed|endpoint is unavailable|upstream request failed|upstream error|service temporarily overloaded|socket connection|providerautherror|authenticationerror|unauthorized|enotfound|econnrefused|econnreset|etimedout|getaddrinfo'
@@ -365,21 +365,19 @@ opencode_run() {
     else
       echo "opencode: mock no-op for ${model} (produces no changes)" >&2
     fi
-    # MOCK_OPENCODE_TODO (or MOCK_OPENCODE_TODO_JSONL) lists the models that
-    # simulate the per-issue progress file. The first round of such a model
-    # creates TODO.jsonl with an outstanding task (and remembers it in
-    # MOCK_OPENCODE_STATE_DIR); the next round empties it, standing in for an
-    # agent that starts the issue, then finishes. The driver must treat the
-    # empty file as done AND remove it before hand-off so it never reaches
-    # main. The state file lives outside the work tree so it is never committed.
-    if { [[ " ${MOCK_OPENCODE_TODO:-} " == *" ${model} "* ]] || [[ " ${MOCK_OPENCODE_TODO_JSONL:-} " == *" ${model} "* ]]; } && [[ -d "${workdir}" && -w "${workdir}" ]]; then
+    # MOCK_OPENCODE_TODO lists the models that simulate the per-issue progress
+    # file. The first round of such a model creates TODO.md (and remembers it in
+    # MOCK_OPENCODE_STATE_DIR); the next round deletes it, standing in for an
+    # agent that starts the issue, then finishes and cleans up. The state file
+    # lives outside the work tree so it is never committed.
+    if [[ " ${MOCK_OPENCODE_TODO:-} " == *" ${model} "* && -d "${workdir}" && -w "${workdir}" ]]; then
       local todo_state
       todo_state="${MOCK_OPENCODE_STATE_DIR:-${TMPDIR:-/tmp}}/conahcnuj-todo-${model//\//-}"
       mkdir -p "$(dirname "${todo_state}")" 2>/dev/null || true
       if [[ -f "${todo_state}" ]]; then
-        : > "${workdir}/TODO.jsonl"
+        rm -f "${workdir}/TODO.md"
       else
-        printf '{"task":"mock task from %s"}\n' "${model}" > "${workdir}/TODO.jsonl"
+        printf '# TODO\n' > "${workdir}/TODO.md"
         : > "${todo_state}"
       fi
     fi

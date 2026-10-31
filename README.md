@@ -22,6 +22,9 @@ reusable workflow の呼び出し方・入力は [docs/workflows.md](docs/workfl
   ドライバを実行し、PR 作成・レビュー依頼まで進める。
 - **承認後の auto-merge** (`owner-approved-auto-merge.yml`): owner の Approve を
   受けてマージする。
+- **セットアップの検証** (`setup.yml` / ルートの `action.yml`): [Getting started](#getting-started)
+  の各設定（App・secrets・インストール・auto-merge）を確認し、準備ができていれば
+  正常終了する。詳細は [docs/workflows.md](docs/workflows.md) を参照。
 
 ## ローカルで使う (opencode)
 

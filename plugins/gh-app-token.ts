@@ -395,7 +395,7 @@ const STATEMENT_SEPARATOR_AVAILABLE =
 const POWERSHELL_USE =
   process.platform === "win32"
     ? "On Windows, use PowerShell (the shell this session runs in) for shell commands: prefer PowerShell cmdlets and built-ins, check availability with Get-Command before relying on a command, and quote paths that contain spaces."
-    : "On this platform, use the shell's own commands or node/python; check availability with command -v before relying on a command."
+    : "On this platform, use the shell's own commands or node/python; check availability with command -v before relying on a command. Do not run `powershell` or `pwsh` (Windows-only shells, not installed here; 'powershell' is not recognized as a command on this platform)."
 const SHELL_EQUIVALENTS =
   process.platform === "win32"
     ? "use PowerShell equivalents or node"

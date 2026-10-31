@@ -47,7 +47,9 @@
   PowerShell を使うこと: PowerShell のコマンドレットや組み込み機能を優先し、
   コマンドの有無は `Get-Command` で確認し、空白を含むパスは引用符で囲むこと。
   Windows 以外の環境ではそのシェル自身のコマンドや node/python を使うこと:
-  コマンドの有無は `command -v` で確認すること。ファイルの読み取りは read
+  コマンドの有無は `command -v` で確認すること。**Windows 以外の環境で
+  `powershell` / `pwsh` を実行しないこと**（存在せず `The term 'powershell' is not
+  recognized...` になる）。ファイルの読み取りは read
   ツール、検索は grep/glob ツールを優先すること。シェルコマンドが避けられない
   場合は、その環境で利用可能なコマンドや node/python を使うこと。
   コマンドが存在するか分からないときは先に確認すること。
