@@ -42,7 +42,33 @@ if [[ -z "${APP_SLUG:-}" || "${APP_SLUG}" == "<"* ]]; then
   exit 1
 fi
 
-LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+# Prefer an authenticated request when a token is available: the public,
+# unauthenticated endpoint is heavily rate-limited on shared IPs (CI runners)
+# and can fail the whole driver run. Try, in order: an explicit token from the
+# environment, then an installation token minted from app.env (APP_ID /
+# INSTALLATION_ID / private key). Fall back to unauthenticated on any failure.
+AUTH_TOKEN=""
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  AUTH_TOKEN="${GH_TOKEN}"
+elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  AUTH_TOKEN="${GITHUB_TOKEN}"
+elif [[ -n "${APP_ID:-}" && "${APP_ID}" != "<"* \
+     && -n "${INSTALLATION_ID:-}" && "${INSTALLATION_ID}" != "<"* \
+     && -n "${PRIVATE_KEY_PATH:-}" && "${PRIVATE_KEY_PATH}" != "<"* ]]; then
+  AUTH_TOKEN="$(bash "${DIR}/get-token.sh" 2>/dev/null || true)"
+fi
+
+LOOKUP=""
+if [[ -n "${AUTH_TOKEN}" ]]; then
+  LOOKUP="$(curl -fsSL \
+    -H "Authorization: Bearer ${AUTH_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+fi
+if [[ -z "${LOOKUP}" ]]; then
+  LOOKUP="$(curl -fsSL "${API_BASE}/users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || true)"
+fi
+
 ID="$(printf '%s' "${LOOKUP}" | tr -d '\n \t' | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
 if [[ -z "${ID}" ]]; then
   echo "ERROR: cannot resolve bot user ID for ${APP_SLUG}[bot] (offline?)." >&2
