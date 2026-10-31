@@ -136,12 +136,24 @@ async function resolveBotUserId(slug: string): Promise<string> {
   if (!/^[A-Za-z0-9-]+$/.test(slug)) {
     throw new Error(`Invalid APP_SLUG for bot lookup: ${slug}`)
   }
-  const res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, {
-    headers: { Accept: "application/vnd.github+json" },
-  })
-  if (!res.ok) {
+  // The public endpoint is unauthenticated and can fail transiently; retry a
+  // few times before giving up (#736).
+  let res: Response | null = null
+  let lastStatus = 0
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      res = await fetch(`https://api.github.com/users/${slug}%5Bbot%5D`, {
+        headers: { Accept: "application/vnd.github+json" },
+      })
+      if (res.ok) break
+      lastStatus = res.status
+    } catch {
+      res = null
+    }
+  }
+  if (!res || !res.ok) {
     throw new Error(
-      `Cannot resolve bot user ID for ${slug}[bot] (HTTP ${res.status}): ` +
+      `Cannot resolve bot user ID for ${slug}[bot] (HTTP ${lastStatus || 0}): ` +
         `check network access to api.github.com.`
     )
   }

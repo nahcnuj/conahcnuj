@@ -18,9 +18,16 @@ set -a
 set +a
 
 # Bot user ID: app.env value wins, otherwise auto-resolved from the API.
-BOT_USER_ID="$(bash "${HERE}/bot-user-id.sh")"
+# Resolution can fail (offline / rate-limited); that only affects the local
+# git identity, which Verified commits do not depend on, so warn and continue
+# rather than aborting the whole run (#736).
+BOT_USER_ID=""
+if BOT_USER_ID="$(bash "${HERE}/bot-user-id.sh" 2>/dev/null)"; then
+  :
+else
+  BOT_USER_ID=""
+fi
 BOT_NAME="${APP_SLUG}[bot]"
-BOT_EMAIL="${BOT_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
 HELPER="${HERE}/git-credential-helper.sh"
 API_COMMIT="${HERE}/api-commit.sh"
@@ -35,7 +42,12 @@ if [[ ! -d .git ]] && ! git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 git config "${SCOPE}" user.name "${BOT_NAME}"
-git config "${SCOPE}" user.email "${BOT_EMAIL}"
+if [[ -n "${BOT_USER_ID}" ]]; then
+  BOT_EMAIL="${BOT_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+  git config "${SCOPE}" user.email "${BOT_EMAIL}"
+else
+  echo "WARNING: could not resolve bot user ID; skipping user.email." >&2
+fi
 git config "${SCOPE}" credential.helper "${HELPER_CMD}"
 git config "${SCOPE}" commit.gpgsign false
 # `git vc` is the verified-commit alias (see plugins/gh-app-token.ts). Mirror it
