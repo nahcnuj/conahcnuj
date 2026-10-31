@@ -135,7 +135,7 @@ printf 'ready\n' > "${DRIVER_RELAUNCH_READY}"
 # Sleep in the background and wait on it so a TERM delivered to this shell
 # is handled promptly (a foreground `sleep` would defer the trap until the
 # sleep finishes, hanging the caller for the full duration).
-sleep 2 &
+sleep 1 &
 wait $!
 EOF
 chmod +x "${CHILD}"

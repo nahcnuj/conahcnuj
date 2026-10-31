@@ -245,7 +245,7 @@ EOF
   # Linux) used to fail exec with E2BIG ("Argument list too long"). It must ride
   # on stdin now, so the round succeeds and the whole prompt arrives intact.
   local big
-  big="$(printf 'x%.0s' $(seq 1 200000))"
+  big="$(head -c 200000 /dev/zero | tr '\0' x)"
   rc=0
   opencode_run "Issue" "Body ${big}" "${tmp}" "opencode/big" >/dev/null 2>&1 || rc=$?
   [[ "${rc}" -eq 0 ]] || { echo "FAIL: a large prompt did not survive the round (rc=${rc})"; exit 1; }
@@ -311,7 +311,7 @@ test_opencode_run_timeout() {
   mkdir -p "${tmp}/bin"
   cat > "${tmp}/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
-sleep 2
+sleep 1
 EOF
   chmod +x "${tmp}/bin/opencode"
   PATH="${tmp}/bin:${PATH}"

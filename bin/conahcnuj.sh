@@ -86,7 +86,7 @@ MAX_DURATION="${CONAHCNUJ_MAX_SECONDS:-259200}"
 # the absence of one). Cap the budget in test mode so a 120s setting does
 # not turn every waiting test into a two-minute run.
 if [[ "${TEST_MODE}" == "1" ]] && [[ "${MAX_DURATION}" =~ ^[0-9]+$ ]] && (( MAX_DURATION > 10 )); then
-  MAX_DURATION=5
+  MAX_DURATION=2
 fi
 POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
 POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"

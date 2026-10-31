@@ -516,7 +516,14 @@ opencode_run() {
         kill -TERM "${opencode_pid}" 2>/dev/null || true
         break
       fi
-      sleep "${CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS:-1}"
+      # Wait for either opencode to exit or the watch interval to elapse,
+      # whichever comes first: a fixed sleep would keep the round (and the
+      # offline tests that drive it with a fast-exiting fake opencode) blocked
+      # for the whole interval even after the process is gone.
+      ( sleep "${CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS:-1}" ) & local _watch_sleeper=$!
+      wait -n "${opencode_pid}" "${_watch_sleeper}" 2>/dev/null || true
+      kill "${_watch_sleeper}" 2>/dev/null || true
+      wait "${_watch_sleeper}" 2>/dev/null || true
     done
     wait "${opencode_pid}" 2>/dev/null || status=$?
     # The FIFO consumers exit once opencode's write ends close; reap them so
