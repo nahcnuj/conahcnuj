@@ -1826,6 +1826,12 @@ start_issue() {
   if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
     echo "PR could not be created for ${branch} -> ${default_branch}; running an implementation round." >&2
     if ! implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created." "${default_branch}"; then
+      if workdir_changed "$(pwd)" && [[ ! -f ".commit-msg" ]]; then
+        printf '%s\n' "${title}" > .commit-msg
+      fi
+      if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
+        commit_changes
+      fi
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi
@@ -1852,6 +1858,12 @@ start_issue() {
     commit_changes
   else
     if ! implement "${title}" "${body}" "" "${default_branch}"; then
+      if workdir_changed "$(pwd)" && [[ ! -f ".commit-msg" ]]; then
+        printf '%s\n' "${title}" > .commit-msg
+      fi
+      if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
+        commit_changes
+      fi
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi
