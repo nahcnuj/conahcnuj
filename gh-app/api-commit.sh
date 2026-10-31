@@ -365,11 +365,12 @@ else
   MESSAGE_FIELD="message:{headline:\"${EM}\"}"
 fi
 if [[ ${#ADDITIONS[@]} -eq 0 && ${#DELETE_PATHS[@]} -eq 0 ]]; then
-   # Empty commit: an empty `fileChanges:{}` (rather than omitting the field
-   # entirely) is what GitHub accepts for a commit with no file changes; omitting
-   # it makes the backend fail with "Something went wrong". This is what lets a
-   # draft PR be opened before any real work exists.
-   QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{}}){commit{oid}}}"
+   # Empty commit: GitHub's createCommitOnBranch rejects a null fileChanges
+   # (an empty object leaves additions/deletions unset), so pass explicit
+   # empty arrays, which is what produces a commit whose tree equals its
+   # parent's. This is what lets a draft PR be opened before any real work
+   # exists.
+   QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[],deletions:[]}}){commit{oid}}}"
 else
   QUERY="mutation { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:\"${REPO}\",branchName:\"${EB}\"},${MESSAGE_FIELD},expectedHeadOid:\"${HEAD_SHA}\",fileChanges:{additions:[${ADD_LIST}],deletions:[${DEL_LIST}]}}){commit{oid}}}"
 fi
