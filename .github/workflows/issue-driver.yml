@@ -73,6 +73,11 @@ on:
         required: false
         type: string
         default: conahcnuj
+      effort:
+        description: 'Effort variant to use (e.g. "max"); empty uses the model default'
+        required: false
+        type: string
+        default: ""
     secrets:
       APP_ID:
         required: true
@@ -139,6 +144,7 @@ jobs:
         with:
           repository: ${{ inputs.repository || github.repository }}
           path: target
+          fetch-depth: 0
 
       # opencode is not preinstalled on runners; shared with ci.yml through the
       # install-opencode composite action (authenticated release lookup so
@@ -186,6 +192,7 @@ jobs:
           # Just under the 60-minute job cap so the driver exits gracefully
           # and files its bug report before Actions kills the run.
           CONAHCNUJ_MAX_SECONDS: "3540"
+          CONAHCNUJ_EFFORT: ${{ inputs.effort }}
           OPENCODE_DISABLE_AUTOUPDATE: "true"
         run: |
           [[ "${CONAHCNUJ_INPUT}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number: ${CONAHCNUJ_INPUT}" >&2; exit 1; }

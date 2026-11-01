@@ -72,6 +72,13 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_MODE="${CONAHCNUJ_TEST_MODE:-0}"
+# In GitHub Actions (or with an explicit opt-in) the run ends as soon as the
+# PR has been handed to the reviewer: waiting for a human approval is not
+# realistic in CI, and the pull_request_review trigger starts the next run.
+CI_MODE="false"
+case "${GITHUB_ACTIONS:-}" in true|1) CI_MODE="true" ;; esac
+case "${CONAHCNUJ_GITHUB_ACTIONS:-}" in true|1) CI_MODE="true" ;; esac
+case "${CONAHCNUJ_CI:-}" in true|1) CI_MODE="true" ;; esac
 
 MAX_DURATION="${CONAHCNUJ_MAX_SECONDS:-259200}"
 POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
@@ -220,14 +227,14 @@ driver_relaunch() {
   # #309-era env propagation).
   local wslenv_add=""
   local v
-  for v in $(compgen -v); do
+  for v in $(compgen -e); do
     case "${v}" in
-      CONAHCNUJ_*|GH_*|OPENCODE_*|MOCK_*) 
-        if [[ -n "${!v:-}" ]]; then
-          wslenv_add="${wslenv_add:+${wslenv_add}:}${v}"
-        fi
-        ;;
+      CONAHCNUJ_ORIG_PWD_WIN) continue ;;
+      PATH|HOME|USER|SHELL|TERM|LANG|LC_*|PWD|OLDPWD|SHLVL|_) continue ;;
     esac
+    if [[ -n "${!v:-}" ]]; then
+      wslenv_add="${wslenv_add:+${wslenv_add}:}${v}"
+    fi
   done
   # Preserve the caller's working directory across the WSL -> Git Bash boundary.
   local orig_pwd_win
@@ -243,6 +250,15 @@ driver_relaunch() {
   trap 'kill -TERM "${child}" 2>/dev/null || true' INT TERM
   rc=0
   wait "${child}" || rc=$?
+  # The wait above may return early because it was interrupted by the signal
+  # that triggered the trap, even though the child is still running its own
+  # trap. Reap the child here so an interrupt actually waits for it to finish
+  # (otherwise the caller can clean up (e.g. delete temp files) before the
+  # child's trap has written its marker, racing the test/report).
+  for ((i=0; i<100; i++)); do
+    kill -0 "${child}" 2>/dev/null || break
+    sleep 0.1
+  done
   wait "${child}" 2>/dev/null || true
   trap - INT TERM
   exit "${rc}"
@@ -333,29 +349,37 @@ todo_present() {
   [[ -f "TODO.md" ]]
 }
 
-# True when the current branch already carries commits on top of the default
-# branch, i.e. an earlier run already implemented the issue. Used to skip the
-# model fall-through (which would otherwise keep asking every model to do work
-# that is already committed) and go straight to opening the PR.
-branch_has_commits() {
-  local default_oid="${1}" default_branch="${2}" ref count
-  # Compare against the default branch's tip as freshly read from the API, not
-  # the local origin/<default> ref: the driver never fetches the default
-  # branch, so that ref goes stale once main advances through merged PRs. A
-  # feature branch pinned at the real main tip would then look like it already
-  # "has commits", the driver would skip implementation, and GitHub would
-  # reject the PR (createPullRequest: UNPROCESSABLE, no commits between base
-  # and head). That is what crashed the driver into the bug-report chain of
-  # issues #33/#34.
+# Resolve the base ref to compare the feature branch against. Shared by the
+# commit-count helpers below so the empty-initial-commit guard and the
+# skip-implement check agree on which base to use.
+_branch_base_ref() {
+  local default_oid="${1}" default_branch="${2}" ref
   ref="${default_oid}"
   if [[ -z "${ref}" ]] || ! git rev-parse --verify -q "${ref}^{commit}" >/dev/null 2>&1; then
-    # The OID is not in this clone (offline tests feed a placeholder oid);
-    # fall back to the local default-branch refs.
     ref="${default_branch}"
     if [[ -n "${ref}" ]] && git rev-parse --verify -q "origin/${default_branch}" >/dev/null 2>&1; then
       ref="origin/${default_branch}"
     fi
   fi
+  printf '%s' "${ref}"
+}
+
+# Number of commits on the feature branch on top of the base branch (including
+# empty commits). Used to decide whether an empty initial commit is needed.
+branch_commit_count() {
+  local ref
+  ref="$(_branch_base_ref "$@")"
+  [[ -n "${ref}" ]] || { printf '0'; return 0; }
+  git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0'
+}
+
+# True when the current branch already carries commits on top of the default
+# branch, i.e. an earlier run already implemented the issue. Used to skip the
+# model fall-through (which would otherwise keep asking every model to do work
+# that is already committed) and go straight to opening the PR.
+branch_has_commits() {
+  local ref count
+  ref="$(_branch_base_ref "$@")"
   if [[ -z "${ref}" ]]; then
     # No base to compare against: cannot tell whether HEAD already carries
     # work, so treat it as "no commits yet" (never accept a message-only
@@ -363,7 +387,16 @@ branch_has_commits() {
     return 1
   fi
   count="$(git rev-list --count "${ref}..HEAD" 2>/dev/null || printf '0')"
-  [[ "${count}" -gt 0 ]]
+  # An empty initial commit (no tree change) does not count as "implemented":
+  # it exists only to let a draft PR be opened early, and must not make the
+  # driver skip the implementation round.
+  if [[ "${count}" -gt 0 ]]; then
+    if git diff --quiet "${ref}" HEAD 2>/dev/null; then
+      return 1
+    fi
+    return 0
+  fi
+  return 1
 }
 
 # Shape a provider/model id like the plugin's label: `provider (model)`.
@@ -462,7 +495,10 @@ commit_changes() {
     fi
     return 0
   fi
-  bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"
+  if ! bash "${HERE}/../gh-app/api-commit.sh" -m "${message}"; then
+    echo "WARNING: verified commit failed; leaving changes uncommitted." >&2
+    return 0
+  fi
   local branch
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git fetch origin "${branch}" >/dev/null 2>&1 || true
@@ -652,8 +688,18 @@ report_bug_on_exit() {
   oid="$(git rev-parse --short HEAD 2>/dev/null || true)"
   title="$(report_bug_title "${code}" "${input}")"
   body="$(report_bug_body "${code}" "${label_owner}" "${label_repo}" "${input}" "${branch}" "${oid}")"
+  # Labels for the bug report issue (issue #46): always `bug`, plus an
+  # environment label based on where the driver ran.
+  local bug_labels="bug"
+  if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+    bug_labels="${bug_labels},os/ubuntu"
+  elif [[ "${OS:-}" == "Windows_NT" || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ]]; then
+    bug_labels="${bug_labels},os/windows"
+  elif [[ "${OSTYPE:-}" == linux* ]]; then
+    bug_labels="${bug_labels},os/ubuntu"
+  fi
   echo "Driver exited abnormally (code ${code}); filing a bug report issue in ${owner}/${repo}." >&2
-  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}")"; then
+  if num="$(gh_api_create_issue "${owner}" "${repo}" "${title}" "${body}" "${bug_labels}")"; then
     if [[ -n "${num}" ]]; then
       echo "Bug report issue #${num} created: https://github.com/${owner}/${repo}/issues/${num}" >&2
       BUG_REPORTED="1"
@@ -700,6 +746,21 @@ next_free_branch() {
   printf '%s\n' "${branch}"
 }
 
+# Drop any in-progress merge or unmerged index entries left by an interrupted
+# round so a following `git checkout` can actually move HEAD. An unresolved
+# conflict (MERGE_HEAD present, or "needs merge" entries in the index) makes
+# `git checkout` refuse with "you need to resolve your current index first",
+# which used to abort the run at the first checkout of a resumed PR (issue
+# #489). The fetch has already succeeded by the time this runs, so the remote
+# head is known; discarding the local conflict state loses only work that was
+# never committed, which is the same fate an interrupted round already had.
+clear_merge_state() {
+  if git rev-parse --verify -q MERGE_HEAD >/dev/null 2>&1; then
+    git merge --quit 2>/dev/null || git merge --abort 2>/dev/null || true
+  fi
+  git reset --hard HEAD >/dev/null 2>&1 || true
+}
+
 # Fetch <branch> from origin and check out its head. A failed fetch stops the
 # run instead of falling back to whatever origin/<branch> happens to hold: such
 # a checkout "succeeds" at a stale commit, the driver then reads the branch as
@@ -716,6 +777,7 @@ checkout_branch_head() {
     echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
     return 1
   fi
+  clear_merge_state
   git checkout -B "${branch}" "origin/${branch}" 1>&2
 }
 
@@ -766,6 +828,7 @@ checkout_new_branch_from_base() {
     echo "ERROR: no base commit to start ${branch} from." >&2
     return 1
   fi
+  clear_merge_state
   git checkout -B "${branch}" "${base}" 1>&2
 }
 
@@ -781,6 +844,7 @@ ensure_issue_branch() {
   echo "Feature branch: ${branch} (from ${default_branch})" >&2
 
   if [[ "${TEST_MODE}" == "1" ]]; then
+    clear_merge_state
     git checkout -B "${branch}" >/dev/null 2>&1 || git checkout -b "${branch}"
     printf '%s\n' "${branch}"
     return 0
@@ -789,12 +853,32 @@ ensure_issue_branch() {
   # This function's stdout is captured by the caller to obtain the branch
   # name, so every git command must keep its own output off stdout (checkout_branch_head
   # sends git's output to stderr).
-  if git rev-parse --verify -q "origin/${branch}" >/dev/null 2>&1; then
+  # Decide whether the branch exists on the remote from the remote itself,
+  # not from a possibly stale local remote-tracking ref: a branch deleted on
+  # the remote leaves origin/<branch> behind, and trusting it would resurrect
+  # commits that no longer exist upstream (issue #115). A failed query leaves
+  # the answer unknown, in which case recreating would be unsafe, so the run
+  # stops with the same message as a failed fetch.
+  local remote_state="unknown"
+  local remote_ref=""
+  if remote_ref="$(git ls-remote origin "refs/heads/${branch}" 2>/dev/null)"; then
+    if [[ -n "${remote_ref}" ]]; then
+      remote_state="present"
+    else
+      remote_state="absent"
+    fi
+  else
+    remote_state="unknown"
+  fi
+  if [[ "${remote_state}" == "present" ]]; then
     # `|| return 1` rather than relying on errexit: this function runs inside a
     # command substitution, where bash does not honour it, and every command
     # after the checkout would otherwise run on the stale head.
     checkout_branch_head "${branch}" || return 1
     echo "Using existing feature branch ${branch} (resume)." >&2
+  elif [[ "${remote_state}" == "unknown" ]]; then
+    echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
+    return 1
   else
     # Brand-new branch: create the remote ref so it can host the Verified
     # commits, then check it out. A freshly created ref is not always fetchable
@@ -810,13 +894,30 @@ ensure_issue_branch() {
       echo "WARNING: branch create returned an error for ${branch}; will try to fetch it." >&2
     fi
     if fetch_new_branch_ref "${branch}"; then
+      clear_merge_state
       git checkout -B "${branch}" "origin/${branch}" 1>&2 || return 1
     elif [[ "${created}" == "1" ]]; then
       echo "WARNING: ${branch} is not fetchable right after creation; starting it from ${default_branch}." >&2
       checkout_new_branch_from_base "${branch}" "${default_branch}" "${default_oid}" || return 1
     else
-      echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
-      return 1
+      # Branch creation failed. The branch may still exist on the remote under
+      # a head we cannot safely assume, in which case the run must stop; but
+      # if the remote is reachable and the ref is verifiably absent, nothing
+      # could have been committed on it, so starting from the base is safe and
+      # avoids aborting the run on a transient create failure.
+      local inner_remote_ref
+      if inner_remote_ref="$(git ls-remote origin "refs/heads/${branch}" 2>/dev/null)"; then
+        remote_ref="${inner_remote_ref}"
+        if [[ -n "${remote_ref}" ]]; then
+          echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
+          return 1
+        fi
+        echo "WARNING: ${branch} is not fetchable right after creation; starting it from ${default_branch}." >&2
+        checkout_new_branch_from_base "${branch}" "${default_branch}" "${default_oid}" || return 1
+      else
+        echo "ERROR: could not fetch ${branch} from origin; refusing to work on a stale branch head." >&2
+        return 1
+      fi
     fi
     echo "Created feature branch ${branch}." >&2
   fi
@@ -828,6 +929,7 @@ ensure_pr_branch_head() {
   local owner="${1}" repo="${2}" head="${3}"
   echo "Checking out PR head branch ${head}..." >&2
   if [[ "${TEST_MODE}" == "1" ]]; then
+    clear_merge_state
     git checkout -B "${head}" >/dev/null 2>&1 || git checkout -b "${head}"
     return 0
   fi
@@ -872,6 +974,7 @@ resolve_agent_branch_name() {
     # The ref may not be fetchable the instant it was created; the branch is
     # brand-new, so starting it from the base loses no committed work.
     if fetch_new_branch_ref "${want}"; then
+      clear_merge_state
       git checkout -B "${want}" "origin/${want}" 1>&2
     else
       echo "WARNING: ${want} is not fetchable right after creation; starting it from the base." >&2
@@ -881,6 +984,7 @@ resolve_agent_branch_name() {
       }
     fi
   else
+    clear_merge_state
     git checkout -B "${want}" >/dev/null 2>&1
   fi
   echo "Using the coding agent's feature branch: ${want}" >&2
@@ -920,7 +1024,7 @@ ${threads}"
   file_list="${CONAHCNUJ_CONTEXT_FILES-README.md AGENTS.md}"
   while IFS= read -r file; do
     [[ -f "${file}" ]] || continue
-    content="$(cat -- "${file}")"
+    content="$(cat -- "${file}" | sed 's/[[:space:]]*$//')"
     [[ -n "${content}" ]] || continue
     if [[ -n "${out}" ]]; then
       out="${out}
@@ -1012,7 +1116,7 @@ persist_missing_model() {
 # base, so a message-only round there stays no work and still falls through to
 # the other models.
 implement() {
-  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried
+  local title="${1}" body="${2}" extra="${3:-}" workdir model previous_model="" run_failed run_timeout now wrote_message provider tree_changed model_retried head_before head_after committed
   local dead_providers="" quota_providers="" failed_rounds=0 env_failed_rounds=0 quota_failed_rounds=0 ran_without_failure=0
   local model_list known_skipped=""
   local base_branch="${4:-}"
@@ -1057,10 +1161,16 @@ implement() {
         echo "Session handoff was unavailable after ${previous_model}; ${model} will continue from the working tree." >&2
       fi
       run_failed="false"
+      head_before="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
       if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
         run_failed="true"
       fi
       OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
+      head_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
+      committed="false"
+      if [[ -n "${head_after}" && "${head_after}" != "${head_before}" ]]; then
+        committed="true"
+      fi
       wrote_message="false"
       if [[ -s "${workdir}/.commit-msg" ]]; then
         wrote_message="true"
@@ -1068,6 +1178,12 @@ implement() {
       tree_changed="false"
       if workdir_changed "${workdir}"; then
         tree_changed="true"
+      fi
+      if [[ "${committed}" == "true" ]]; then
+        rm -f "${workdir}/.commit-msg"
+        echo "Model ${model} completed the work and committed it." >&2
+        OPENCODE_LAST_MODEL="${model}"
+        return 0
       fi
       if [[ "${tree_changed}" == "true" && "${wrote_message}" == "true" ]]; then
         echo "Model ${model} completed the work." >&2
@@ -1122,7 +1238,7 @@ implement() {
     done
   done
   echo "ERROR: no available model completed the work (tried: ${OPENCODE_USED_MODELS:-none}; handoffs: ${OPENCODE_HANDOFFS:-none})." >&2
-  if [[ "${failed_rounds}" -gt 0 && "$((env_failed_rounds + quota_failed_rounds))" -eq "${failed_rounds}" && "${ran_without_failure}" -eq 0 ]]; then
+  if [[ "${failed_rounds}" -gt 0 && "$((env_failed_rounds + quota_failed_rounds))" -eq "${failed_rounds}" ]]; then
     ENVIRONMENT_DOWN="1"
     echo "ERROR: every model round died on an environment error (provider unreachable, credentials rejected, or quota/billing exhausted; providers given up on:${dead_providers}${quota_providers}). Nothing the driver can do about that -- re-run it once its providers are usable again." >&2
   fi
@@ -1232,7 +1348,7 @@ poll_conditions() {
         ;;
       CLOSED)
         echo "PR #${pr} is closed without merge while waiting; nothing left to do." >&2
-        exit 1
+        exit 0
         ;;
     esac
     if [[ "${state}" == "SUCCESS" && "${mergeable}" == "MERGEABLE" ]]; then
@@ -1561,19 +1677,22 @@ drive() {
       # "Addressed the review feedback" comment: the in-thread replies are how
       # the reviewer learns what happened. Because the fingerprint drops
       # bot-authored comments, those replies never look like fresh feedback.
-      local reply_help="Address the pull request review feedback. First make the code changes and resolve any merge conflict (merge the base branch in, resolve every conflict, leave no conflict markers), leaving the result in the working tree and writing .commit-msg; the driver commits and pushes it and then CI runs. Only after that, reply in each unresolved thread below (comment), saying what you changed or answering the question. Post the reply with the GitHub API (POST https://api.github.com/repos/${owner}/${repo}/pulls/${pr}/comments/<comment_id>/replies is the reply endpoint; \${GH_TOKEN} is set) using the comment id shown for each thread. Do not request review yourself (the driver does that after the checks pass)."
-      if ! implement "${title}" "${body}" "${reply_help}
+      local code_help="Address the pull request review feedback. Make the code changes, commit them with \`git vc\`, and resolve any merge conflict (merge the base branch in, resolve every conflict, leave no conflict markers). Then reply in each unresolved review thread below (comment), saying what you changed or answering the question. Post the reply with the GitHub API (POST https://api.github.com/repos/${owner}/${repo}/pulls/${pr}/comments/<comment_id>/replies is the reply endpoint; \${GH_TOKEN} is set) using the comment id shown for each thread. Do not request review yourself (the driver does that after the checks pass).
 
-${summary}" "${base}"; then
+${summary}"
+      if ! implement "${title}" "${body}" "${code_help}" "${base}"; then
         echo "No working-tree change was produced for this feedback; keeping whatever thread replies were already made." >&2
       fi
-      # A round can fail after leaving a partial change and no .commit-msg (a
-      # provider outage mid-round is what filed issue #251). There is nothing
-      # the driver may commit, and refusing must not abort the run: it hands the
-      # PR back to the reviewer below and keeps driving.
+      # The agent is asked to commit with `git vc` itself; the driver only
+      # commits uncommitted changes that still have a .commit-msg as a safety
+      # net. A round can fail after leaving a partial change and no
+      # .commit-msg (a provider outage mid-round is what filed issue #251):
+      # there is nothing the driver may commit, and refusing must not abort the
+      # run.
       if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
         commit_changes
       fi
+      rm -f .commit-msg
       # Verify the non-reviewer constraints again before handing the PR back:
       # the fix restarted CI, so the reviewer is only asked once the checks are
       # green again (and the branch still merges), exactly as on the first
@@ -1584,6 +1703,10 @@ ${summary}" "${base}"; then
       fi
       request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
       log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
+      if [[ "${CI_MODE}" == "true" ]]; then
+        echo "CI mode: review requested; ending the run." >&2
+        exit 0
+      fi
       handed_off="true"
       continue
     fi
@@ -1644,6 +1767,10 @@ ${summary}" "${base}"; then
     # run does not end here; the next loop iteration waits for the verdict.
     request_review_from_owner "${owner}" "${repo}" "${pr}" || exit 1
     log_review_handoff "${owner}" "${repo}" "${pr}" "${owner}"
+    if [[ "${CI_MODE}" == "true" ]]; then
+      echo "CI mode: review requested; ending the run." >&2
+      exit 0
+    fi
     handed_off="true"
     continue
   done
@@ -1675,6 +1802,44 @@ start_issue() {
   # agent will work on. An issue has no PR yet, hence no review threads.
   COLLECTED_CONTEXT="$(collect_initial_context "${owner}" "${repo}")"
 
+  # Open a draft PR early so its number is stable for the whole run (the
+  # concurrency group and review/resume triggers can key on it instead of the
+  # issue number). That requires at least one commit on the branch, so create
+  # an empty initial commit first: it carries no file changes and only exists
+  # to let the PR be opened before the real implementation lands. Any commit on
+  # top of the base counts here (even an empty one left by an interrupted
+  # earlier run), so a second empty commit is never stacked on top of one.
+  if [[ "$(branch_commit_count "${default_oid}" "${default_branch}")" == "0" ]]; then
+    echo "Creating an empty initial commit so a draft PR can be opened early." >&2
+    if [[ "${TEST_MODE}" == "1" ]]; then
+      git commit --allow-empty -q -m "Initial commit" 2>/dev/null || true
+    else
+      bash "${HERE}/../gh-app/api-commit.sh" -m "Initial commit" --allow-empty >/dev/null 2>&1 || echo "WARNING: could not create the empty initial commit; continuing." >&2
+    fi
+  fi
+
+  # Open the draft PR now, before implementation, so its number is available
+  # from the start. It stays a draft while TODO.md is present. PR creation can
+  # fail when the branch has no real diff yet (e.g. only the empty initial
+  # commit); recover the same way drive() does instead of dying.
+  local early_pr=""
+  if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
+    echo "PR could not be created for ${branch} -> ${default_branch}; running an implementation round." >&2
+    if ! implement "${title}" "${body}" "The pull request for ${branch} could not be opened; GitHub rejects a PR with no changes between the branches. Make a real change so the PR can be created." "${default_branch}"; then
+      echo "ERROR: could not implement issue #${num} with any available model." >&2
+      exit 1
+    fi
+    rm -f .branch-name
+    if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
+      commit_changes
+    fi
+    if ! early_pr="$(ensure_pr "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true")"; then
+      echo "No PR could be created; backing off before retrying." >&2
+      rate_limit_poll_sleep "${POLL_CONDITIONS_MIN}" "${POLL_CONDITIONS_MAX}"
+    fi
+  fi
+  echo "Early draft PR: #${early_pr}" >&2
+
   # An earlier run may have already committed the implementation to this
   # branch. In that case there is nothing left to implement, so skip the
   # model fall-through and go straight to opening the PR for review. This is
@@ -1690,11 +1855,15 @@ start_issue() {
       echo "ERROR: could not implement issue #${num} with any available model." >&2
       exit 1
     fi
-    branch="$(resolve_agent_branch_name "${owner}" "${repo}" "${default_oid}" "${branch}")"
-    commit_changes
+    # The PR is already open on the driver-derived branch, so keep that branch
+    # stable instead of renaming it mid-flight: the PR number must not change.
+    rm -f .branch-name
+    if workdir_changed "$(pwd)" && [[ -f ".commit-msg" ]]; then
+      commit_changes
+    fi
   fi
 
-  drive "${owner}" "${repo}" "" "${branch}" "${default_branch}" "${title}" "${body}" "${num}"
+  drive "${owner}" "${repo}" "${early_pr}" "${branch}" "${default_branch}" "${title}" "${body}" "${num}" "true"
 }
 
 resume_pr() {
@@ -1732,7 +1901,7 @@ resume_pr() {
       ;;
     CLOSED)
       echo "PR #${pr} is closed without merge. Nothing to do." >&2
-      exit 1
+      exit 0
       ;;
     OPEN|"") ;;
     *)
@@ -1762,10 +1931,41 @@ main() {
     cd "${CONAHCNUJ_ORIG_PWD_WIN}" 2>/dev/null || true
   fi
   if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <issue-or-pr-number>" >&2
+    echo "Usage: $0 [--max-effort] <issue-or-pr-number>" >&2
     exit 1
   fi
-  local input="${1}" repo_info owner repo
+  local input="" repo_info owner repo
+  local max_effort=""
+  local -a positional=()
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --max-effort)
+        max_effort="1"
+        shift
+        ;;
+      --)
+        shift
+        positional+=("$@")
+        break
+        ;;
+      -*)
+        echo "Unknown option: ${1}" >&2
+        exit 1
+        ;;
+      *)
+        positional+=("${1}")
+        shift
+        ;;
+    esac
+  done
+  if [[ ${#positional[@]} -ne 1 ]]; then
+    echo "Usage: $0 [--max-effort] <issue-or-pr-number>" >&2
+    exit 1
+  fi
+  input="${positional[0]}"
+  if [[ "${max_effort}" == "1" ]]; then
+    export CONAHCNUJ_MAX_EFFORT="1"
+  fi
   if [[ "${input}" == -* ]]; then
     echo "Unknown option: ${input}" >&2
     exit 1

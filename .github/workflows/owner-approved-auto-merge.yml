@@ -48,6 +48,7 @@ jobs:
     # CI の完了はこのジョブでは待たず、ネイティブ auto-merge（GitHub 側）に任せる
     # （issue #269）。ジョブは 1 〜 2 回の API 呼び出しで終わる。
     timeout-minutes: 10
+    continue-on-error: true
     steps:
       - name: Merge and dispatch
         env:

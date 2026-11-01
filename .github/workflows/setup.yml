@@ -1,0 +1,38 @@
+name: conahcnuj setup
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name holding the GitHub App secrets.'
+        required: true
+        type: string
+    secrets:
+      APP_ID:
+        required: true
+      INSTALLATION_ID:
+        required: true
+      PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    name: Verify conahcnuj setup
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Check out the conahcnuj repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+
+      - name: Verify setup
+        uses: ./
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          installation-id: ${{ secrets.INSTALLATION_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}

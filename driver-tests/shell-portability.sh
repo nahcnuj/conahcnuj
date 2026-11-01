@@ -27,3 +27,11 @@ grep -q "まず自分がどの OS" "${ROOT}/opencode/AGENTS.md" || {
   exit 1
 }
 
+# 3. The PowerShell fallback must be platform-gated (issue #702): on Linux/macOS
+#    a model told to "use PowerShell equivalents" runs `powershell`, which is
+#    not installed there. AGENTS.md must name the non-Windows path explicitly.
+grep -q "Windows 以外の環境" "${ROOT}/opencode/AGENTS.md" || {
+  echo "FAIL: opencode/AGENTS.md does not give a non-Windows shell fallback" >&2
+  exit 1
+}
+

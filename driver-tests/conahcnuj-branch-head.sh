@@ -144,4 +144,29 @@ out="$(
 grep -q "gh_api_create_branch" "${API_CALLS}" || { echo "FAIL: the remote branch was not created" >&2; exit 1; }
 grep -q "not fetchable right after creation" "${ROOT}/new.log" || { echo "FAIL: the fallback was not explained in the log" >&2; exit 1; }
 
-echo "conahcnuj branch-head checkout passed"
+# 6. A stale local remote-tracking ref must not abort the run: when the branch
+#    was deleted on the remote but origin/<branch> lingers locally (a clone
+#    that was not pruned), the remote itself is the authority. The branch is
+#    verifiably absent upstream, so nothing can be lost by starting it from the
+#    base; checking out the stale ref instead used to fail the fetch and stop
+#    the run (the reported #734 run).
+STALE_BRANCH="conahcnuj/115-deleted-remotely"
+git -C "${UPSTREAM}" commit -q --allow-empty -m "to be deleted"
+git -C "${UPSTREAM}" push -q origin "HEAD:refs/heads/${STALE_BRANCH}"
+git -C "${WORK}" fetch -q origin "${STALE_BRANCH}"
+git -C "${UPSTREAM}" push -q origin ":refs/heads/${STALE_BRANCH}"
+git -C "${WORK}" rev-parse --verify -q "origin/${STALE_BRANCH}" >/dev/null || {
+  echo "FAIL: the test fixture did not leave a stale remote-tracking ref" >&2
+  exit 1
+}
+CREATE_BRANCH_RC=0
+: > "${API_CALLS}"
+rc=0
+out="$(
+  cd "${WORK}"
+  ensure_issue_branch "nahcnuj" "conahcnuj" 115 "deleted remotely" "main" "${BASE_HEAD}" "${STALE_BRANCH}" 2>"${ROOT}/stale.log"
+)" || rc=$?
+[[ ${rc} -eq 0 ]] || { echo "FAIL: a stale remote-tracking ref with no remote branch aborted (rc=${rc})" >&2; exit 1; }
+[[ "${out}" == "${STALE_BRANCH}" ]] || { echo "FAIL: ensure_issue_branch did not return the branch name: ${out}" >&2; exit 1; }
+[[ "$(git -C "${WORK}" rev-parse HEAD)" == "${BASE_HEAD}" ]] || { echo "FAIL: the stale branch was not restarted from the base" >&2; exit 1; }
+[[ "$(git -C "${WORK}" branch --show-current)" == "${STALE_BRANCH}" ]] || { echo "FAIL: wrong current branch after the stale-ref fallback" >&2; exit 1; }

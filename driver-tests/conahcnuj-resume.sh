@@ -102,6 +102,10 @@ APPROVED_LINE="$(grep -n "Ready to merge" "${LOG}" | head -1 | cut -d: -f1)"
 ASSIGNED_LINE="$(grep -n "Assigned nahcnuj as reviewer on PR #15" "${LOG}" | head -1 | cut -d: -f1)"
 [[ -n "${APPROVED_LINE}" && "${ASSIGNED_LINE}" -lt "${APPROVED_LINE}" ]] || { echo "FAIL: the driver did not keep polling to the approval"; exit 1; }
 grep -q "New review feedback detected" "${LOG}" || { echo "FAIL: review feedback was not acted on"; exit 1; }
+# The agent commits the fix with `git vc` in the same round; the driver must
+# see the new commit and not commit the work a second time.
+grep -q "completed the work and committed it" "${LOG}" || { echo "FAIL: the agent's commit was not detected"; exit 1; }
+grep -q "Using coding agent's commit message" "${LOG}" && { echo "FAIL: the driver committed the agent's work again"; exit 1; }
 # Known feedback must be addressed before the run waits on CI (#219): a PR with
 # open threads (or required conversation resolution) never reaches the
 # constraints until the threads are answered, so polling first only stalls.
@@ -114,6 +118,11 @@ FIRST_CONSTRAINTS_LINE="$(grep -n 'constraints: checks=' "${LOG}" | head -1 | cu
 grep -q "Addressed the review feedback" "${LOG}" && { echo "FAIL: the driver still posts its own review-feedback comment"; exit 1; }
 grep -q "comment 12345 by reviewer" "${LOG}" || { echo "FAIL: the feedback prompt does not name the thread comment to answer"; exit 1; }
 grep -q "POST https://api.github.com/repos/nahcnuj/conahcnuj/pulls/15/comments/<comment_id>/replies" "${LOG}" || { echo "FAIL: the feedback prompt does not tell the agent the reply endpoint"; exit 1; }
+# The reply comes AFTER the fix is committed and pushed (#485): the code round
+# The agent now commits (git vc) and replies in the same round, so the
+# reply instructions and the thread comment ids travel together in one prompt.
+grep -q "comments/<comment_id>/replies" "${LOG}" || { echo "FAIL: the feedback prompt does not tell the agent the reply endpoint"; exit 1; }
+grep -q "comment 12345 by reviewer" "${LOG}" || { echo "FAIL: the feedback prompt does not name the thread comment to answer"; exit 1; }
 
 # The prompt carries the collected context: the PR's open thread and the
 # checkout's orientation files, but never the resolved thread.

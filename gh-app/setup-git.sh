@@ -23,8 +23,10 @@ BOT_NAME="${APP_SLUG}[bot]"
 BOT_EMAIL="${BOT_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
 HELPER="${HERE}/git-credential-helper.sh"
+API_COMMIT="${HERE}/api-commit.sh"
 BASH_EXE="${BASH_EXE:-C:/Program Files/Git/bin/bash.exe}"
 HELPER_CMD="!\"${BASH_EXE}\" \"${HELPER//\\//}\""
+API_COMMIT_CMD="!\"${BASH_EXE}\" \"${API_COMMIT//\\//}\""
 
 SCOPE="--local"
 if [[ ! -d .git ]] && ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -36,8 +38,12 @@ git config "${SCOPE}" user.name "${BOT_NAME}"
 git config "${SCOPE}" user.email "${BOT_EMAIL}"
 git config "${SCOPE}" credential.helper "${HELPER_CMD}"
 git config "${SCOPE}" commit.gpgsign false
+# `git vc` is the verified-commit alias (see plugins/gh-app-token.ts). Mirror it
+# into the (local or global) git config so it is available in every shell,
+# not only inside an opencode session whose plugin injects it via GIT_CONFIG_*.
+git config "${SCOPE}" alias.vc "${API_COMMIT_CMD}"
 
 echo "Configured (${SCOPE}):"
-git config --get-regexp "^(user\.(name|email)|credential\.helper|commit\.gpgsign)$" "${SCOPE}" 2>/dev/null || true
+git config ${SCOPE} --get-regexp "^(user\.(name|email)|credential\.helper|commit\.gpgsign|alias\.vc)$" 2>/dev/null || true
 echo
 echo "Test with: git ls-remote https://github.com/<owner>/<repo>.git HEAD"

@@ -70,14 +70,12 @@ FINDINGS_PREFIX="auto-drive findings"
 SELF_IMPROVEMENT_LABEL="self-improvement"
 LABEL_COLOR="5319e7"
 LABEL_DESCRIPTION="weekly auto-drive self-improvement finding"
-PROJECT_TITLE_DEFAULT="auto-drive self-improvement"
-PROJECT_COLUMN_DEFAULT="To do"
 
 usage() {
   cat <<'EOF'
 Usage: auto-drive-workflow.sh [--repo OWNER/REPO] [--runs-url-prefix PREFIX]
                               [--lookback-days N] [--ref BRANCH]
-                              [--project-number N] [--project-title TITLE]
+                              [--project-number N] [--project-owner OWNER] [--project-title TITLE]
 
 Weekly self-improvement loop: collect the "Issue auto-drive" run logs through
 `gh`, analyze them (auto-drive-report.sh, stdout), publish the report on a
@@ -95,7 +93,9 @@ runs_url_prefix=""
 lookback_days="7"
 dispatch_ref=""
 project_number="${PROJECT_NUMBER:-}"
+# shellcheck disable=SC2034
 project_title="${PROJECT_TITLE:-}"
+project_owner="${PROJECT_OWNER:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -104,7 +104,10 @@ while [[ $# -gt 0 ]]; do
     --lookback-days) lookback_days="${2:-}"; shift 2 ;;
     --ref) dispatch_ref="${2:-}"; shift 2 ;;
     --project-number) project_number="${2:-}"; shift 2 ;;
-    --project-title) project_title="${2:-}"; shift 2 ;;
+    --project-owner) project_owner="${2:-}"; shift 2 ;;
+    --project-title)
+      # shellcheck disable=SC2034
+      project_title="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -120,6 +123,7 @@ fi
 [[ "${repo}" =~ ^[^/]+/[^/]+$ ]] || { echo "Invalid repo: ${repo}" >&2; exit 1; }
 [[ "${lookback_days}" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid lookback-days: ${lookback_days}" >&2; exit 1; }
 [[ -z "${project_number}" || "${project_number}" =~ ^[0-9]+$ ]] || { echo "Invalid project-number: ${project_number}" >&2; exit 1; }
+if [[ -z "${project_owner}" ]]; then project_owner="${repo%%/*}"; fi
 
 command -v gh >/dev/null 2>&1 || { echo "gh CLI is required" >&2; exit 1; }
 [[ -x "${REPORT_SCRIPT}" || -f "${REPORT_SCRIPT}" ]] || { echo "missing ${REPORT_SCRIPT}" >&2; exit 1; }
@@ -147,7 +151,7 @@ gh_app() {
 # App token, while an offline run needs an explicit PROJECT_NUMBER /
 # PROJECT_TITLE.
 project_configured() {
-  [[ -n "${GH_APP_TOKEN:-}" || -n "${project_number}" || -n "${project_title}" ]]
+  [[ -n "${project_number}" ]]
 }
 
 gh_project() {
@@ -156,46 +160,6 @@ gh_project() {
   else
     gh "$@"
   fi
-}
-
-# Resolve the classic repository Project's id: an explicit --project-number
-# pins it, otherwise find the board by title and create it when missing. Prints
-# the id, or nothing on failure (the caller warns and falls back to the board's
-# built-in auto-add).
-resolve_project_id() {
-  local title="${project_title:-${PROJECT_TITLE_DEFAULT}}"
-  title="${title//\"/}"
-  local id
-  if [[ -n "${project_number}" ]]; then
-    id="$(gh_project api "repos/${repo}/projects?state=all&per_page=100" \
-      --jq ".[] | select(.number == ${project_number}) | .id" 2>/dev/null \
-      | head -n 1 || true)"
-  else
-    id="$(gh_project api "repos/${repo}/projects?state=open&per_page=100" \
-      --jq ".[] | select(.name == \"${title}\") | .id" 2>/dev/null \
-      | head -n 1 || true)"
-    if [[ -z "${id}" ]]; then
-      id="$(gh_project api --method POST "repos/${repo}/projects" \
-        -f "name=${title}" --jq '.id' 2>/dev/null || true)"
-    fi
-  fi
-  [[ "${id}" =~ ^[0-9]+$ ]] || return 1
-  printf '%s\n' "${id}"
-}
-
-# The column a card goes in: the board's first column, or a default one created
-# when the board has none.
-resolve_column_id() {
-  local project_id="${1}"
-  local column_id
-  column_id="$(gh_project api "projects/${project_id}/columns?per_page=100" \
-    --jq '.[0].id' 2>/dev/null || true)"
-  if [[ ! "${column_id}" =~ ^[0-9]+$ ]]; then
-    column_id="$(gh_project api --method POST "projects/${project_id}/columns" \
-      -f "name=${PROJECT_COLUMN_DEFAULT}" --jq '.id' 2>/dev/null || true)"
-  fi
-  [[ "${column_id}" =~ ^[0-9]+$ ]] || return 1
-  printf '%s\n' "${column_id}"
 }
 
 # GitHub rejects an issue/comment body longer than 65536 characters
@@ -270,37 +234,24 @@ comment_file_continuation() {
   done
 }
 
-# Add an issue to the resolved classic Project as a card. A failure only warns:
+# Add an issue to the configured Projects V2 board. A failure only warns:
 # the report and the findings issue are already published, and a Project hiccup
 # must not lose them. Args: issue-url
 add_to_project() {
   local issue_url="${1}"
-  [[ -n "${issue_url}" && -n "${project_column_resolved}" ]] || return 0
-  local number="${issue_url##*/}"
-  local content_id
-  content_id="$(gh_project api "repos/${repo}/issues/${number}" \
-    --jq '.id' 2>/dev/null || true)"
-  if [[ ! "${content_id}" =~ ^[0-9]+$ ]]; then
-    echo "warning: could not resolve issue ${issue_url} for the Project" >&2
-    return 0
-  fi
-  gh_project api --method POST "projects/columns/${project_column_resolved}/cards" \
-    -F "content_id=${content_id}" -f "content_type=Issue" >/dev/null 2>&1 \
+  [[ -n "${issue_url}" && -n "${project_number}" ]] || return 0
+  gh_project project item-add "${project_number}" --owner "${project_owner}" --url "${issue_url}" \
+    >/dev/null 2>&1 \
     || echo "warning: failed to add ${issue_url} to the Project" >&2
 }
 
-# Resolve the board and its column once. project_column_resolved stays empty
-# when there is no Project or it cannot be resolved; the loop then relies on
-# the Project's built-in auto-add.
-project_column_resolved=""
-if project_configured; then
-  if project_id_resolved="$(resolve_project_id)" \
-    && project_column_resolved="$(resolve_column_id "${project_id_resolved}")"; then
-    echo "using classic GitHub Project #${project_id_resolved}" >&2
-  else
-    project_column_resolved=""
-    echo "warning: could not resolve the classic GitHub Project; relying on its built-in auto-add" >&2
-  fi
+# Projects V2 board configuration. The board is addressed by its number and
+# owner; when no number is configured the loop skips Project updates and relies
+# on the board's built-in auto-add.
+if [[ -n "${project_number}" ]]; then
+  echo "using GitHub Project (Projects V2) #${project_number} (owner: ${project_owner})" >&2
+else
+  echo "no Project configured; skipping Project updates" >&2
 fi
 
 # --- 1. collect --------------------------------------------------------------

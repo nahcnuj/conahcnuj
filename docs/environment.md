@@ -35,12 +35,16 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `CONAHCNUJ_POLL_CONDITIONS_MIN` | `15` | 制約ポーリングの最短間隔（秒） |
 | `CONAHCNUJ_POLL_CONDITIONS_MAX` | `300` | 制約ポーリングの最長間隔（秒） |
 | `CONAHCNUJ_COMMIT_MODEL` | 未設定 | コミット trailer（`Co-Authored-By: <値>`。プラグインが `provider (model/effort)` を設定）。未設定なら trailer なし |
+| `CONAHCNUJ_MAX_EFFORT` | 未設定 | 非空で max effort モード（opencode に `--variant max` を渡す）。`--max-effort` フラグでも有効 |
+| `CONAHCNUJ_EFFORT` | 未設定 | `max` で max effort モードを有効にする（issue-driver の `effort` 入力から設定） |
 | `CONAHCNUJ_OPENCODE_LOG_LEVEL` | `WARN` | opencode の `--log-level` |
-| `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow 名（カンマ区切り、空で無効）。issue driver の job 名（`Attempt to resolve issue`）も除外し、reusable workflow として他リポジトリから実行され workflow 名が呼び出し側になる場合も自身の status を待たない |
+| `CONAHCNUJ_OWN_WORKFLOWS` | `Issue auto-drive,Owner-approved auto-merge` | 制約チェックから除外する自 workflow 名（カンマ区切り、空で無効）。issue driver の job 名（`Attempt to resolve issue`）と auto-merge の job 名（`enable`）も除外し、reusable workflow として他リポジトリから実行され workflow 名が呼び出し側になる場合も待たない |
 | `CONAHCNUJ_CONTEXT_FILES` | `README.md AGENTS.md` | 最初のプロンプトへ同梱する作業ツリーファイル（スペース区切り）。空文字で同梱を無効化 |
 | `CONAHCNUJ_MISSING_MODELS_FILE` | `<gh-app>/missing-models` | 永久に使えない（deprecated / 削除済み）モデルの記録先。ラウンド前に読み、判明したモデルを追記する |
 | `CONAHCNUJ_RATE_LIMIT_WATCH_SECONDS` | `1` | provider の rate limit を検知してラウンドを打ち切る監視間隔（秒）。再試行を待たず次モデルへ移る |
 | `CONAHCNUJ_TEST_MODE` | `0` | `1` で offline テストモード |
+| `GITHUB_ACTIONS` | - | `true` / `1` で CI モード: レビュー依頼（reviewer 設定）をもって正常終了し、承認待ちしない |
+| `CONAHCNUJ_CI` | - | `true` / `1` で CI モードを明示的に有効化（`GITHUB_ACTIONS` が無い環境向け） |
 
 ## ドライバ ↔ プラグイン連携（自動設定）
 
@@ -69,9 +73,9 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 
 | 変数 / secret | 使う workflow | 内容 |
 | --- | --- | --- |
-| `secrets.APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY` | issue-driver / weekly-self-improvement | App 認証情報（PEM は `$RUNNER_TEMP` へ書き出し）。weekly-self-improvement では findings issue の作成と classic repository Projects API（card 追加。App に repository の **Projects** 権限が必要）にも使う |
-| `vars.PROJECT_NUMBER` | weekly-self-improvement | 追加先 classic Project の番号。未設定なら `PROJECT_TITLE` で検索・作成 |
-| `vars.PROJECT_TITLE` | weekly-self-improvement | 検索・作成する classic Project 名（既定 `auto-drive self-improvement`） |
+| `secrets.APP_ID` / `INSTALLATION_ID` / `APP_SLUG` / `PRIVATE_KEY` | issue-driver / weekly-self-improvement | App 認証情報（PEM は `$RUNNER_TEMP` へ書き出し）。weekly-self-improvement では findings issue の作成と Projects V2 board への item 追加（App に **Projects** 権限が必要）にも使う |
+| `vars.PROJECT_NUMBER` | weekly-self-improvement | 追加先 Projects V2 board の番号 |
+| `vars.PROJECT_OWNER` | weekly-self-improvement | Projects V2 board の owner login（未設定ならリポジトリ owner） |
 | `CONAHCNUJ_INPUT` | issue-driver | issue / PR 番号（workflow 側の受け渡し用） |
 | `CONAHCNUJ_MAX_SECONDS=3540` | issue-driver | `timeout-minutes: 60` より前に自己終了するための予算 |
 | `OPENCODE_DISABLE_AUTOUPDATE` | issue-driver / e2e | opencode の自動更新を停止 |
@@ -92,6 +96,11 @@ conahcnuj が読む環境変数の全量です。値の意味や設定ファイ�
 | `MOCK_OPENCODE_MESSAGE_ONLY` | 作業ツリー無変更 + `.commit-msg` のみのラウンドを再現 |
 | `MOCK_OPENCODE_NOOP` | 指定モデルを no-op（実装を省略した振る舞い）にする |
 | `MOCK_OPENCODE_SESSION_ID` | モックが返す `sessionID` |
+
+通常の `OPENCODE_TEST_MODE=1` のモックは、実エージェントと同じように
+`git vc` 相当のローカルコミットを作り、`.commit-msg` は残しません。
+`MOCK_OPENCODE_MESSAGE_ONLY` のときだけ、作業ツリーを変えずに `.commit-msg`
+だけを書くラウンドを再現します。
 
 ## 内部変数（実装詳細・上書きしない）
 

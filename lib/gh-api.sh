@@ -416,6 +416,14 @@ gh_api_rollup_state() {
           check_name="$(gh_api_json_str "${node%%\"checkSuite\"*}" "name")"
           case "${check_name}" in
             *"Attempt to resolve issue"*) continue ;;
+            # The auto-merge job keeps the same called job name ("enable")
+            # whether it runs in this repository or as a reusable workflow
+            # called by another repository. Its check run is reported under the
+            # caller's workflow name and prefixed with the caller's job name, so
+            # the workflow-name filter below misses it. Exclude it by job name
+            # too, so a cross-repo run does not wait for the merge job that is
+            # itself waiting for this run (issue #574).
+            *enable) continue ;;
           esac
         fi
         if [[ -n "${workflow}" && ",${skip}," == *",${workflow},"* ]]; then
@@ -707,11 +715,30 @@ gh_api_create_pr() {
   gh_api_json_num "${json}" "number"
 }
 
-# Mark a draft PR ready for review, the undo of creating it as a draft. REST:
-# POST /repos/{owner}/{repo}/pulls/{number}/ready_for_review. Args: owner repo pr
+# Mark a draft PR ready for review, the undo of creating it as a draft. The REST
+# endpoint (POST /repos/{owner}/{repo}/pulls/{number}/ready_for_review) returns
+# 404 for installation (GitHub App) tokens, so this goes through the
+# markPullRequestReadyForReview GraphQL mutation, which needs the PR node id
+# (resolved with one extra query). Args: owner repo pr
 gh_api_ready_pr() {
-  local owner="${1}" repo="${2}" number="${3}"
-  gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/pulls/${number}/ready_for_review" >/dev/null
+  local owner="${1}" repo="${2}" number="${3}" id_json pr_id query
+  local id_query="query { repository(owner: \"${owner}\", name: \"${repo}\") { pullRequest(number: ${number}) { id } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    id_json="$(gh_api_read_line)"
+  else
+    id_json="$(gh_api_graphql "${id_query}")"
+  fi
+  pr_id="$(gh_api_json_str "${id_json}" "id")"
+  if [[ -z "${pr_id}" ]]; then
+    echo "ERROR: could not resolve the node id of PR #${number} to mark it ready for review." >&2
+    return 1
+  fi
+  query="mutation { markPullRequestReadyForReview(input: {pullRequestId: \"${pr_id}\"}) { pullRequest { isDraft } } }"
+  if [[ "${GH_API_TEST_MODE:-0}" == "1" ]]; then
+    gh_api_read_line >/dev/null
+  else
+    gh_api_graphql "${query}" >/dev/null
+  fi
 }
 
 # Convert a PR back to draft. There is no REST endpoint for this, so it goes
@@ -810,11 +837,54 @@ gh_api_post_comment() {
   gh_api_json_num "${json}" "id"
 }
 
+# Build a JSON array of label strings from a comma-separated list.
+gh_api_labels_json() {
+  local input="${1}" IFS=,
+  local -a parts=()
+  read -ra parts <<< "${input}"
+  local out="["
+  local first=1 p
+  for p in "${parts[@]}"; do
+    p="$(printf '%s' "${p}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -z "${p}" ]] && continue
+    if [[ "${first}" == "1" ]]; then
+      first=0
+    else
+      out="${out},"
+    fi
+    out="${out}\"$(gh_api_escape "${p}")\""
+  done
+  out="${out}]"
+  printf '%s' "${out}"
+}
+
 # Create an issue. Args: owner repo title body. Output: issue number.
 gh_api_create_issue() {
   local owner="${1}" repo="${2}" title="${3}" body="${4}"
+  shift 4 2>/dev/null || true
+  local labels_input=""
+  local arg
+  for arg in "$@"; do
+    if [[ -n "${arg}" ]]; then
+      if [[ -z "${labels_input}" ]]; then
+        labels_input="${arg}"
+      else
+        labels_input="${labels_input},${arg}"
+      fi
+    fi
+  done
   local payload
-  payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\"}"
+  if [[ -n "${labels_input}" ]]; then
+    local labels_json
+    if [[ "${labels_input}" == \[* ]]; then
+      labels_json="${labels_input}"
+    else
+      labels_json="$(gh_api_labels_json "${labels_input}")"
+    fi
+    payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\",\"labels\":${labels_json}}"
+  else
+    payload="{\"title\":\"$(gh_api_escape "${title}")\",\"body\":\"$(gh_api_escape "${body}")\"}"
+  fi
   local json
   json="$(gh_api_call POST "https://api.github.com/repos/${owner}/${repo}/issues" "${payload}")"
   gh_api_json_num "${json}" "number"

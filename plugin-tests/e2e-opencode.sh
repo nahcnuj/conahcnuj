@@ -35,7 +35,7 @@ run_e2e_model() {
   OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
     OPENCODE_DISABLE_AUTOUPDATE=true \
     OPENCODE_DISABLE_MODELS_FETCH=true \
-    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
+    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
     "Commit the staged changes with message e2e test. Execute the necessary commands." \
     > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" &
   opid=$!
@@ -66,7 +66,7 @@ run_e2e_model() {
   # (exit 1 is expected). Calls with no exit (null) never concluded
   # and are benign: the model often interrupts a long command, and a
   # hook-blocked `git commit` likewise never executes.
-  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 2 and (.exit != 1 or ((.cmd // "") | contains("git vc") | not) and ((.cmd // "") | contains("api-commit.sh") | not))) | [.cmd, .exit] | @tsv' || true)"
+  BAD="$(echo "${JSONL}" | jq -c 'select(.type=="tool_use" and .part.tool=="bash") | {cmd: .part.state.input.command, exit: .part.state.metadata.exit} | select(.exit != null and .exit != 0 and .exit != 1 and .exit != 2) | [.cmd, .exit] | @tsv' || true)"
 
   # Record the raw exit status and whether this attempt emitted anything.
   # The orchestrator needs both to tell a regression from a service

@@ -39,6 +39,11 @@ unsigned コミットを塞ぐプラグインです。ファイルは `plugins/g
 - **GitHub 認証規則**: `GH_TOKEN` は各シェルへ注入済みなので `gh` をそのまま
   使えばよい。エージェントが `GH_TOKEN` を自分で export したり
   `gh-app/get-token.sh` を実行してトークンを取り直したりしない。
+- **シェル規則**: 実行環境の OS・シェルに応じた規則（null デバイス、
+  行継続、文の区切り文字など）。Windows の PowerShell では `&&` は文の
+  区切り文字として使えず `The token '&&' is not a valid statement separator
+  in this version.` になるため、`&&` を使わず `;` で連結するかコマンドを
+  別々に実行する。
 
 ### `tool.execute.before` - `git commit` のブロック
 

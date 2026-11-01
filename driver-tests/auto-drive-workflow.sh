@@ -206,6 +206,28 @@ case "${cmd}" in
     printf 'dispatch number=%s\n' "${n}" >> "${state}/events"
     echo "created workflow run"
     ;;
+  project)
+    sub="$1"
+    shift
+    case "${sub}" in
+      item-add)
+        number="$1"; shift
+        owner=""; url=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --owner) shift; owner="$1" ;;
+            --url) shift; url="$1" ;;
+          esac
+          shift
+        done
+        printf 'project item-add %s --owner %s --url %s\n' "${number}" "${owner}" "${url}" >> "${state}/events"
+        ;;
+      *)
+        echo "mock: unhandled project subcommand: ${sub}" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   *)
     echo "mock: unhandled gh command: ${cmd} $*" >&2
     exit 1
@@ -312,10 +334,11 @@ Driver exited abnormally (code 1); filing a bug report issue in nahcnuj/conahcnu
 Bug report issue #140 created: https://github.com/nahcnuj/conahcnuj/issues/140
 EOF
 export GH_APP_TOKEN=test-app-token
+export PROJECT_NUMBER=7
 run_workflow
-grep -q '^project create auto-drive self-improvement$' "${ROOT}/state/events" \
+grep -q '^project item-add 7 --owner nahcnuj --url ' "${ROOT}/state/events" \
   || { echo "FAIL: the classic Project must be created when missing"; cat "${ROOT}/state/events"; exit 1; }
-[[ "$(grep -c '^project card ' "${ROOT}/state/events" || true)" == "2" ]] \
+[[ "$(grep -c '^project item-add ' "${ROOT}/state/events" || true)" == "2" ]] \
   || { echo "FAIL: the tracking and findings issues must both become cards"; cat "${ROOT}/state/events"; exit 1; }
 
 # Re-running with the issues already present must still add them as cards and
@@ -327,9 +350,10 @@ grep -q '^project create ' "${ROOT}/state/events" \
   && { echo "FAIL: an existing Project must not be re-created"; cat "${ROOT}/state/events"; exit 1; }
 grep -q '^issue comment' "${ROOT}/state/events" \
   || { echo "FAIL: the second run must comment on the existing issues"; cat "${ROOT}/state/events"; exit 1; }
-[[ "$(grep -c '^project card ' "${ROOT}/state/events" || true)" == "2" ]] \
+[[ "$(grep -c '^project item-add ' "${ROOT}/state/events" || true)" == "2" ]] \
   || { echo "FAIL: the existing tracking and findings issues must also become cards"; cat "${ROOT}/state/events"; exit 1; }
 unset GH_APP_TOKEN
+unset PROJECT_NUMBER
 
 # --- no Project reachable: the Projects API stays untouched ------------------
 # Without the App token (offline) or an explicit PROJECT_NUMBER / PROJECT_TITLE

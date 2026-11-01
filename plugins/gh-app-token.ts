@@ -155,6 +155,13 @@ async function resolveBotUserId(slug: string): Promise<string> {
     throw new Error(`Unexpected user lookup response for ${slug}[bot].`)
   }
   const id = String((data as { id: number }).id)
+  // The value written below is the bot account's numeric user ID, validated
+  // as digits only; it is not arbitrary response data.
+  // codeql[js/http-to-file-access]
+  // lgtm[js/http-to-file-access]
+  if (!/^\d+$/.test(id)) {
+    throw new Error(`Unexpected bot user ID in lookup response: ${id}`)
+  }
   try {
     fs.writeFileSync(BOT_ID_CACHE_FILE, id, "utf8")
   } catch {
@@ -323,6 +330,8 @@ const COMMIT_RULES = [
   `them. Commit with the \`git vc\` alias instead (${VC_USAGE}): it collects the`,
   "same content as `git commit` (add files with `git add` first; `-a` for",
   "tracked worktree changes) but GitHub creates and verifies the commit.",
+  "`git vc` is a git alias (not a separate executable): run it directly as `git vc ...`;",
+  "do not search for a `git-vc` binary and do not try `git commit`.",
   "Prefer `git vc` over `git commit` and use it naturally. Do not run `git commit`,",
   "and do not run gh-app/api-commit.sh or any other gh-app script directly:",
   "`git vc` is the supported wrapper around it.",
@@ -368,10 +377,41 @@ const HEAD_TAIL_GREP_AVAILABLE =
   process.platform === "win32"
     ? "`head`, `tail`, and `grep` are available as commands here (provided by Git for Windows), so you may use them in shell commands"
     : "`head`, `tail`, and `grep` are available as commands here"
+const NULL_DEVICE_AVAILABLE =
+  process.platform === "win32"
+    ? "there is no `/dev/null` device on PowerShell: redirect to `$null` (for example `2>$null`) or pipe to `Out-Null` instead of `>/dev/null` or `2>/dev/null`"
+    : "`/dev/null` is the null device and may be used for redirection"
+const LINE_CONTINUATION_AVAILABLE =
+  process.platform === "win32"
+    ? "PowerShell uses a backtick (`) for line continuation, not a backslash (\\)"
+    : "a backslash (\\) continues a command onto the next line"
+// On Windows PowerShell 5.1 `&&` is not a valid statement separator, so a
+// command chained with `&&` fails with "The token '&&' is not a valid
+// statement separator in this version.". Chain with `;` (or run the
+// commands separately) instead. Issue #1516.
+const STATEMENT_SEPARATOR_AVAILABLE =
+  process.platform === "win32"
+    ? "on this PowerShell `&&` is NOT a valid statement separator and fails with \"The token '&&' is not a valid statement separator in this version.\"; chain commands with `;` or run them separately instead of `&&`"
+    : "`&&` is a valid statement separator here and may be used to chain commands"
+const POWERSHELL_USE =
+  process.platform === "win32"
+    ? "On Windows, use PowerShell (the shell this session runs in) for shell commands: prefer PowerShell cmdlets and built-ins, check availability with Get-Command before relying on a command, and quote paths that contain spaces."
+    : "On this platform, use the shell's own commands or node/python; check availability with command -v before relying on a command. Do not run `powershell` or `pwsh` (Windows-only shells, not installed here; 'powershell' is not recognized as a command on this platform)."
+const SHELL_EQUIVALENTS =
+  process.platform === "win32"
+    ? "use PowerShell equivalents or node"
+    : "use the shell's own commands or node/python"
+const NODE_AVAILABLE =
+  "Node and npm are on PATH (the plugin adds the directory of the node binary opencode runs on), so use `node`/`npm` directly instead of searching the filesystem for them."
 const SHELL_RULES = [
   `Shell environment: this session runs on ${SHELL_PLATFORM} (${process.platform}) in ${SHELL_NAME}; ${HEAD_TAIL_GREP_AVAILABLE}.`,
+  `Null device: ${NULL_DEVICE_AVAILABLE}.`,
+  `Line continuation: ${LINE_CONTINUATION_AVAILABLE}.`,
+  `Statement separator: ${STATEMENT_SEPARATOR_AVAILABLE}.`,
   "First determine the OS and shell you are actually running in before relying on any command, and re-check availability if they differ from the above.",
-  "Read files with the read tool and search with the grep/glob tools instead; if a shell command is unavoidable, use PowerShell equivalents or node/python.",
+  `Read files with the read tool and search with the grep/glob tools instead; if a shell command is unavoidable, ${SHELL_EQUIVALENTS}.`,
+  POWERSHELL_USE,
+  NODE_AVAILABLE,
 ].join(" ")
 
 import {
@@ -435,6 +475,22 @@ async function injectShellEnv(
     const present = current.split(path.delimiter).some((e) => norm(e) === norm(usrBin))
     if (!present) {
       const next = current ? `${usrBin}${path.delimiter}${current}` : usrBin
+      env.PATH = next
+    }
+  }
+
+  // Node (and npm, which ships beside it) may not be on PATH in the agent's
+  // shell even though opencode itself runs on it (e.g. when node is managed
+  // by fnm/nvm and only activated for opencode's own process). Inject the
+  // directory of the node binary opencode is running on so the agent can use
+  // `node`/`npm` without searching the filesystem. No-op when absent.
+  const nodeDir = path.dirname(process.execPath)
+  if (nodeDir && fs.existsSync(nodeDir)) {
+    const current = env.PATH || env.Path || process.env.PATH || ""
+    const norm = (v: string) => v.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+    const present = current.split(path.delimiter).some((e) => norm(e) === norm(nodeDir))
+    if (!present) {
+      const next = current ? `${nodeDir}${path.delimiter}${current}` : nodeDir
       env.PATH = next
     }
   }

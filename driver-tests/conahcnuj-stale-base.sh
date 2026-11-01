@@ -55,6 +55,8 @@ sed "s/REAL_OID_PLACEHOLDER/${REAL_OID}/" > "${TAPE}" <<'EOF'
 {"data":{"repository":{"pullRequests":{"nodes":[]}}}}
 {"data":{"repository":{"id":"R_kgDOXmplR3p"}}}
 {"data":{"createPullRequest":{"pullRequest":{"number":124}}}}
+{}
+{}
 {"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED","reviews":{"nodes":[{"state":"APPROVED","body":"LGTM","author":{"login":"reviewer"}}]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}
 {"data":{"repository":{"pullRequest":{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}}}}
 EOF
@@ -80,7 +82,7 @@ echo "-----------------------------"
 
 grep -q "Implementing with available models" "${LOG}" || { echo "FAIL: the driver skipped implementation despite an empty branch"; exit 1; }
 grep -q "already has commits; skipping implement" "${LOG}" && { echo "FAIL: the stale origin/main ref wrongly triggered the already-done skip"; exit 1; }
-grep -q "Created PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; exit 1; }
+grep -q "Created draft PR #124" "${LOG}" || { echo "FAIL: PR #124 was not created"; exit 1; }
 grep -q "Ready to merge" "${LOG}" || { echo "FAIL: no ready-to-merge line"; exit 1; }
 
 # Here-string, not `git log | grep -q`: under `set -o pipefail` an early
