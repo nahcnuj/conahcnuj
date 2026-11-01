@@ -53,16 +53,33 @@ OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
 # other models stay in the pool.
 OPENCODE_ROUND_RATE_LIMITED="false"
 
+# Resolve the opencode executable, even when it is installed in a location that
+# is not on PATH (e.g. ~/.opencode/bin under WSL). Prints the path and returns
+# 0 on success, 1 when opencode cannot be found.
+opencode_command() {
+  if command -v opencode >/dev/null 2>&1; then
+    printf '%s\n' "opencode"
+    return 0
+  fi
+  local candidate
+  for candidate in /home/*/.opencode/bin/opencode /root/.opencode/bin/opencode "${HOME}/.opencode/bin/opencode"; do
+    if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # List available models, one per line. Test mode: $MOCK_OPENCODE_MODELS.
 opencode_get_models() {
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
     printf '%s\n' "${MOCK_OPENCODE_MODELS:-}"
     return 0
   fi
-  if ! command -v opencode >/dev/null 2>&1; then
-    return 1
-  fi
-  opencode models 2>/dev/null | tr -d '\r' | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+  local oc
+  oc="$(opencode_command)" || return 1
+  "${oc}" models 2>/dev/null | tr -d '\r' | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 }
 
 
@@ -451,9 +468,11 @@ opencode_run() {
   # $PIPESTATUS stays aligned with opencode.
   prompt_file="$(mktemp)"
   printf '%s\n' "${prompt}" > "${prompt_file}"
-  executable=(opencode)
+  local oc_bin
+  oc_bin="$(opencode_command)" || oc_bin="opencode"
+  executable=("${oc_bin}")
   if [[ -n "${CONAHCNUJ_RUN_TIMEOUT_SECONDS:-}" ]]; then
-    executable=(timeout --signal=TERM --kill-after=30s "${CONAHCNUJ_RUN_TIMEOUT_SECONDS}s" opencode)
+    executable=(timeout --signal=TERM --kill-after=30s "${CONAHCNUJ_RUN_TIMEOUT_SECONDS}s" "${oc_bin}")
   fi
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
