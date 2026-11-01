@@ -1,63 +1,19 @@
 name: Issue auto-drive
 
-# When an issue is created or reopened, a non-approval review is submitted,
-# edited, or dismissed, a required check (the CI workflow) fails on a pull
-# request, the workflow is dispatched by hand, or another repository's workflow
-# calls this one (`workflow_call` with a `number` input), attempt to resolve it
-# with the conahcnuj driver end-to-end (feature branch -> PR -> review feedback)
-# and end with a ready-to-merge PR, or file a bug-report issue on failure.
-#
-# Reusable use checks out this workflow's own repository
-# (`job.workflow_repository` at `job.workflow_sha`) for the driver scripts and
-# drives the issue or PR in the caller's repository (`inputs.repository`,
-# defaulting to the caller). When the target is not the driver's own repository
-# the target is checked out again into the working directory and the driver runs
-# from there, so its git operations (branch, fetch, Verified commits) and the
-# coding agent's edits all act on the target, exactly like makamujo's local
-# auto-drive pattern; the caller needs no copy of the driver.
-# The caller passes the GitHub App secrets (`secrets: inherit` within the same
-# organization or enterprise, named secrets otherwise); the job-level
-# `environment` (default `conahcnuj`, overridable with `inputs.environment`)
-# still decides which environment secrets win over the passed ones.
-#
-# The timeout is controlled on the Actions side: "timeout-minutes" below is
-# the hard cap for the whole job, and CONAHCNUJ_MAX_SECONDS is kept just under
-# it so the driver wraps up on its own and files its bug report (exit 1)
-# before the runner kills the job. Bump both together when changing the budget.
-#
-# Least privilege for GITHUB_TOKEN: contents: read is all the runner needs for
-# checkout and the opencode install. Every write the driver performs (feature
-# branch, Verified commits, PR, review requests, comments, bug-report issues)
-# goes through the GitHub App installation token from gh-app/get-token.sh,
-# exactly like a local run.
-
 on:
-  issues:
-    types: [opened, reopened]
-  pull_request_review:
-    types: [submitted, edited, dismissed]
-  # A failed required check is itself a reason to resume the driver: it re-runs,
-  # sees the failing constraint and hands a fix round to the coding agent. The
-  # trigger is the CI workflow's completion rather than check_run / check_suite:
-  # those also fire for this driver's own run and would recurse, while
-  # workflow_run lets the `on` side name the workflow to watch, and the job `if`
-  # keeps only the failures (on a same-repository pull request).
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+#  issues:
+#    types: [opened, reopened]
+#  pull_request_review:
+#    types: [submitted, edited, dismissed]
+#  workflow_run:
+#    workflows: [CI]
+#    types: [completed]
   workflow_dispatch:
     inputs:
       number:
         description: Issue or pull request number to continue
         required: true
         type: number
-  # Another repository drives one of its issues or pull requests by calling
-  # this workflow. The job `if` below runs whenever `inputs.number` is set, and
-  # the driver checkout follows this file (`job.workflow_repository` at
-  # `job.workflow_sha`), not the caller. The target repository (`repository`,
-  # defaulting to the caller) is checked out separately below and the driver
-  # runs from inside it. Secrets are passed with `secrets: inherit` (same
-  # organization or enterprise) or by name.
   workflow_call:
     inputs:
       number:
