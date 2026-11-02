@@ -51,6 +51,7 @@ jobs:
           set -e
           out="${RUNNER_TEMP}/opencode-gh-auth.jsonl"
           err="${RUNNER_TEMP}/opencode-gh-auth.err"
+          export GH_TOKEN="${GITHUB_TOKEN:-}"
           timeout 180s opencode run --auto --format json --model opencode/mimo-v2.6-flash-free \
             "Run the command \`gh auth status\` and report whether it succeeded." \
             > "$out" 2> "$err" || true
