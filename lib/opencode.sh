@@ -353,9 +353,9 @@ opencode_run() {
       mock_variant_arg=" --variant ${_mv}"
     fi
     if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --auto --format json --model %s --dir %s%s --session %s %s\n' "${model}" "${workdir}" "${mock_variant_arg}" "${session_id}" "${prompt}"
+      printf 'opencode run --auto --format json --model %s%s --session %s %s\n' "${model}" "${mock_variant_arg}" "${session_id}" "${prompt}"
     else
-      printf 'opencode run --auto --format json --model %s --dir %s%s --title conahcnuj %s\n' "${model}" "${workdir}" "${mock_variant_arg}" "${prompt}"
+      printf 'opencode run --auto --format json --model %s%s --title conahcnuj %s\n' "${model}" "${mock_variant_arg}" "${prompt}"
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
@@ -517,7 +517,7 @@ opencode_run() {
   fi
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
-  args=(run --auto --print-logs --thinking --format json --model "${model}" --dir "${workdir}")
+  args=(run --auto --print-logs --thinking --format json --model "${model}")
   local _effort_variant
   _effort_variant="$(opencode_effort_variant 2>/dev/null || true)"
   if [[ -n "${_effort_variant}" ]]; then
