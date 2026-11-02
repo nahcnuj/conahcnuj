@@ -51,25 +51,10 @@ jobs:
           set -e
           out="${RUNNER_TEMP}/opencode-gh-auth.jsonl"
           err="${RUNNER_TEMP}/opencode-gh-auth.err"
-          set +e
           timeout 180s opencode run --auto --format json --model opencode/mimo-v2.6-flash-free \
             "Run the command \`gh auth status\` and report whether it succeeded." \
-            > "$out" 2> "$err"
-          rc=$?
-          set -e
-          echo "opencode exit code: $rc"
-          echo "opencode version: $(opencode --version 2>&1)"
-          # Treat a run that produced no events as an inconclusive service
-          # problem rather than a plugin regression, mirroring e2e-opencode.
-          if [ ! -s "$out" ]; then
-            echo "opencode gh auth INCONCLUSIVE (no output); treating as pass"
-            exit 0
-          fi
-          # Treat opencode service/server errors as inconclusive (transient upstream)
-          if grep -qi '"type":"error"' "$out" 2>/dev/null && grep -qi '"UnknownError"\|server error\|Check server logs' "$out" 2>/dev/null; then
-            echo "opencode gh auth INCONCLUSIVE (server error); treating as pass"
-            exit 0
-          fi
+            > "$out" 2> "$err" || true
+
           echo "=== stdout ==="
           cat "$out" 2>/dev/null || true
           echo "=== stderr ==="
