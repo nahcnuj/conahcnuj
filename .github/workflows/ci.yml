@@ -360,12 +360,7 @@ jobs:
             exit 0
           fi
           if grep -q "E2E SKIP:" "$log"; then
-            echo "e2e-opencode.sh skipped: no verdict from the free-model service (inconclusive); treating as pass" >&2
-            exit 0
-          fi
-          if grep -qi "free-limit\|Free usage limit\|FreeUsageLimit" "$log"; then
-            echo "e2e-opencode.sh inconclusive: free-model service rate-limited; treating as pass" >&2
-            exit 0
+            echo "e2e-opencode.sh skipped: no verdict from the free-model service (inconclusive)" >&2
           fi
           echo "e2e-opencode.sh failed (exit ${rc})" >&2
           exit 1
