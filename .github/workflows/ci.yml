@@ -293,6 +293,21 @@ jobs:
       - name: Run plugin smoke test
         run: bash plugin-tests/smoke.sh
 
+  e2e-opencode:
+    name: OpenCode e2e plugin test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install opencode
+        uses: ./.github/actions/install-opencode
+
+      - name: Run e2e plugin test
+        run: bash plugin-tests/e2e-opencode.sh
+
   docs:
     name: Build docs site
     runs-on: ubuntu-latest

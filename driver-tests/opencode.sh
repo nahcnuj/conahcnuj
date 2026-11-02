@@ -212,9 +212,9 @@ EOF
   [[ "${args}" == *"--model opencode/second"* ]]
   [[ "${args}" == *"--session ses_parsed"* ]]
   # Thinking and a quiet log level are part of a readable log: --thinking makes
-  # the model show its reasoning, --log-level WARN drops the INFO boot chatter.
+  # the model show its reasoning, --log-level warn drops the INFO boot chatter.
   [[ "${args}" == *"--thinking"* ]]
-  [[ "${args}" == *"--log-level WARN"* ]]
+  [[ "${args}" == *"--log-level warn"* ]]
   CONAHCNUJ_OPENCODE_LOG_LEVEL=DEBUG opencode_run "Issue" "Body" "${tmp}" "opencode/third" >/dev/null || rc=$?
   args="$(cat "${OPENCODE_ARGS_FILE}")"
   [[ "${args}" == *"--log-level DEBUG"* ]]
