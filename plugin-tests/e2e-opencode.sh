@@ -29,6 +29,16 @@ run_e2e_model() {
   # never overwritten.
   # shellcheck disable=SC2064  # expand $status_file now; it is unset at EXIT
   trap "[ -f '${status_file}' ] || echo fail > '${status_file}'" EXIT
+  # Mock model: emit a synthetic transcript containing `git vc` and exit 0,
+  # so the E2E test passes without the free-model service, a real opencode
+  # model run, or any network access. Controlled by CONAHCNUJ_E2E_MOCK_MODEL.
+  if [ -n "${CONAHCNUJ_E2E_MOCK_MODEL:-}" ] && [ "${model}" = "${CONAHCNUJ_E2E_MOCK_MODEL}" ]; then
+    printf '{"type":"tool_use","part":{"tool":"bash","state":{"status":"success","metadata":{"exit":0},"input":{"command":"git vc -m \"e2e test\""}}}}\n' > "${slot_dir}/out.jsonl"
+    echo 0 > "${E2E_DIR}/results/r${round}-${slot}.rc"
+    : > "${E2E_DIR}/results/r${round}-${slot}.output"
+    echo ok > "${status_file}"
+    return 0
+  fi
   cp -a "${RUNNER_TEMP}/e2e-inst" "${slot_dir}/inst"
   cp -a "${RUNNER_TEMP}/e2e-fixture" "${slot_dir}/fixture"
 
@@ -91,21 +101,32 @@ run_e2e_model() {
   return 1
 }
 
-MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
-if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
-# Skip models the repository has recorded as permanently unavailable
-# (gh-app/missing-models, the same committed list the driver reads). Trying a
-# dead model wastes a parallel slot and its timeout dominates the round (#209).
-E2E_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-E2E_MISSING_MODELS="${CONAHCNUJ_MISSING_MODELS_FILE:-${E2E_REPO_ROOT}/gh-app/missing-models}"
-if [ -f "${E2E_MISSING_MODELS}" ]; then
-  E2E_SKIP_MODELS="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "${E2E_MISSING_MODELS}" | grep -v '^$' || true)"
-  if [ -n "${E2E_SKIP_MODELS}" ]; then
-    E2E_SKIP_FILE="$(mktemp)"
-    printf '%s\n' "${E2E_SKIP_MODELS}" > "${E2E_SKIP_FILE}"
-    MODELS="$(printf '%s\n' "${MODELS}" | grep -vxF -f "${E2E_SKIP_FILE}" || true)"
-    rm -f "${E2E_SKIP_FILE}"
-    if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
+# When CONAHCNUJ_E2E_MOCK_MODEL is set the E2E run uses a synthetic model
+# instead of the free-model service: `opencode models` reports it and
+# `opencode run` with it emits a minimal transcript containing `git vc` and
+# exits 0. This makes the E2E test deterministic and offline-safe (no network,
+# no flaky free models, no opencode install required for the model run itself).
+# See issue #883.
+if [ -n "${CONAHCNUJ_E2E_MOCK_MODEL:-}" ]; then
+  MODELS="${CONAHCNUJ_E2E_MOCK_MODEL}"
+  echo "E2E mock model: ${MODELS}"
+else
+  MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
+  if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
+  # Skip models the repository has recorded as permanently unavailable
+  # (gh-app/missing-models, the same committed list the driver reads). Trying a
+  # dead model wastes a parallel slot and its timeout dominates the round (#209).
+  E2E_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  E2E_MISSING_MODELS="${CONAHCNUJ_MISSING_MODELS_FILE:-${E2E_REPO_ROOT}/gh-app/missing-models}"
+  if [ -f "${E2E_MISSING_MODELS}" ]; then
+    E2E_SKIP_MODELS="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "${E2E_MISSING_MODELS}" | grep -v '^$' || true)"
+    if [ -n "${E2E_SKIP_MODELS}" ]; then
+      E2E_SKIP_FILE="$(mktemp)"
+      printf '%s\n' "${E2E_SKIP_MODELS}" > "${E2E_SKIP_FILE}"
+      MODELS="$(printf '%s\n' "${MODELS}" | grep -vxF -f "${E2E_SKIP_FILE}" || true)"
+      rm -f "${E2E_SKIP_FILE}"
+      if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
+    fi
   fi
 fi
 echo "Available models:"
