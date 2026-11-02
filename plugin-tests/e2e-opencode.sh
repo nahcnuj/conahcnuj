@@ -32,12 +32,15 @@ run_e2e_model() {
   cp -a "${RUNNER_TEMP}/e2e-inst" "${slot_dir}/inst"
   cp -a "${RUNNER_TEMP}/e2e-fixture" "${slot_dir}/fixture"
 
-  OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
-    OPENCODE_DISABLE_AUTOUPDATE=true \
-    OPENCODE_DISABLE_MODELS_FETCH=true \
-    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
-    "Commit the staged changes with message e2e test. Execute the necessary commands." \
-    > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" &
+  (
+    cd "${slot_dir}/fixture" || exit 1
+    OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
+      OPENCODE_DISABLE_AUTOUPDATE=true \
+      OPENCODE_DISABLE_MODELS_FETCH=true \
+      timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --title e2e \
+      "Commit the staged changes with message e2e test. Execute the necessary commands." \
+      > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log"
+  ) &
   opid=$!
   # The orchestrator stops this attempt with a signal once another model
   # already surfaced `git vc`. A foreground `timeout`/opencode would ignore
@@ -89,7 +92,7 @@ run_e2e_model() {
 }
 
 MODELS="$(opencode models 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || true)"
-if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
 # Skip models the repository has recorded as permanently unavailable
 # (gh-app/missing-models, the same committed list the driver reads). Trying a
 # dead model wastes a parallel slot and its timeout dominates the round (#209).
@@ -102,7 +105,7 @@ if [ -f "${E2E_MISSING_MODELS}" ]; then
     printf '%s\n' "${E2E_SKIP_MODELS}" > "${E2E_SKIP_FILE}"
     MODELS="$(printf '%s\n' "${MODELS}" | grep -vxF -f "${E2E_SKIP_FILE}" || true)"
     rm -f "${E2E_SKIP_FILE}"
-    if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.5-free"; fi
+    if [ -z "${MODELS}" ]; then MODELS="opencode/mimo-v2.6-flash-free"; fi
   fi
 fi
 echo "Available models:"
