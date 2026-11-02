@@ -442,9 +442,13 @@ async function injectShellEnv(
 ): Promise<void> {
   const token = await getInstallationToken().catch(() => null)
 
-  // GH_TOKEN: lets gh CLI / GitHub API calls run as the App.
+  // GH_TOKEN: lets gh CLI / GitHub API calls run as the App. When the App
+  // isn't configured (no secrets), fall back to the ambient GITHUB_TOKEN so
+  // gh still works in CI / containers without the App key.
   if (token) {
     env.GH_TOKEN = token
+  } else if (env.GITHUB_TOKEN || process.env.GITHUB_TOKEN) {
+    env.GH_TOKEN = (env.GITHUB_TOKEN || process.env.GITHUB_TOKEN) as string
   }
 
   // GIT_CONFIG_*: force every git operation in this project to use the App identity.

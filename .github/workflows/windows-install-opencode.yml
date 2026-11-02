@@ -18,7 +18,7 @@ jobs:
     env:
       APP_ID: ${{ secrets.APP_ID }}
       INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
-      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
