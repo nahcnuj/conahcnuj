@@ -19,84 +19,8 @@ const assert = require("node:assert")
 async function main() {
   const [expectedSlug, expectedId] = process.argv.slice(2)
   assert(expectedSlug && expectedId, "usage: node smoke-run.js <app slug> <bot id>")
-  const mod = require("./.smoke/out/gh-app-token.js")
-  const hooks = {}
-  const ctx = {
-    location: { directory: process.cwd(), project: { id: "test" } },
-    options: {},
-    session: { hook: (name, cb) => { hooks[name] = cb; return { dispose() {} } } },
-    shell: { hook: (name, cb) => { hooks[name] = cb; return { dispose() {} } } },
-    tool: { hook: (name, cb) => { hooks[name] = cb; return { dispose() {} } } },
-  }
-  await mod.default.setup(ctx)
-  const plugin = {}
-  plugin["shell.env"] = async (input, output) => {
-    await hooks["create.before"]({
-      command: "",
-      cwd: (input && input.cwd) || ".",
-      timeout: 0,
-      shell: "",
-      env: output.env,
-      sessionID: (input && input.sessionID) || "",
-    })
-  }
-  plugin["tool.execute.before"] = async (input, output) => {
-    await hooks["execute.before"]({
-      tool: input.tool,
-      sessionID: "s",
-      agent: "a",
-      messageID: "m",
-      id: "c",
-      input: output.args,
-    })
-  }
-  plugin["experimental.chat.system.transform"] = async (_input, output) => {
-    await hooks["context"]({
-      sessionID: "s",
-      model: { providerID: "p", id: "m" },
-      system: output.system,
-      messages: [],
-      options: {},
-      agent: "a",
-      tools: {},
-    })
-  }
-  plugin["chat.message"] = async (input) => {
-    const model = input.model
-      ? {
-          providerID: input.model.providerID,
-          id: input.model.modelID,
-          variant: input.variant,
-        }
-      : undefined
-    await hooks["context"]({
-      sessionID: input.sessionID,
-      model,
-      system: [],
-      messages: [],
-      options: {},
-      agent: "a",
-      tools: {},
-    })
-  }
-  plugin["chat.params"] = async (input) => {
-    const model = input.model
-      ? {
-          providerID: input.model.providerID,
-          id: input.model.id,
-          variant: input.model.variant,
-        }
-      : undefined
-    await hooks["context"]({
-      sessionID: (input && input.sessionID) || "s",
-      model,
-      system: [],
-      messages: [],
-      options: {},
-      agent: "a",
-      tools: {},
-    })
-  }
+  const { GhAppTokenPlugin } = require("./.smoke/out/gh-app-token.js")
+  const plugin = await GhAppTokenPlugin({})
   assert(plugin["shell.env"], "missing shell.env hook")
   assert(plugin["tool.execute.before"], "missing tool.execute.before hook")
 
@@ -162,7 +86,7 @@ async function main() {
     3,
     "commit, GitHub-auth, and shell rules were not injected into the system prompt"
   )
-  const rules = sysOutput.system[0].text || sysOutput.system[0]
+  const rules = sysOutput.system[0]
   assert(!/[\r\n]/.test(rules), "commit rules must be a single line")
   assert(rules.includes("`git vc`"), `rules must name git vc: ${rules}`)
   assert(
@@ -175,14 +99,14 @@ async function main() {
   )
   // The GitHub-auth rule tells the agent GH_TOKEN is already set (issue #210),
   // so it stops re-issuing a token itself.
-  const githubRules = (sysOutput.system[1].text || sysOutput.system[1])
+  const githubRules = sysOutput.system[1]
   assert(!/[\r\n]/.test(githubRules), "GitHub-auth rules must be a single line")
   assert(
     githubRules.includes("`GH_TOKEN`") && githubRules.includes("Do not export"),
     `rules must state GH_TOKEN is pre-set and must not be exported: ${githubRules}`
   )
   // The shell rule names the real platform (issue #369).
-  const shellRules = (sysOutput.system[2].text || sysOutput.system[2])
+  const shellRules = sysOutput.system[2]
   assert(!/[\r\n]/.test(shellRules), "shell rules must be a single line")
   assert(shellRules.includes(process.platform), `rules must name the platform: ${shellRules}`)
   // Long commands must raise the shell tool's own timeout (issue #629).

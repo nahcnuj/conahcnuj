@@ -12,11 +12,7 @@ unsigned コミットを塞ぐプラグインです。ファイルは `plugins/g
 
 ## フック
 
-V2 プラグインは default export の `id` と `setup(ctx)` を持ち、フックは
-`setup` の中でドメインごとに登録します（V1 のようにフック名のオブジェクトを
-返しません）。このプラグインは次の 3 つを登録します。
-
-### `ctx.shell.hook("create.before")` - シェルへの注入
+### `shell.env` - シェルへの注入
 
 セッションが起動するすべてのシェルに次を注入します。
 
@@ -34,7 +30,7 @@ V2 プラグインは default export の `id` と `setup(ctx)` を持ち、フ�
 | `commit.gpgsign` | `false` |
 | `alias.vc` | `!"<BASH_EXE>" "<gh-app>/api-commit.sh"`（[git vc](#git-vc)） |
 
-### `ctx.session.hook("context")` - システムプロンプトへの規則注入
+### `experimental.chat.system.transform` - システムプロンプトへの規則注入
 
 全セッションのシステムプロンプトへ 1 行ずつの規則を追加します（重複しません）。
 
@@ -52,17 +48,16 @@ V2 プラグインは default export の `id` と `setup(ctx)` を持ち、フ�
   シェルの `timeout` や `Start-Sleep` ではなく、ツール呼び出しの
   `timeout`（ミリ秒）を大きくして実行するよう伝える（#629）。
 
-### `ctx.tool.hook("execute.before")` - `git commit` のブロック
+### `tool.execute.before` - `git commit` のブロック
 
 bash ツールが `git commit`（`git.exe commit`、`-C <dir> commit` も含む）を呼ぼうと
 すると、`Commits must have verified signatures` でブロックされる旨と代替手段
 （`git vc -m "<メッセージ>" [-a]`）を示すエラーで失敗させます。他の git サブコマンドは
 通します。
 
-### モデルラベルの記録
+### `chat.message` / `chat.params` - モデルラベルの記録
 
-`ctx.session.hook("context")` はモデルリクエストのたびに呼ばれるため、そこでも
-セッションのモデルを記録します。セッションのモデルの表示名と effort（variant）を組み合わせた 1 行ラベル
+セッションのモデルの表示名と effort（variant）を組み合わせた 1 行ラベル
 （例: `Grok 4.7 (medium)`）を記録し、`CONAHCNUJ_MODEL_LABEL_FILE` が設定されていれば
 そのファイルへ 1 行で書き込みます（パスはシステムの temp ディレクトリ配下に
 限定）。`CONAHCNUJ_SESSION_MODEL` が設定されているときは、そのモデル

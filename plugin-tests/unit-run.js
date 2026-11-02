@@ -94,80 +94,8 @@ function loadPlugin() {
   return require(PLUGIN_MODULE)
 }
 
-let currentHooks = {}
-
 async function freshHooks() {
-  const mod = loadPlugin()
-  currentHooks = {}
-  const ctx = {
-    location: { directory: STAGE_DIR, project: { id: "test" } },
-    options: {},
-    session: { hook: (name, cb) => { currentHooks[name] = cb; return { dispose() {} } } },
-    shell: { hook: (name, cb) => { currentHooks[name] = cb; return { dispose() {} } } },
-    tool: { hook: (name, cb) => { currentHooks[name] = cb; return { dispose() {} } } },
-  }
-  await mod.default.setup(ctx)
-  const plugin = {}
-  plugin["tool.execute.before"] = async (input, output) => {
-    await currentHooks["execute.before"]({
-      tool: input.tool,
-      sessionID: "s",
-      agent: "a",
-      messageID: "m",
-      id: "c",
-      input: output.args,
-    })
-  }
-  plugin["shell.env"] = async (input, output) => {
-    await currentHooks["create.before"]({
-      command: "",
-      cwd: (input && input.cwd) || ".",
-      timeout: 0,
-      shell: "",
-      env: output.env,
-      sessionID: (input && input.sessionID) || "",
-    })
-  }
-  plugin["experimental.chat.system.transform"] = async (_input, output) => {
-    await currentHooks["context"]({
-      sessionID: "s",
-      model: { providerID: "p", id: "m" },
-      system: output.system,
-      messages: [],
-      options: {},
-      agent: "a",
-      tools: {},
-    })
-  }
-  plugin["chat.message"] = async (input) => {
-    const model = input.model
-      ? { providerID: input.model.providerID, id: input.model.modelID, variant: input.variant }
-      : undefined
-    await currentHooks["context"]({
-      sessionID: input.sessionID,
-      model,
-      system: [],
-      messages: [],
-      options: {},
-      agent: "a",
-      tools: {},
-    })
-  }
-  plugin["chat.params"] = async (input) => {
-    const model = input.model
-      ? { providerID: input.model.providerID, id: input.model.id, variant: input.model.variant }
-      : undefined
-    await currentHooks["context"]({
-      sessionID: (input && input.sessionID) || "s",
-      model,
-      system: [],
-      messages: [],
-      options: {},
-      agent: "a",
-      tools: {},
-    })
-  }
-  return plugin
+  return loadPlugin().GhAppTokenPlugin({})
 }
 
 // --- test registry ----------------------------------------------------------
@@ -262,7 +190,7 @@ test("module: exports the plugin factory and nothing else", () => {
   const mod = loadPlugin()
   // opencode's loader treats every export as a plugin, so a second export
   // would be loaded as a second plugin.
-  assert.deepStrictEqual(Object.keys(mod), ["default"])
+  assert.deepStrictEqual(Object.keys(mod), ["GhAppTokenPlugin"])
 })
 
 test("plugin: exposes exactly the hooks opencode and the driver rely on", async () => {

@@ -76,7 +76,7 @@ EOF
 #    the tsconfig dir, which no longer reaches plugins/node_modules).
 mkdir -p "${STAGE}/node_modules"
 cp -r "${PLUGINS_DIR}/node_modules/@types" "${STAGE}/node_modules/"
-cp -r "${PLUGINS_DIR}/node_modules/@opencode" "${STAGE}/node_modules/"
+cp -r "${PLUGINS_DIR}/node_modules/@opencode-ai" "${STAGE}/node_modules/"
 "${PLUGINS_DIR}/node_modules/.bin/tsc" -p "${STAGE}/src"
 
 node "${HERE}/smoke-run.js" conahcnuj 331119074
