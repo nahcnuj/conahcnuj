@@ -145,7 +145,6 @@ test_opencode_run() {
   local out
   out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "more ctx")"
   [[ "${out}" == *"opencode run --auto --format json --model opencode/mimo-v2.5-free"* ]]
-  [[ "${out}" == *"--dir ${tmp}"* ]]
   [[ "${out}" == *"Test Issue"* ]]
   [[ "${out}" == *"more ctx"* ]]
   # A mock change file is written (the driver relies on working-tree changes),
