@@ -526,7 +526,7 @@ opencode_run() {
   # --print-logs defaults to INFO, which is ~30 lines of boot/permission
   # chatter per model and buries the rendered log. WARN keeps the diagnostics
   # that matter without the noise; override to DEBUG when hunting a problem.
-  args+=(--log-level "${CONAHCNUJ_OPENCODE_LOG_LEVEL:-WARN}")
+  args+=(--log-level "${CONAHCNUJ_OPENCODE_LOG_LEVEL:-warn}")
   if [[ -n "${session_id}" ]]; then
     args+=(--session "${session_id}")
   else
