@@ -51,7 +51,7 @@ jobs:
           set -e
           out="${RUNNER_TEMP}/opencode-gh-auth.jsonl"
           err="${RUNNER_TEMP}/opencode-gh-auth.err"
-          timeout 180s opencode run --auto --format json --model opencode/mimo-v2.6-flash-free \
+          timeout 180s opencode --standalone run --auto --format json --model opencode/mimo-v2.6-flash-free \
             "Run the command \`gh auth status\` and report whether it succeeded." \
             > "$out" 2> "$err" || true
           echo "=== stdout ==="
