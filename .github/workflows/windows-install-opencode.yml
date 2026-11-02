@@ -51,9 +51,14 @@ jobs:
           set -e
           out="${RUNNER_TEMP}/opencode-gh-auth.jsonl"
           err="${RUNNER_TEMP}/opencode-gh-auth.err"
+          set +e
           timeout 180s opencode run --auto --format json --model opencode/mimo-v2.6-flash-free \
             "Run the command \`gh auth status\` and report whether it succeeded." \
-            > "$out" 2> "$err" || true
+            > "$out" 2> "$err"
+          rc=$?
+          set -e
+          echo "opencode exit code: $rc"
+          echo "opencode version: $(opencode --version 2>&1)"
           # Treat a run that produced no events as an inconclusive service
           # problem rather than a plugin regression, mirroring e2e-opencode.
           if [ ! -s "$out" ]; then
