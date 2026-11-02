@@ -32,12 +32,15 @@ run_e2e_model() {
   cp -a "${RUNNER_TEMP}/e2e-inst" "${slot_dir}/inst"
   cp -a "${RUNNER_TEMP}/e2e-fixture" "${slot_dir}/fixture"
 
-  OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
-    OPENCODE_DISABLE_AUTOUPDATE=true \
-    OPENCODE_DISABLE_MODELS_FETCH=true \
-    timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --dir "${slot_dir}/fixture" --title e2e \
-    "Commit the staged changes with message e2e test. Execute the necessary commands." \
-    > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log" &
+  (
+    cd "${slot_dir}/fixture" || exit 1
+    OPENCODE_CONFIG_DIR="${slot_dir}/inst" \
+      OPENCODE_DISABLE_AUTOUPDATE=true \
+      OPENCODE_DISABLE_MODELS_FETCH=true \
+      timeout "${E2E_ATTEMPT_TIMEOUT}" opencode run --auto --format json --model "${model}" --title e2e \
+      "Commit the staged changes with message e2e test. Execute the necessary commands." \
+      > "${slot_dir}/out.jsonl" 2> "${slot_dir}/err.log"
+  ) &
   opid=$!
   # The orchestrator stops this attempt with a signal once another model
   # already surfaced `git vc`. A foreground `timeout`/opencode would ignore
