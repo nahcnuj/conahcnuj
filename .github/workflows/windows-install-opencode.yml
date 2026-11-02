@@ -62,12 +62,7 @@ jobs:
             echo "opencode gh auth OK"
             exit 0
           fi
-          # Treat a run that produced no events as an inconclusive service
-          # problem rather than a plugin regression, mirroring e2e-opencode.
-          if [ ! -s "$out" ]; then
-            echo "opencode gh auth INCONCLUSIVE (no output); treating as pass"
-            exit 0
-          fi
+
 
           echo "opencode gh auth FAILED"
           exit 1
