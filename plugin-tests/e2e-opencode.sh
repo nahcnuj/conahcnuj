@@ -29,11 +29,14 @@ run_e2e_model() {
   # never overwritten.
   # shellcheck disable=SC2064  # expand $status_file now; it is unset at EXIT
   trap "[ -f '${status_file}' ] || echo fail > '${status_file}'" EXIT
-  # Mock model: emit a synthetic transcript containing `git vc` and exit 0,
-  # so the E2E test passes without the free-model service, a real opencode
-  # model run, or any network access. Controlled by CONAHCNUJ_E2E_MOCK_MODEL.
+  # Mock model: emit a synthetic transcript showing `git commit` being
+  # redirected to `git vc` (the expected suggestion), then `git vc`
+  # succeeding. So the E2E test passes without the free-model service, a
+  # real opencode model run, or any network access. Controlled by
+  # CONAHCNUJ_E2E_MOCK_MODEL.
   if [ -n "${CONAHCNUJ_E2E_MOCK_MODEL:-}" ] && [ "${model}" = "${CONAHCNUJ_E2E_MOCK_MODEL}" ]; then
-    printf '{"type":"tool_use","part":{"tool":"bash","state":{"status":"success","metadata":{"exit":0},"input":{"command":"git vc -m \"e2e test\""}}}}\n' > "${slot_dir}/out.jsonl"
+    printf '{"type":"tool_use","part":{"tool":"bash","state":{"status":"error","metadata":{"exit":1},"input":{"command":"git commit -m \"e2e test\""}}}\n' > "${slot_dir}/out.jsonl"
+    printf '{"type":"tool_use","part":{"tool":"bash","state":{"status":"success","metadata":{"exit":0},"input":{"command":"git vc -m \"e2e test\""}}}\n' >> "${slot_dir}/out.jsonl"
     echo 0 > "${E2E_DIR}/results/r${round}-${slot}.rc"
     : > "${E2E_DIR}/results/r${round}-${slot}.output"
     echo ok > "${status_file}"
