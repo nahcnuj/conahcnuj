@@ -122,13 +122,6 @@ opencode_version() {
     printf '%s\n' "${OPENCODE_VERSION_CACHE}"
     return 0
   fi
-  # In test mode there is no real opencode to probe: assume v2 (the mock
-  # tests expect v2-style flags such as --thinking / --log-level).
-  if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
-    OPENCODE_VERSION_CACHE="v2"
-    printf 'v2\n'
-    return 0
-  fi
   local oc ver major
   oc="$(command -v opencode 2>/dev/null || command -v opencode.exe 2>/dev/null || echo "")"
   if [[ -z "${oc}" ]]; then

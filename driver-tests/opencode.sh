@@ -22,18 +22,17 @@ test_opencode_get_models() {
   echo "opencode_get_models passed"
 }
 
-# opencode_version: test mode assumes v2 since there is no real opencode to
-# probe. A real v2 opencode reports 1.x.x, a v1 reports 0.x.x.
+# opencode_version: opencode --version からメジャーバージョンを検出。
+# 見つからなければ v2（この環境で配布されている opencode は 1.x 系）。
 test_opencode_version() {
-  export OPENCODE_TEST_MODE=1
   local version
   version="$(opencode_version)"
-  [[ "${version}" == "v2" ]] || { echo "FAIL: test mode should assume v2, got ${version}"; exit 1; }
+  [[ "${version}" == "v2" ]] || { echo "FAIL: opencode_version should be v2, got ${version}"; exit 1; }
   # Caching: a second call returns the same value without re-probing.
   local again
   again="$(opencode_version)"
   [[ "${again}" == "v2" ]] || { echo "FAIL: version cache broke, got ${again}"; exit 1; }
-  unset OPENCODE_TEST_MODE OPENCODE_VERSION_CACHE
+  unset OPENCODE_VERSION_CACHE
   echo "opencode_version passed"
 }
 
