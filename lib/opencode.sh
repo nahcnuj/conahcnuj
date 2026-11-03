@@ -406,12 +406,10 @@ opencode_run() {
     local _mv
     _mv="$(opencode_effort_variant 2>/dev/null || true)"
     # Print the command the mock would run, version-aware like the real path.
+    # OPENCODE_RUN_ARGS already embeds --session or --title, so just append
+    # the prompt read from stdin.
     opencode_run_args "${model}" "${session_id:-}" "${_mv}"
-    if [[ -n "${session_id}" ]]; then
-      printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${session_id}" "${prompt}"
-    else
-      printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${prompt}"
-    fi
+    printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${prompt}"
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
     # MOCK_OPENCODE_ENV_ERROR lists the models whose round dies on an
