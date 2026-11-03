@@ -180,13 +180,36 @@ jobs:
           }
           Write-Host "all files deployed OK"
 
-  mock-test:
-    name: Mock tests (no secrets / no network)
+  mock-test-v1:
+    name: Mock tests v1 (no secrets / no network)
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-26.04, windows-latest]
+    env:
+      OPENCODE_VERSION: v1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Run gh-app test suite
+        run: bash gh-app/tests/run.sh
+
+      - name: Run driver test suite
+        run: bash driver-tests/run.sh
+
+  mock-test-v2:
+    name: Mock tests v2 (no secrets / no network)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-latest]
+    env:
+      OPENCODE_VERSION: v2
     defaults:
       run:
         shell: bash
@@ -284,6 +307,8 @@ jobs:
 
       - name: Install opencode
         uses: ./.github/actions/install-opencode
+        with:
+          version: 2.2.5
 
       - name: Install plugin via install.ps1
         shell: pwsh

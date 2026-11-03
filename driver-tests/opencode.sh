@@ -290,7 +290,12 @@ EOF
 # fake opencode が --version で 0.x.x を返すと、opencode_run は --auto
 # / --format json / --print-logs / --thinking / --log-level / --variant を
 # 省略して --model ... --session|--title のみを出力する。
+# 実際の opencode バージョンが v1 のときだけ実行する（v2 環境ではスキップ）。
 test_opencode_run_v1_flags() {
+  if [[ "$(opencode_version)" != "v1" ]]; then
+    echo "opencode_run (v1 flags) skipped (not v1 environment)"
+    return 0
+  fi
   local tmp old_path rc args
   tmp="$(mktemp -d)"
   old_path="${PATH}"
@@ -334,6 +339,10 @@ EOF
 # fake opencode が --version で 1.x.x を返すと、opencode_run は --auto
 # / --format json / --print-logs / --thinking --log-level を出力する。
 test_opencode_run_v2_flags() {
+  if [[ "$(opencode_version)" != "v2" ]]; then
+    echo "opencode_run (v2 flags) skipped (not v2 environment)"
+    return 0
+  fi
   local tmp old_path rc args
   tmp="$(mktemp -d)"
   old_path="${PATH}"

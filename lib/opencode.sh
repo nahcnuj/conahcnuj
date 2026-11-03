@@ -118,6 +118,13 @@ opencode_command() {
 # a single call site in opencode_run.
 OPENCODE_VERSION_CACHE=""
 opencode_version() {
+  # CI/test harness exports OPENCODE_VERSION=v1|v2 to select the matching
+  # tests without probing the real opencode binary.
+  if [[ -n "${OPENCODE_VERSION:-}" ]]; then
+    OPENCODE_VERSION_CACHE="${OPENCODE_VERSION}"
+    printf '%s\n' "${OPENCODE_VERSION}"
+    return 0
+  fi
   if [[ -n "${OPENCODE_VERSION_CACHE:-}" ]]; then
     printf '%s\n' "${OPENCODE_VERSION_CACHE}"
     return 0
