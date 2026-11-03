@@ -113,13 +113,20 @@ opencode_command() {
 # opencode major version: "v1" (0.x.x) or "v2" (1.x.x). Best-effort: when
 # --version cannot be parsed or opencode cannot be located, assume v2 (the
 # currently shipping CLI), so a machine that only has v2 keeps working.
+# Cached in OPENCODE_VERSION_CACHE so opencode --version is only run once.
+OPENCODE_VERSION_CACHE=""
 opencode_version() {
+  if [[ -n "${OPENCODE_VERSION_CACHE}" ]]; then
+    printf '%s\n' "${OPENCODE_VERSION_CACHE}"
+    return 0
+  fi
   local oc ver major
-  oc="$(opencode_command 2>/dev/null)" || { printf 'v2\n'; return 0; }
+  oc="$(opencode_command 2>/dev/null)" || { OPENCODE_VERSION_CACHE="v2"; printf 'v2\n'; return 0; }
   ver="$("${oc}" --version 2>/dev/null | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
-  if [[ -z "${ver}" ]]; then printf 'v2\n'; return 0; fi
+  if [[ -z "${ver}" ]]; then OPENCODE_VERSION_CACHE="v2"; printf 'v2\n'; return 0; fi
   major="${ver%%.*}"
-  if [[ "${major}" -eq 0 ]]; then printf 'v1\n'; else printf 'v2\n'; fi
+  if [[ "${major}" -eq 0 ]]; then OPENCODE_VERSION_CACHE="v1"; else OPENCODE_VERSION_CACHE="v2"; fi
+  printf '%s\n' "${OPENCODE_VERSION_CACHE}"
 }
 
 # Build the `opencode run` argument list for the detected opencode major
@@ -131,7 +138,7 @@ opencode_version() {
 # v1 flag support is best-effort: confirm against a real v1 opencode before
 # relying on it, since this environment only ships v2 (1.19.5).
 opencode_run_args() {
-  local model="${1}" session_id="${2}" effort_variant="${3}"
+  local model="${1}" session_id="${2:-}" effort_variant="${3:-}"
   OPENCODE_RUN_ARGS=(run --model "${model}")
   local version
   version="$(opencode_version)"
