@@ -278,8 +278,12 @@ EOF
   export PATH
   OPENCODE_ARGS_FILE="${tmp}/args.txt"
   export OPENCODE_ARGS_FILE
+  # The fake opencode reports v1.19.5 (v2) for --version, so
+  # OPENCODE_COMMAND_DONE/PATH are unused here; suppress SC2034.
+  # shellcheck disable=SC2034
   unset OPENCODE_VERSION_CACHE OPENCODE_COMMAND_DONE OPENCODE_COMMAND_PATH
   OPENCODE_COMMAND_DONE=1
+  # shellcheck disable=SC2034
   OPENCODE_COMMAND_PATH="${tmp}/bin/opencode"
   FAKE_OPENCODE_EXIT=7
   export FAKE_OPENCODE_EXIT
