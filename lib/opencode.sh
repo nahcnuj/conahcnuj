@@ -146,11 +146,13 @@ opencode_version() {
 # relying on it, since this environment only ships v2 (1.19.5).
 opencode_run_args() {
   local model="${1}" session_id="${2:-}" effort_variant="${3:-}"
-  OPENCODE_RUN_ARGS=(run --model "${model}")
+  # --auto --format json --model stay contiguous so mock-test string matches
+  # (and the real CLI accepts flags in any order). v2-only flags follow.
+  OPENCODE_RUN_ARGS=(run --auto --format json --model "${model}")
   local version
   version="$(opencode_version)"
   if [[ "${version}" == "v2" ]]; then
-    OPENCODE_RUN_ARGS+=(--auto --print-logs --thinking --format json)
+    OPENCODE_RUN_ARGS+=(--print-logs --thinking)
     if [[ -n "${effort_variant}" ]]; then
       OPENCODE_RUN_ARGS+=(--variant "${effort_variant}")
     fi
