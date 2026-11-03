@@ -280,7 +280,7 @@ EOF
   [[ "${args}" != *"--log-level "* ]] || { echo "FAIL: v1 session handoff should not include --log-level: ${args}"; exit 1; }
   PATH="${old_path}"
   rm -rf "${tmp}"
-  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID OPENCODE_VERSION_CACHE
+  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID OPENCODE_VERSION_CACHE OPENCODE_COMMAND_DONE OPENCODE_COMMAND_PATH
   echo "opencode_run (session handoff) passed"
 }
 
