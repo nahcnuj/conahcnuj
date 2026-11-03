@@ -232,7 +232,7 @@ test_opencode_run_noop_models() {
   [[ ! -f "${tmp}/.commit-msg" ]]
   local out
   out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" "" "${OPENCODE_SESSION_ID}" "opencode/dead-model")"
-  [[ "${out}" == *"--title conahcnuj"* ]] || { echo "FAIL: v1 mock should use --title: ${out}"; exit 1; }
+  [[ "${out}" == *"--session ses_mock"* ]] || { echo "FAIL: v1 mock should use --session: ${out}"; exit 1; }
   [[ "${out}" == *"taking over unfinished work from model opencode/dead-model"* ]]
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
