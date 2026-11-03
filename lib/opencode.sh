@@ -158,13 +158,13 @@ opencode_version() {
 #
 # v1 flag support is best-effort: confirm against a real v1 opencode before
 # relying on it, since this environment only ships v2 (1.19.5).
+# The version is passed in by the caller (opencode_run detects it once) so
+# opencode --version is only probed once per run.
 opencode_run_args() {
-  local model="${1}" session_id="${2:-}" effort_variant="${3:-}"
+  local model="${1}" session_id="${2:-}" effort_variant="${3:-}" version="${4}"
   # --auto --format json --model stay contiguous so mock-test string matches
   # (and the real CLI accepts flags in any order). v2-only flags follow.
   OPENCODE_RUN_ARGS=(run --auto --format json --model "${model}")
-  local version
-  version="$(opencode_version)"
   if [[ "${version}" == "v2" ]]; then
     OPENCODE_RUN_ARGS+=(--print-logs --thinking)
     if [[ -n "${effort_variant}" ]]; then
@@ -584,7 +584,9 @@ opencode_run() {
   fi
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
-  opencode_run_args "${model}" "${session_id:-}"
+  local version
+  version="$(opencode_version)"
+  opencode_run_args "${model}" "${session_id:-}" "" "${version}"
   local _effort_variant
   _effort_variant="$(opencode_effort_variant 2>/dev/null || true)"
   if [[ -n "${_effort_variant}" ]]; then
