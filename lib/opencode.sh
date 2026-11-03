@@ -422,7 +422,7 @@ opencode_run() {
     # Print the command the mock would run, version-aware like the real path.
     # OPENCODE_RUN_ARGS already embeds --session or --title, so just append
     # the prompt read from stdin.
-    opencode_run_args "${model}" "${session_id:-}" "${_mv}"
+    opencode_run_args "${model}" "${session_id:-}" "${_mv}" "v2"
     printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${prompt}"
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
