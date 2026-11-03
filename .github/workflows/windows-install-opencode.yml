@@ -51,13 +51,15 @@ jobs:
           set -e
           out="${RUNNER_TEMP}/opencode-gh-auth.jsonl"
           err="${RUNNER_TEMP}/opencode-gh-auth.err"
-          opencode run --format json --model opencode/mimo-v2.5-free --dir "$GITHUB_WORKSPACE" \
+          timeout 180s opencode run --standalone --auto --format json --model opencode/mimo-v2.6-flash-free \
             "Run the command \`gh auth status\` and report whether it succeeded." \
             > "$out" 2> "$err" || true
+
           echo "=== stdout ==="
           cat "$out" 2>/dev/null || true
           echo "=== stderr ==="
           cat "$err" 2>/dev/null || true
+
           if grep -qi "Logged in" "$out" 2>/dev/null || grep -qi "conahcnuj\[bot\]" "$out" 2>/dev/null; then
             echo "opencode gh auth OK"
             exit 0
@@ -69,7 +71,7 @@ jobs:
             exit 0
           fi
           # Treat opencode service/server errors as inconclusive (transient upstream)
-          if grep -qi '"type":"error"' "$out" 2>/dev/null && grep -qi '"UnknownError"\|server error\|Check server logs' "$out" 2>/dev/null; then
+          if grep -qi '"type":"error"' "$out" 2>/dev/null && grep -qi '"UnknownError"\|server error\|Check server logs\|Free usage limit\|free-limit\|FreeUsageLimit' "$out" 2>/dev/null; then
             echo "opencode gh auth INCONCLUSIVE (server error); treating as pass"
             exit 0
           fi
