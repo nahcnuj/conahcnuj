@@ -53,6 +53,11 @@ OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
 # other models stay in the pool.
 OPENCODE_ROUND_RATE_LIMITED="false"
 
+# Cache for opencode_command: path or empty (failed lookup). Set once so the
+# command lookup (which spawns opencode --version) only happens once per run.
+OPENCODE_COMMAND_DONE=0
+OPENCODE_COMMAND_PATH=""
+
 # Probe whether a candidate opencode binary actually runs. Under WSL with
 # interop unavailable a Windows binary is "found" (it sits on a /mnt path and
 # command -v / -f succeed) but executing it fails with "Exec format error", so
@@ -62,14 +67,20 @@ opencode_runs() {
   "${c}" --version >/dev/null 2>&1
 }
 
-# Resolve the opencode executable, even when it is installed in a location that
-# is not on PATH (e.g. ~/.opencode/bin under WSL, or Windows scoop under a
-# WSL mount). Prints the path and returns 0 on success, 1 when opencode cannot
-# be found.
 opencode_command() {
+  if [[ "${OPENCODE_COMMAND_DONE}" -eq 1 ]]; then
+    if [[ -n "${OPENCODE_COMMAND_PATH}" ]]; then
+      printf '%s\n' "${OPENCODE_COMMAND_PATH}"
+      return 0
+    fi
+    echo "opencode: no runnable opencode found (under WSL this usually means interop is unavailable; run the driver under Git Bash instead)" >&2
+    return 1
+  fi
+  OPENCODE_COMMAND_DONE=1
   local c candidate
   for c in opencode opencode.exe opencode.cmd; do
     if command -v "${c}" >/dev/null 2>&1 && opencode_runs "${c}"; then
+      OPENCODE_COMMAND_PATH="${c}"
       printf '%s\n' "${c}"
       return 0
     fi
@@ -84,6 +95,7 @@ opencode_command() {
     /usr/bin/opencode ; do
     for c in ${candidate}; do
       if [[ -n "${c}" && -f "${c}" ]] && opencode_runs "${c}"; then
+        OPENCODE_COMMAND_PATH="${c}"
         printf '%s\n' "${c}"
         return 0
       fi
@@ -101,11 +113,13 @@ opencode_command() {
     /[a-zA-Z]/Users/*/AppData/Local/Programs/opencode/opencode.exe ; do
     for c in ${candidate}; do
       if [[ -n "${c}" && -f "${c}" ]] && opencode_runs "${c}"; then
+        OPENCODE_COMMAND_PATH="${c}"
         printf '%s\n' "${c}"
         return 0
       fi
     done
   done
+  OPENCODE_COMMAND_PATH=""
   echo "opencode: no runnable opencode found (under WSL this usually means interop is unavailable; run the driver under Git Bash instead)" >&2
   return 1
 }
