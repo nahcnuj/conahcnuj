@@ -110,6 +110,47 @@ opencode_command() {
   return 1
 }
 
+# opencode major version: "v1" (0.x.x) or "v2" (1.x.x). Best-effort: when
+# --version cannot be parsed or opencode cannot be located, assume v2 (the
+# currently shipping CLI), so a machine that only has v2 keeps working.
+opencode_version() {
+  local oc ver major
+  oc="$(opencode_command 2>/dev/null)" || { printf 'v2\n'; return 0; }
+  ver="$("${oc}" --version 2>/dev/null | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+  if [[ -z "${ver}" ]]; then printf 'v2\n'; return 0; fi
+  major="${ver%%.*}"
+  if [[ "${major}" -eq 0 ]]; then printf 'v1\n'; else printf 'v2\n'; fi
+}
+
+# Build the `opencode run` argument list for the detected opencode major
+# version. Results are left in the global array OPENCODE_RUN_ARGS.
+#
+# v2 (1.x.x): --auto --print-logs --thinking --format json --model ... [--variant] --session|--title --log-level
+# v1 (0.x.x): --model ... [--session|--title]  (v2-only flags omitted)
+#
+# v1 flag support is best-effort: confirm against a real v1 opencode before
+# relying on it, since this environment only ships v2 (1.19.5).
+opencode_run_args() {
+  local model="${1}" session_id="${2}" effort_variant="${3}"
+  OPENCODE_RUN_ARGS=(run --model "${model}")
+  local version
+  version="$(opencode_version)"
+  if [[ "${version}" == "v2" ]]; then
+    OPENCODE_RUN_ARGS+=(--auto --print-logs --thinking --format json)
+    if [[ -n "${effort_variant}" ]]; then
+      OPENCODE_RUN_ARGS+=(--variant "${effort_variant}")
+    fi
+    # --print-logs defaults to INFO (~30 lines of boot chatter per model).
+    # WARN keeps the diagnostics that matter; override to DEBUG to debug a model.
+    OPENCODE_RUN_ARGS+=(--log-level "${CONAHCNUJ_OPENCODE_LOG_LEVEL:-warn}")
+  fi
+  if [[ -n "${session_id}" ]]; then
+    OPENCODE_RUN_ARGS+=(--session "${session_id}")
+  else
+    OPENCODE_RUN_ARGS+=(--title conahcnuj)
+  fi
+}
+
 # List available models, one per line. Test mode: $MOCK_OPENCODE_MODELS.
 opencode_get_models() {
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
@@ -346,16 +387,14 @@ opencode_run() {
   export GH_TOKEN
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
-    local mock_variant_arg=""
     local _mv
     _mv="$(opencode_effort_variant 2>/dev/null || true)"
-    if [[ -n "${_mv}" ]]; then
-      mock_variant_arg=" --variant ${_mv}"
-    fi
+    # Print the command the mock would run, version-aware like the real path.
+    opencode_run_args "${model}" "${session_id:-}" "${_mv}"
     if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --auto --format json --model %s%s --session %s %s\n' "${model}" "${mock_variant_arg}" "${session_id}" "${prompt}"
+      printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${session_id}" "${prompt}"
     else
-      printf 'opencode run --auto --format json --model %s%s --title conahcnuj %s\n' "${model}" "${mock_variant_arg}" "${prompt}"
+      printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${prompt}"
     fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
@@ -517,21 +556,13 @@ opencode_run() {
   fi
   # --thinking makes opencode emit its reasoning parts as JSON events; without
   # it the log shows only tool calls and final answers.
-  args=(run --auto --print-logs --thinking --format json --model "${model}")
+  opencode_run_args "${model}" "${session_id:-}"
   local _effort_variant
   _effort_variant="$(opencode_effort_variant 2>/dev/null || true)"
   if [[ -n "${_effort_variant}" ]]; then
-    args+=(--variant "${_effort_variant}")
+    OPENCODE_RUN_ARGS+=(--variant "${_effort_variant}")
   fi
-  # --print-logs defaults to INFO, which is ~30 lines of boot/permission
-  # chatter per model and buries the rendered log. WARN keeps the diagnostics
-  # that matter without the noise; override to DEBUG when hunting a problem.
-  args+=(--log-level "${CONAHCNUJ_OPENCODE_LOG_LEVEL:-warn}")
-  if [[ -n "${session_id}" ]]; then
-    args+=(--session "${session_id}")
-  else
-    args+=(--title conahcnuj)
-  fi
+  args=("${OPENCODE_RUN_ARGS[@]}")
   status=0
   # tee keeps the raw stream for the session id, the renderer prints the log to
   # stderr as the run proceeds (the header's SHA / diff only mean anything
@@ -615,8 +646,11 @@ opencode_run() {
   if [[ "${status}" != "0" ]] && { [[ "${rate_aborted}" == "true" ]] || opencode_round_is_rate_limited "${output_file}" "${err_file}"; }; then
     OPENCODE_ROUND_RATE_LIMITED="true"
   fi
-  local detected_session
-  detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
+  local detected_session=""
+  # v2 emits JSON events with "sessionID":"..."; v1 may not, so only parse for v2.
+  if [[ "$(opencode_version)" == "v2" ]]; then
+    detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
+  fi
   if [[ "${detected_session}" =~ ^ses_[A-Za-z0-9_-]+$ ]]; then
     OPENCODE_SESSION_ID="${detected_session}"
     export OPENCODE_SESSION_ID
