@@ -28,7 +28,12 @@ test_opencode_get_models() {
 
 # opencode_version: opencode --version からメジャーバージョンを検出。
 # 見つからなければ v2（この環境で配布されている opencode は 1.x 系）。
+# CI で OPENCODE_VERSION を上書きすることもあるが、ここでは
+# デフォルトのプローブ結果（v2）を検証するため一時的に unset する。
 test_opencode_version() {
+  local saved="${OPENCODE_VERSION:-}"
+  unset OPENCODE_VERSION
+  OPENCODE_VERSION_CACHE=""
   local version
   version="$(opencode_version)"
   [[ "${version}" == "v2" ]] || { echo "FAIL: opencode_version should be v2, got ${version}"; exit 1; }
@@ -36,6 +41,11 @@ test_opencode_version() {
   local again
   again="$(opencode_version)"
   [[ "${again}" == "v2" ]] || { echo "FAIL: version cache broke, got ${again}"; exit 1; }
+  if [[ -n "${saved}" ]]; then
+    export OPENCODE_VERSION="${saved}"
+  else
+    unset OPENCODE_VERSION
+  fi
   unset OPENCODE_VERSION_CACHE
   echo "opencode_version passed"
 }
