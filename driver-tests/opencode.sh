@@ -248,6 +248,10 @@ test_opencode_run_session_handoff() {
   mkdir -p "${tmp}/bin"
   cat > "${tmp}/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then
+  printf '0.5.0\n'
+  exit 0
+fi
 printf '{"type":"step_start","sessionID":"ses_parsed"}\n'
 printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
 exit "${FAKE_OPENCODE_EXIT:-0}"
