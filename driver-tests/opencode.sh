@@ -22,6 +22,70 @@ test_opencode_get_models() {
   echo "opencode_get_models passed"
 }
 
+# opencode_version: test mode assumes v2 since there is no real opencode to
+# probe. A real v2 opencode reports 1.x.x, a v1 reports 0.x.x.
+test_opencode_version() {
+  export OPENCODE_TEST_MODE=1
+  local version
+  version="$(opencode_version)"
+  [[ "${version}" == "v2" ]] || { echo "FAIL: test mode should assume v2, got ${version}"; exit 1; }
+  # Caching: a second call returns the same value without re-probing.
+  local again
+  again="$(opencode_version)"
+  [[ "${again}" == "v2" ]] || { echo "FAIL: version cache broke, got ${again}"; exit 1; }
+  unset OPENCODE_TEST_MODE OPENCODE_VERSION_CACHE
+  echo "opencode_version passed"
+}
+
+# opencode_run_args: v2 keeps the full flag set (--auto --format json --model
+# contiguous, plus --print-logs --thinking --variant --session|--title
+# --log-level).
+test_opencode_run_args_v2() {
+  export OPENCODE_TEST_MODE=1
+  local args
+  opencode_run_args "opencode/mimo-v2.5-free" "ses_abc" "max" "v2"
+  args="$(printf ' %s' "${OPENCODE_RUN_ARGS[@]}")"
+  [[ "${args}" == *" --auto --format json --model opencode/mimo-v2.5-free"* ]] || { echo "FAIL: v2 args missing --auto --format json --model contiguous: ${args}"; exit 1; }
+  [[ "${args}" == *" --print-logs --thinking"* ]] || { echo "FAIL: v2 args missing --print-logs --thinking"; exit 1; }
+  [[ "${args}" == *" --variant max"* ]] || { echo "FAIL: v2 args missing --variant max"; exit 1; }
+  [[ "${args}" == *" --session ses_abc"* ]] || { echo "FAIL: v2 args missing --session"; exit 1; }
+  [[ "${args}" == *" --log-level warn"* ]] || { echo "FAIL: v2 args missing --log-level warn"; exit 1; }
+  # No --title when a session id is present.
+  [[ "${args}" != *" --title "* ]] || { echo "FAIL: v2 args should not include --title with --session: ${args}"; exit 1; }
+  unset OPENCODE_TEST_MODE OPENCODE_VERSION_CACHE OPENCODE_RUN_ARGS
+  echo "opencode_run_args_v2 passed"
+}
+
+# opencode_run_args: v1 omits v2-only flags (--auto --format json
+# --print-logs --thinking --log-level --variant) but keeps --model and
+# --session|--title.
+test_opencode_run_args_v1() {
+  local args
+  opencode_run_args "opencode/mimo-v2.5-free" "ses_abc" "" "v1"
+  args="$(printf ' %s' "${OPENCODE_RUN_ARGS[@]}")"
+  [[ "${args}" == *" --model opencode/mimo-v2.5-free"* ]] || { echo "FAIL: v1 args missing --model: ${args}"; exit 1; }
+  [[ "${args}" != *" --auto "* ]] || { echo "FAIL: v1 args should not include --auto: ${args}"; exit 1; }
+  [[ "${args}" != *" --format json "* ]] || { echo "FAIL: v1 args should not include --format json: ${args}"; exit 1; }
+  [[ "${args}" != *" --print-logs "* ]] || { echo "FAIL: v1 args should not include --print-logs: ${args}"; exit 1; }
+  [[ "${args}" != *" --thinking "* ]] || { echo "FAIL: v1 args should not include --thinking: ${args}"; exit 1; }
+  [[ "${args}" != *" --variant "* ]] || { echo "FAIL: v1 args should not include --variant: ${args}"; exit 1; }
+  [[ "${args}" != *" --log-level "* ]] || { echo "FAIL: v1 args should not include --log-level: ${args}"; exit 1; }
+  [[ "${args}" == *" --session ses_abc"* ]] || { echo "FAIL: v1 args missing --session: ${args}"; exit 1; }
+  unset OPENCODE_RUN_ARGS
+  echo "opencode_run_args_v1 passed"
+}
+
+# opencode_run_args: without a session id it uses --title conahcnuj instead.
+test_opencode_run_args_title() {
+  local args
+  opencode_run_args "opencode/mimo-v2.5-free" "" "" "v2"
+  args="$(printf ' %s' "${OPENCODE_RUN_ARGS[@]}")"
+  [[ "${args}" == *" --title conahcnuj"* ]] || { echo "FAIL: v2 args missing --title conahcnuj: ${args}"; exit 1; }
+  [[ "${args}" != *" --session "* ]] || { echo "FAIL: v2 args should not include --session without session id: ${args}"; exit 1; }
+  unset OPENCODE_RUN_ARGS OPENCODE_VERSION_CACHE
+  echo "opencode_run_args_title passed"
+}
+
 test_opencode_build_prompt() {
   local prompt
   prompt="$(opencode_build_prompt "Issue title" "Issue body" "extra ctx")"
@@ -444,6 +508,10 @@ test_opencode_run_quota() {
 }
 
 test_opencode_get_models
+test_opencode_version
+test_opencode_run_args_v2
+test_opencode_run_args_v1
+test_opencode_run_args_title
 test_opencode_build_prompt
 test_opencode_build_prompt_fresh
 test_opencode_build_prompt_collected

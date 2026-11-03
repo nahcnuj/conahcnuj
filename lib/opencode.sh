@@ -118,7 +118,7 @@ opencode_command() {
 # a single call site in opencode_run.
 OPENCODE_VERSION_CACHE=""
 opencode_version() {
-  if [[ -n "${OPENCODE_VERSION_CACHE}" ]]; then
+  if [[ -n "${OPENCODE_VERSION_CACHE:-}" ]]; then
     printf '%s\n' "${OPENCODE_VERSION_CACHE}"
     return 0
   fi
@@ -152,18 +152,21 @@ opencode_version() {
 # v1 flag support is best-effort: confirm against a real v1 opencode before
 # relying on it, since this environment only ships v2 (1.19.5).
 opencode_run_args() {
-  local model="${1}" session_id="${2:-}" effort_variant="${3:-}" version="${4}"
-  # --auto --format json --model stay contiguous so mock-test string matches
-  # (and the real CLI accepts flags in any order). v2-only flags follow.
-  OPENCODE_RUN_ARGS=(run --auto --format json --model "${model}")
+  local model="${1}" session_id="${2:-}" effort_variant="${3:-}" version="${4:-}"
+  # v2-only flags (--auto --format json --print-logs --thinking --log-level
+  # --variant) are added only for v2. v1 gets just --model and --session|--title.
+  # --model stays contiguous with --auto --format json on v2 so mock-test
+  # string matches still work.
   if [[ "${version}" == "v2" ]]; then
-    OPENCODE_RUN_ARGS+=(--print-logs --thinking)
+    OPENCODE_RUN_ARGS=(run --auto --format json --model "${model}" --print-logs --thinking)
     if [[ -n "${effort_variant}" ]]; then
       OPENCODE_RUN_ARGS+=(--variant "${effort_variant}")
     fi
     # --print-logs defaults to INFO (~30 lines of boot chatter per model).
-    # WARN keeps the diagnostics that matter; override to DEBUG to debug a model.
+    # WARN keeps the diagnostics that matter; override to DEBUG when hunting a model.
     OPENCODE_RUN_ARGS+=(--log-level "${CONAHCNUJ_OPENCODE_LOG_LEVEL:-warn}")
+  else
+    OPENCODE_RUN_ARGS=(run --model "${model}")
   fi
   if [[ -n "${session_id}" ]]; then
     OPENCODE_RUN_ARGS+=(--session "${session_id}")
