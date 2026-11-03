@@ -53,11 +53,6 @@ OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
 # other models stay in the pool.
 OPENCODE_ROUND_RATE_LIMITED="false"
 
-# Cache for opencode_command: path or empty (failed lookup). Set once so the
-# command lookup (which spawns opencode --version) only happens once per run.
-OPENCODE_COMMAND_DONE=0
-OPENCODE_COMMAND_PATH=""
-
 # Probe whether a candidate opencode binary actually runs. Under WSL with
 # interop unavailable a Windows binary is "found" (it sits on a /mnt path and
 # command -v / -f succeed) but executing it fails with "Exec format error", so
@@ -67,20 +62,14 @@ opencode_runs() {
   "${c}" --version >/dev/null 2>&1
 }
 
+# Resolve the opencode executable, even when it is installed in a location that
+# is not on PATH (e.g. ~/.opencode/bin under WSL, or Windows scoop under a
+# WSL mount). Prints the path and returns 0 on success, 1 when opencode cannot
+# be found.
 opencode_command() {
-  if [[ "${OPENCODE_COMMAND_DONE}" -eq 1 ]]; then
-    if [[ -n "${OPENCODE_COMMAND_PATH}" ]]; then
-      printf '%s\n' "${OPENCODE_COMMAND_PATH}"
-      return 0
-    fi
-    echo "opencode: no runnable opencode found (under WSL this usually means interop is unavailable; run the driver under Git Bash instead)" >&2
-    return 1
-  fi
-  OPENCODE_COMMAND_DONE=1
   local c candidate
   for c in opencode opencode.exe opencode.cmd; do
     if command -v "${c}" >/dev/null 2>&1 && opencode_runs "${c}"; then
-      OPENCODE_COMMAND_PATH="${c}"
       printf '%s\n' "${c}"
       return 0
     fi
@@ -95,7 +84,6 @@ opencode_command() {
     /usr/bin/opencode ; do
     for c in ${candidate}; do
       if [[ -n "${c}" && -f "${c}" ]] && opencode_runs "${c}"; then
-        OPENCODE_COMMAND_PATH="${c}"
         printf '%s\n' "${c}"
         return 0
       fi
@@ -113,13 +101,11 @@ opencode_command() {
     /[a-zA-Z]/Users/*/AppData/Local/Programs/opencode/opencode.exe ; do
     for c in ${candidate}; do
       if [[ -n "${c}" && -f "${c}" ]] && opencode_runs "${c}"; then
-        OPENCODE_COMMAND_PATH="${c}"
         printf '%s\n' "${c}"
         return 0
       fi
     done
   done
-  OPENCODE_COMMAND_PATH=""
   echo "opencode: no runnable opencode found (under WSL this usually means interop is unavailable; run the driver under Git Bash instead)" >&2
   return 1
 }
@@ -128,6 +114,8 @@ opencode_command() {
 # --version cannot be parsed or opencode cannot be located, assume v2 (the
 # currently shipping CLI), so a machine that only has v2 keeps working.
 # Cached in OPENCODE_VERSION_CACHE so opencode --version is only run once.
+# Uses command -v directly (not opencode_command) so opencode_command stays
+# a single call site in opencode_run.
 OPENCODE_VERSION_CACHE=""
 opencode_version() {
   if [[ -n "${OPENCODE_VERSION_CACHE}" ]]; then
@@ -142,7 +130,12 @@ opencode_version() {
     return 0
   fi
   local oc ver major
-  oc="$(opencode_command 2>/dev/null)" || { OPENCODE_VERSION_CACHE="v2"; printf 'v2\n'; return 0; }
+  oc="$(command -v opencode 2>/dev/null || command -v opencode.exe 2>/dev/null || echo "")"
+  if [[ -z "${oc}" ]]; then
+    OPENCODE_VERSION_CACHE="v2"
+    printf 'v2\n'
+    return 0
+  fi
   ver="$("${oc}" --version 2>/dev/null | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
   if [[ -z "${ver}" ]]; then OPENCODE_VERSION_CACHE="v2"; printf 'v2\n'; return 0; fi
   major="${ver%%.*}"
@@ -158,8 +151,6 @@ opencode_version() {
 #
 # v1 flag support is best-effort: confirm against a real v1 opencode before
 # relying on it, since this environment only ships v2 (1.19.5).
-# The version is passed in by the caller (opencode_run detects it once) so
-# opencode --version is only probed once per run.
 opencode_run_args() {
   local model="${1}" session_id="${2:-}" effort_variant="${3:-}" version="${4}"
   # --auto --format json --model stay contiguous so mock-test string matches
@@ -417,13 +408,17 @@ opencode_run() {
   export GH_TOKEN
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
+    local mock_variant_arg=""
     local _mv
     _mv="$(opencode_effort_variant 2>/dev/null || true)"
-    # Print the command the mock would run, version-aware like the real path.
-    # OPENCODE_RUN_ARGS already embeds --session or --title, so just append
-    # the prompt read from stdin.
-    opencode_run_args "${model}" "${session_id:-}" "${_mv}" "v2"
-    printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${prompt}"
+    if [[ -n "${_mv}" ]]; then
+      mock_variant_arg=" --variant ${_mv}"
+    fi
+    if [[ -n "${session_id}" ]]; then
+      printf 'opencode run --auto --format json --model %s%s --session %s %s\n' "${model}" "${mock_variant_arg}" "${session_id}" "${prompt}"
+    else
+      printf 'opencode run --auto --format json --model %s%s --title conahcnuj %s\n' "${model}" "${mock_variant_arg}" "${prompt}"
+    fi
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
     # MOCK_OPENCODE_ENV_ERROR lists the models whose round dies on an
@@ -676,11 +671,8 @@ opencode_run() {
   if [[ "${status}" != "0" ]] && { [[ "${rate_aborted}" == "true" ]] || opencode_round_is_rate_limited "${output_file}" "${err_file}"; }; then
     OPENCODE_ROUND_RATE_LIMITED="true"
   fi
-  local detected_session=""
-  # v2 emits JSON events with "sessionID":"..."; v1 may not, so only parse for v2.
-  if [[ "$(opencode_version)" == "v2" ]]; then
-    detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
-  fi
+  local detected_session
+  detected_session="$(sed -n 's/.*"sessionID":"\([^"]*\)".*/\1/p' "${output_file}" | sed -n '1p')"
   if [[ "${detected_session}" =~ ^ses_[A-Za-z0-9_-]+$ ]]; then
     OPENCODE_SESSION_ID="${detected_session}"
     export OPENCODE_SESSION_ID
