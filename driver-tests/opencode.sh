@@ -185,7 +185,9 @@ test_opencode_run_message_only() {
   [[ ! -e "${tmp}/conahcnuj.mock" ]] || { echo "FAIL: the mock message-only round touched the tree"; exit 1; }
   # The next model is handed the same session and asked to finish the work.
   out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/talker")"
-  [[ "${out}" == *"--title conahcnuj"* ]] || { echo "FAIL: v1 mock should use --title not --session: ${out}"; exit 1; }
+  [[ "${out}" == *"--session ses_mock"* ]] || { echo "FAIL: v1 mock should use --session with session id: ${out}"; exit 1; }
+  [[ "${out}" != *"--auto "* ]] || { echo "FAIL: v1 mock should not include --auto: ${out}"; exit 1; }
+  [[ "${out}" != *"--format json "* ]] || { echo "FAIL: v1 mock should not include --format json: ${out}"; exit 1; }
   [[ "${out}" == *"Your part is the change in the working tree"* ]] || { echo "FAIL: the handoff prompt lost the division of labour"; exit 1; }
   [[ "${out}" == *"because it could not complete the task"* ]] || { echo "FAIL: the takeover prompt does not say why the previous round stopped"; exit 1; }
   [[ -f "${tmp}/conahcnuj.mock" ]]
