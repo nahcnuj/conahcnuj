@@ -7,6 +7,10 @@ LIB="${HERE}/../lib/opencode.sh"
 # shellcheck source=lib/opencode.sh
 . "${LIB}"
 
+# v1 (0.x.x) opencode 向けのテスト。v2 専用フラグ (--auto --format json
+# --print-logs --thinking --log-level --variant) は付かず、
+# --model ... --title conahcnuj のみが出力されることを検証する。
+
 test_opencode_get_models() {
   export OPENCODE_TEST_MODE=1
   export MOCK_OPENCODE_MODELS
@@ -36,25 +40,6 @@ test_opencode_version() {
   echo "opencode_version passed"
 }
 
-# opencode_run_args: v2 keeps the full flag set (--auto --format json --model
-# contiguous, plus --print-logs --thinking --variant --session|--title
-# --log-level).
-test_opencode_run_args_v2() {
-  export OPENCODE_TEST_MODE=1
-  local args
-  opencode_run_args "opencode/mimo-v2.5-free" "ses_abc" "max" "v2"
-  args="$(printf ' %s' "${OPENCODE_RUN_ARGS[@]}")"
-  [[ "${args}" == *" --auto --format json --model opencode/mimo-v2.5-free"* ]] || { echo "FAIL: v2 args missing --auto --format json --model contiguous: ${args}"; exit 1; }
-  [[ "${args}" == *" --print-logs --thinking"* ]] || { echo "FAIL: v2 args missing --print-logs --thinking"; exit 1; }
-  [[ "${args}" == *" --variant max"* ]] || { echo "FAIL: v2 args missing --variant max"; exit 1; }
-  [[ "${args}" == *" --session ses_abc"* ]] || { echo "FAIL: v2 args missing --session"; exit 1; }
-  [[ "${args}" == *" --log-level warn"* ]] || { echo "FAIL: v2 args missing --log-level warn"; exit 1; }
-  # No --title when a session id is present.
-  [[ "${args}" != *" --title "* ]] || { echo "FAIL: v2 args should not include --title with --session: ${args}"; exit 1; }
-  unset OPENCODE_TEST_MODE OPENCODE_VERSION_CACHE OPENCODE_RUN_ARGS
-  echo "opencode_run_args_v2 passed"
-}
-
 # opencode_run_args: v1 omits v2-only flags (--auto --format json
 # --print-logs --thinking --log-level --variant) but keeps --model and
 # --session|--title.
@@ -77,10 +62,10 @@ test_opencode_run_args_v1() {
 # opencode_run_args: without a session id it uses --title conahcnuj instead.
 test_opencode_run_args_title() {
   local args
-  opencode_run_args "opencode/mimo-v2.5-free" "" "" "v2"
+  opencode_run_args "opencode/mimo-v2.5-free" "" "" "v1"
   args="$(printf ' %s' "${OPENCODE_RUN_ARGS[@]}")"
-  [[ "${args}" == *" --title conahcnuj"* ]] || { echo "FAIL: v2 args missing --title conahcnuj: ${args}"; exit 1; }
-  [[ "${args}" != *" --session "* ]] || { echo "FAIL: v2 args should not include --session without session id: ${args}"; exit 1; }
+  [[ "${args}" == *" --title conahcnuj"* ]] || { echo "FAIL: v1 args missing --title conahcnuj: ${args}"; exit 1; }
+  [[ "${args}" != *" --session "* ]] || { echo "FAIL: v1 args should not include --session without session id: ${args}"; exit 1; }
   unset OPENCODE_RUN_ARGS OPENCODE_VERSION_CACHE
   echo "opencode_run_args_title passed"
 }
@@ -190,7 +175,7 @@ test_opencode_run_message_only() {
   [[ ! -e "${tmp}/conahcnuj.mock" ]] || { echo "FAIL: the mock message-only round touched the tree"; exit 1; }
   # The next model is handed the same session and asked to finish the work.
   out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/talker")"
-  [[ "${out}" == *"--session ses_mock"* ]]
+  [[ "${out}" == *"--title conahcnuj"* ]] || { echo "FAIL: v1 mock should use --title not --session: ${out}"; exit 1; }
   [[ "${out}" == *"Your part is the change in the working tree"* ]] || { echo "FAIL: the handoff prompt lost the division of labour"; exit 1; }
   [[ "${out}" == *"because it could not complete the task"* ]] || { echo "FAIL: the takeover prompt does not say why the previous round stopped"; exit 1; }
   [[ -f "${tmp}/conahcnuj.mock" ]]
@@ -207,7 +192,8 @@ test_opencode_run() {
   tmp="$(mktemp -d)"
   local out
   out="$(opencode_run "Test Issue" "Test body" "${tmp}" "opencode/mimo-v2.5-free" "more ctx")"
-  [[ "${out}" == *"opencode run --auto --format json --model opencode/mimo-v2.5-free"* ]]
+  # v1 emits --model ... --title conahcnuj (no --auto --format json).
+  [[ "${out}" == *"opencode run --model opencode/mimo-v2.5-free --title conahcnuj"* ]] || { echo "FAIL: v1 mock output unexpected: ${out}"; exit 1; }
   [[ "${out}" == *"Test Issue"* ]]
   [[ "${out}" == *"more ctx"* ]]
   # A mock change file is written (the driver relies on working-tree changes),
@@ -234,7 +220,7 @@ test_opencode_run_noop_models() {
   [[ ! -f "${tmp}/.commit-msg" ]]
   local out
   out="$(opencode_run "Issue" "Body" "${tmp}" "opencode/live-model" "" "${OPENCODE_SESSION_ID}" "opencode/dead-model")"
-  [[ "${out}" == *"--session ses_mock"* ]]
+  [[ "${out}" == *"--title conahcnuj"* ]] || { echo "FAIL: v1 mock should use --title: ${out}"; exit 1; }
   [[ "${out}" == *"taking over unfinished work from model opencode/dead-model"* ]]
   [[ -f "${tmp}/conahcnuj.mock" ]]
   [[ -f "${tmp}/.commit-msg" ]]
@@ -259,6 +245,7 @@ EOF
   export PATH
   OPENCODE_ARGS_FILE="${tmp}/args.txt"
   export OPENCODE_ARGS_FILE
+  unset OPENCODE_VERSION_CACHE
   FAKE_OPENCODE_EXIT=7
   export FAKE_OPENCODE_EXIT
   rc=0
@@ -267,35 +254,23 @@ EOF
   [[ "${OPENCODE_SESSION_ID:-}" == "ses_parsed" ]]
   args="$(cat "${OPENCODE_ARGS_FILE}")"
   [[ "${args}" == *"--model opencode/first"* ]]
-  [[ "${args}" != *"--session"* ]]
-  rc=0
-  opencode_run "Issue" "Body" "${tmp}" "opencode/second" "" "${OPENCODE_SESSION_ID}" "opencode/first" >/dev/null || rc=$?
-  [[ "${rc}" -eq 7 ]]
-  args="$(cat "${OPENCODE_ARGS_FILE}")"
-  [[ "${args}" == *"--model opencode/second"* ]]
-  [[ "${args}" == *"--session ses_parsed"* ]]
-  # Thinking and a quiet log level are part of a readable log: --thinking makes
-  # the model show its reasoning, --log-level warn drops the INFO boot chatter.
-  [[ "${args}" == *"--thinking"* ]]
-  [[ "${args}" == *"--log-level warn"* ]]
-  CONAHCNUJ_OPENCODE_LOG_LEVEL=DEBUG opencode_run "Issue" "Body" "${tmp}" "opencode/third" >/dev/null || rc=$?
-  args="$(cat "${OPENCODE_ARGS_FILE}")"
-  [[ "${args}" == *"--log-level DEBUG"* ]]
+  [[ "${args}" == *"--title conahcnuj"* ]] || { echo "FAIL: v1 session handoff should use --title: ${args}"; exit 1; }
+  [[ "${args}" != *"--auto "* ]] || { echo "FAIL: v1 session handoff should not include --auto: ${args}"; exit 1; }
+  [[ "${args}" != *"--format json "* ]] || { echo "FAIL: v1 session handoff should not include --format json: ${args}"; exit 1; }
+  [[ "${args}" != *"--print-logs "* ]] || { echo "FAIL: v1 session handoff should not include --print-logs: ${args}"; exit 1; }
+  [[ "${args}" != *"--thinking "* ]] || { echo "FAIL: v1 session handoff should not include --thinking: ${args}"; exit 1; }
+  [[ "${args}" != *"--log-level "* ]] || { echo "FAIL: v1 session handoff should not include --log-level: ${args}"; exit 1; }
   PATH="${old_path}"
   rm -rf "${tmp}"
-  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID
+  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID OPENCODE_VERSION_CACHE
+  echo "opencode_run (session handoff) passed"
 }
 
 # opencode_run: v1 (0.x.x) opencode では v2 専用フラグを付けない。
 # fake opencode が --version で 0.x.x を返すと、opencode_run は --auto
 # / --format json / --print-logs / --thinking / --log-level / --variant を
 # 省略して --model ... --session|--title のみを出力する。
-# 実際の opencode バージョンが v1 のときだけ実行する（v2 環境ではスキップ）。
 test_opencode_run_v1_flags() {
-  if [[ "$(opencode_version)" != "v1" ]]; then
-    echo "opencode_run (v1 flags) skipped (not v1 environment)"
-    return 0
-  fi
   local tmp old_path rc args
   tmp="$(mktemp -d)"
   old_path="${PATH}"
@@ -328,54 +303,11 @@ EOF
   [[ "${args}" != *"--thinking "* ]] || { echo "FAIL: v1 args should not include --thinking: ${args}"; exit 1; }
   [[ "${args}" != *"--variant "* ]] || { echo "FAIL: v1 args should not include --variant: ${args}"; exit 1; }
   [[ "${args}" != *"--log-level "* ]] || { echo "FAIL: v1 args should not include --log-level: ${args}"; exit 1; }
-  [[ "${args}" == *"--session ses_mock"* ]] || { echo "FAIL: v1 args missing --session: ${args}"; exit 1; }
+  [[ "${args}" == *"--title conahcnuj"* ]] || { echo "FAIL: v1 args missing --title conahcnuj: ${args}"; exit 1; }
   PATH="${old_path}"
   rm -rf "${tmp}"
   unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID OPENCODE_VERSION_CACHE
   echo "opencode_run (v1 flags) passed"
-}
-
-# opencode_run: v2 (1.x.x) opencode では v2 専用フラグをすべて付ける。
-# fake opencode が --version で 1.x.x を返すと、opencode_run は --auto
-# / --format json / --print-logs / --thinking --log-level を出力する。
-test_opencode_run_v2_flags() {
-  if [[ "$(opencode_version)" != "v2" ]]; then
-    echo "opencode_run (v2 flags) skipped (not v2 environment)"
-    return 0
-  fi
-  local tmp old_path rc args
-  tmp="$(mktemp -d)"
-  old_path="${PATH}"
-  mkdir -p "${tmp}/bin"
-  cat > "${tmp}/bin/opencode" <<'EOF'
-#!/usr/bin/env bash
-if [[ "$1" == "--version" ]]; then
-  printf '1.19.5\n'
-  exit 0
-fi
-printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
-exit "${FAKE_OPENCODE_EXIT:-0}"
-EOF
-  chmod +x "${tmp}/bin/opencode"
-  PATH="${tmp}/bin:${PATH}"
-  export PATH
-  OPENCODE_ARGS_FILE="${tmp}/args.txt"
-  export OPENCODE_ARGS_FILE
-  unset OPENCODE_VERSION_CACHE
-  FAKE_OPENCODE_EXIT=7
-  export FAKE_OPENCODE_EXIT
-  rc=0
-  opencode_run "Issue" "Body" "${tmp}" "opencode/first" >/dev/null || rc=$?
-  [[ "${rc}" -eq 7 ]]
-  args="$(cat "${OPENCODE_ARGS_FILE}")"
-  [[ "${args}" == *"--auto --format json --model opencode/first"* ]] || { echo "FAIL: v2 args missing --auto --format json --model: ${args}"; exit 1; }
-  [[ "${args}" == *"--print-logs --thinking"* ]] || { echo "FAIL: v2 args missing --print-logs --thinking: ${args}"; exit 1; }
-  [[ "${args}" == *"--log-level warn"* ]] || { echo "FAIL: v2 args missing --log-level warn: ${args}"; exit 1; }
-  [[ "${args}" == *"--session ses_mock"* ]] || { echo "FAIL: v2 args missing --session: ${args}"; exit 1; }
-  PATH="${old_path}"
-  rm -rf "${tmp}"
-  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID OPENCODE_VERSION_CACHE
-  echo "opencode_run (v2 flags) passed"
 }
 
 test_opencode_run_prompt_via_stdin() {
@@ -600,7 +532,6 @@ test_opencode_run_quota() {
 
 test_opencode_get_models
 test_opencode_version
-test_opencode_run_args_v2
 test_opencode_run_args_v1
 test_opencode_run_args_title
 test_opencode_build_prompt
@@ -613,7 +544,6 @@ test_opencode_run_message_only
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
 test_opencode_run_v1_flags
-test_opencode_run_v2_flags
 test_opencode_run_prompt_via_stdin
 test_opencode_run_renders_log
 test_opencode_run_timeout
