@@ -404,17 +404,13 @@ opencode_run() {
   export GH_TOKEN
 
   if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
-    local mock_variant_arg=""
     local _mv
     _mv="$(opencode_effort_variant 2>/dev/null || true)"
-    if [[ -n "${_mv}" ]]; then
-      mock_variant_arg=" --variant ${_mv}"
-    fi
-    if [[ -n "${session_id}" ]]; then
-      printf 'opencode run --auto --format json --model %s%s --session %s %s\n' "${model}" "${mock_variant_arg}" "${session_id}" "${prompt}"
-    else
-      printf 'opencode run --auto --format json --model %s%s --title conahcnuj %s\n' "${model}" "${mock_variant_arg}" "${prompt}"
-    fi
+    # Mock mode: print what `opencode run` would look like, using the same
+    # version-aware arg construction as the real path. The fake opencode in
+    # tests captures these args via OPENCODE_ARGS_FILE.
+    opencode_run_args "${model}" "${session_id:-}" "${_mv}" "$(opencode_version)"
+    printf 'opencode %s %s\n' "${OPENCODE_RUN_ARGS[*]}" "${prompt}"
     OPENCODE_SESSION_ID="${MOCK_OPENCODE_SESSION_ID:-ses_mock}"
     export OPENCODE_SESSION_ID
     # MOCK_OPENCODE_ENV_ERROR lists the models whose round dies on an

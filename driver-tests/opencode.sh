@@ -286,6 +286,89 @@ EOF
   unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID
 }
 
+# opencode_run: v1 (0.x.x) opencode では v2 専用フラグを付けない。
+# fake opencode が --version で 0.x.x を返すと、opencode_run は --auto
+# / --format json / --print-logs / --thinking / --log-level / --variant を
+# 省略して --model ... --session|--title のみを出力する。
+test_opencode_run_v1_flags() {
+  local tmp old_path rc args
+  tmp="$(mktemp -d)"
+  old_path="${PATH}"
+  mkdir -p "${tmp}/bin"
+  cat > "${tmp}/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then
+  printf '0.5.0\n'
+  exit 0
+fi
+printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
+exit "${FAKE_OPENCODE_EXIT:-0}"
+EOF
+  chmod +x "${tmp}/bin/opencode"
+  PATH="${tmp}/bin:${PATH}"
+  export PATH
+  OPENCODE_ARGS_FILE="${tmp}/args.txt"
+  export OPENCODE_ARGS_FILE
+  unset OPENCODE_VERSION_CACHE
+  FAKE_OPENCODE_EXIT=7
+  export FAKE_OPENCODE_EXIT
+  rc=0
+  opencode_run "Issue" "Body" "${tmp}" "opencode/first" >/dev/null || rc=$?
+  [[ "${rc}" -eq 7 ]]
+  args="$(cat "${OPENCODE_ARGS_FILE}")"
+  [[ "${args}" == *"--model opencode/first"* ]] || { echo "FAIL: v1 args missing --model: ${args}"; exit 1; }
+  [[ "${args}" != *"--auto "* ]] || { echo "FAIL: v1 args should not include --auto: ${args}"; exit 1; }
+  [[ "${args}" != *"--format json "* ]] || { echo "FAIL: v1 args should not include --format json: ${args}"; exit 1; }
+  [[ "${args}" != *"--print-logs "* ]] || { echo "FAIL: v1 args should not include --print-logs: ${args}"; exit 1; }
+  [[ "${args}" != *"--thinking "* ]] || { echo "FAIL: v1 args should not include --thinking: ${args}"; exit 1; }
+  [[ "${args}" != *"--variant "* ]] || { echo "FAIL: v1 args should not include --variant: ${args}"; exit 1; }
+  [[ "${args}" != *"--log-level "* ]] || { echo "FAIL: v1 args should not include --log-level: ${args}"; exit 1; }
+  [[ "${args}" == *"--session ses_mock"* ]] || { echo "FAIL: v1 args missing --session: ${args}"; exit 1; }
+  PATH="${old_path}"
+  rm -rf "${tmp}"
+  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID OPENCODE_VERSION_CACHE
+  echo "opencode_run (v1 flags) passed"
+}
+
+# opencode_run: v2 (1.x.x) opencode では v2 専用フラグをすべて付ける。
+# fake opencode が --version で 1.x.x を返すと、opencode_run は --auto
+# / --format json / --print-logs / --thinking --log-level を出力する。
+test_opencode_run_v2_flags() {
+  local tmp old_path rc args
+  tmp="$(mktemp -d)"
+  old_path="${PATH}"
+  mkdir -p "${tmp}/bin"
+  cat > "${tmp}/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then
+  printf '1.19.5\n'
+  exit 0
+fi
+printf '%s\n' "$*" > "${OPENCODE_ARGS_FILE}"
+exit "${FAKE_OPENCODE_EXIT:-0}"
+EOF
+  chmod +x "${tmp}/bin/opencode"
+  PATH="${tmp}/bin:${PATH}"
+  export PATH
+  OPENCODE_ARGS_FILE="${tmp}/args.txt"
+  export OPENCODE_ARGS_FILE
+  unset OPENCODE_VERSION_CACHE
+  FAKE_OPENCODE_EXIT=7
+  export FAKE_OPENCODE_EXIT
+  rc=0
+  opencode_run "Issue" "Body" "${tmp}" "opencode/first" >/dev/null || rc=$?
+  [[ "${rc}" -eq 7 ]]
+  args="$(cat "${OPENCODE_ARGS_FILE}")"
+  [[ "${args}" == *"--auto --format json --model opencode/first"* ]] || { echo "FAIL: v2 args missing --auto --format json --model: ${args}"; exit 1; }
+  [[ "${args}" == *"--print-logs --thinking"* ]] || { echo "FAIL: v2 args missing --print-logs --thinking: ${args}"; exit 1; }
+  [[ "${args}" == *"--log-level warn"* ]] || { echo "FAIL: v2 args missing --log-level warn: ${args}"; exit 1; }
+  [[ "${args}" == *"--session ses_mock"* ]] || { echo "FAIL: v2 args missing --session: ${args}"; exit 1; }
+  PATH="${old_path}"
+  rm -rf "${tmp}"
+  unset OPENCODE_ARGS_FILE FAKE_OPENCODE_EXIT OPENCODE_SESSION_ID OPENCODE_VERSION_CACHE
+  echo "opencode_run (v2 flags) passed"
+}
+
 test_opencode_run_prompt_via_stdin() {
   local tmp old_path rc
   tmp="$(mktemp -d)"
@@ -520,6 +603,8 @@ test_opencode_run_commits
 test_opencode_run_message_only
 test_opencode_run_noop_models
 test_opencode_run_session_handoff
+test_opencode_run_v1_flags
+test_opencode_run_v2_flags
 test_opencode_run_prompt_via_stdin
 test_opencode_run_renders_log
 test_opencode_run_timeout
