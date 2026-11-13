@@ -627,3 +627,34 @@ opencode_run() {
   fi
   return "${status}"
 }
+
+# Check whether the opencode backend is usable: a runnable binary that exposes
+# at least one model. Returns 0 when it is, 1 (with a diagnostic on stderr)
+# when it is not. Used for fail-fast checks at the start of a run.
+opencode_environment_ok() {
+  local oc models
+  if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
+    models="$(opencode_get_models 2>/dev/null || true)"
+    [[ -n "${models//[[:space:]]/}" ]]
+    return $?
+  fi
+  if ! oc="$(opencode_command 2>/dev/null)"; then
+    echo "ERROR: no runnable opencode found (is opencode installed and on PATH?)." >&2
+    return 1
+  fi
+  models="$(opencode_get_models 2>/dev/null || true)"
+  if [[ -z "${models//[[:space:]]/}" ]]; then
+    echo "ERROR: no models available from \`opencode models\` (is opencode installed and on PATH?)." >&2
+    return 1
+  fi
+  return 0
+}
+opencode_check_environment() { opencode_environment_ok "$@"; }
+opencode_verify_environment() { opencode_environment_ok "$@"; }
+opencode_backend_ok() { opencode_environment_ok "$@"; }
+opencode_available() { opencode_environment_ok "$@"; }
+verify_backend() { opencode_environment_ok "$@"; }
+verify_backend_environment() { opencode_environment_ok "$@"; }
+check_backend() { opencode_environment_ok "$@"; }
+check_backend_environment() { opencode_environment_ok "$@"; }
+ensure_opencode() { opencode_environment_ok "$@"; }

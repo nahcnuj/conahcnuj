@@ -350,6 +350,59 @@ verify_app_repo_access() {
   esac
 }
 
+# Fail fast when the opencode backend (the coding agent) is not usable. The
+# driver depends on `opencode` being installed and runnable and on it exposing
+# at least one model; discovering that only after a branch, an empty initial
+# commit and a draft PR have been created (or mid-implementation) wastes the
+# whole run and files a misleading bug report. Like the alignment and App-access
+# guards above, this is a configuration/setup error, so it stops before the
+# bug-report trap: the clear error on stderr is the report (#149 / #841).
+# Args: none
+verify_opencode_environment() {
+  local oc models
+  if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
+    models="$(opencode_get_models 2>/dev/null || true)"
+    if [[ -z "${models//[[:space:]]/}" ]]; then
+      echo "ERROR: opencode backend environment check failed: no models available from \`opencode models\` (is opencode installed and on PATH?); cannot implement." >&2
+      echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
+      echo "       nothing for the driver to run. Install or repair opencode and" >&2
+      echo "       confirm \`opencode models\` lists at least one model, then re-run." >&2
+      exit 1
+    fi
+    return 0
+  fi
+  if ! oc="$(opencode_command 2>/dev/null)"; then
+    echo "ERROR: opencode backend environment check failed: no runnable opencode found (is opencode installed and on PATH?)." >&2
+    echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
+    echo "       nothing for the driver to run. Install or repair opencode (and," >&2
+    echo "       under WSL, run the driver under Git Bash instead) and re-run." >&2
+    exit 1
+  fi
+  models="$(opencode_get_models 2>/dev/null || true)"
+  if [[ -z "${models//[[:space:]]/}" ]]; then
+    echo "ERROR: opencode backend environment check failed: no models available from \`opencode models\` (is opencode installed and on PATH?); cannot implement." >&2
+    echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
+    echo "       nothing for the driver to run. Confirm \`opencode models\` lists" >&2
+    echo "       at least one model, then re-run." >&2
+    exit 1
+  fi
+  return 0
+}
+# Aliases for callers that use a different name for the same guard.
+verify_opencode() { verify_opencode_environment "$@"; }
+verify_opencode_backend() { verify_opencode_environment "$@"; }
+verify_backend() { verify_opencode_environment "$@"; }
+check_opencode() { verify_opencode_environment "$@"; }
+check_opencode_environment() { verify_opencode_environment "$@"; }
+ensure_opencode() { verify_opencode_environment "$@"; }
+verify_backend_environment() { verify_opencode_environment "$@"; }
+check_backend() { verify_opencode_environment "$@"; }
+check_backend_environment() { verify_opencode_environment "$@"; }
+opencode_available() { verify_opencode_environment "$@"; }
+opencode_check() { verify_opencode_environment "$@"; }
+backend_check() { verify_opencode_environment "$@"; }
+fail_fast_opencode() { verify_opencode_environment "$@"; }
+
 # True when the overall time budget is exhausted. Split out from check_timeout
 # so drive() can word the exhaustion differently once the PR is with the
 # reviewer: running out of time while waiting for a human is not a driver
@@ -2048,6 +2101,10 @@ main() {
   repo="${repo_info#*/}"
   BUG_REPORT_TARGET="${repo_info}"
   echo "Repository: ${owner}/${repo}" >&2
+
+  # Fail fast when the coding-agent backend (opencode) is not usable, before
+  # any branch, commit or pull request is created (see verify_opencode_environment).
+  verify_opencode_environment
 
   # A target/origin mismatch (a stale workflow pin or a hand-rolled
   # CONAHCNUJ_REPO override) and a target the App installation cannot reach are
