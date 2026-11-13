@@ -360,17 +360,6 @@ verify_app_repo_access() {
 # Args: none
 verify_opencode_environment() {
   local oc models
-  if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
-    models="$(opencode_get_models 2>/dev/null || true)"
-    if [[ -z "${models//[[:space:]]/}" ]]; then
-      echo "ERROR: opencode backend environment check failed: no models available from \`opencode models\` (is opencode installed and on PATH?); cannot implement." >&2
-      echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
-      echo "       nothing for the driver to run. Install or repair opencode and" >&2
-      echo "       confirm \`opencode models\` lists at least one model, then re-run." >&2
-      exit 1
-    fi
-    return 0
-  fi
   if ! oc="$(opencode_command 2>/dev/null)"; then
     echo "ERROR: opencode backend environment check failed: no runnable opencode found (is opencode installed and on PATH?)." >&2
     echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
@@ -388,20 +377,6 @@ verify_opencode_environment() {
   fi
   return 0
 }
-# Aliases for callers that use a different name for the same guard.
-verify_opencode() { verify_opencode_environment "$@"; }
-verify_opencode_backend() { verify_opencode_environment "$@"; }
-verify_backend() { verify_opencode_environment "$@"; }
-check_opencode() { verify_opencode_environment "$@"; }
-check_opencode_environment() { verify_opencode_environment "$@"; }
-ensure_opencode() { verify_opencode_environment "$@"; }
-verify_backend_environment() { verify_opencode_environment "$@"; }
-check_backend() { verify_opencode_environment "$@"; }
-check_backend_environment() { verify_opencode_environment "$@"; }
-opencode_available() { verify_opencode_environment "$@"; }
-opencode_check() { verify_opencode_environment "$@"; }
-backend_check() { verify_opencode_environment "$@"; }
-fail_fast_opencode() { verify_opencode_environment "$@"; }
 
 # True when the overall time budget is exhausted. Split out from check_timeout
 # so drive() can word the exhaustion differently once the PR is with the

@@ -67,6 +67,10 @@ opencode_runs() {
 # WSL mount). Prints the path and returns 0 on success, 1 when opencode cannot
 # be found.
 opencode_command() {
+  if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
+    printf 'opencode\n'
+    return 0
+  fi
   local c candidate
   for c in opencode opencode.exe opencode.cmd; do
     if command -v "${c}" >/dev/null 2>&1 && opencode_runs "${c}"; then
@@ -633,11 +637,6 @@ opencode_run() {
 # when it is not. Used for fail-fast checks at the start of a run.
 opencode_environment_ok() {
   local oc models
-  if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
-    models="$(opencode_get_models 2>/dev/null || true)"
-    [[ -n "${models//[[:space:]]/}" ]]
-    return $?
-  fi
   if ! oc="$(opencode_command 2>/dev/null)"; then
     echo "ERROR: no runnable opencode found (is opencode installed and on PATH?)." >&2
     return 1
@@ -649,12 +648,3 @@ opencode_environment_ok() {
   fi
   return 0
 }
-opencode_check_environment() { opencode_environment_ok "$@"; }
-opencode_verify_environment() { opencode_environment_ok "$@"; }
-opencode_backend_ok() { opencode_environment_ok "$@"; }
-opencode_available() { opencode_environment_ok "$@"; }
-verify_backend() { opencode_environment_ok "$@"; }
-verify_backend_environment() { opencode_environment_ok "$@"; }
-check_backend() { opencode_environment_ok "$@"; }
-check_backend_environment() { opencode_environment_ok "$@"; }
-ensure_opencode() { opencode_environment_ok "$@"; }
