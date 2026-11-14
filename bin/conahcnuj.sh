@@ -81,7 +81,6 @@ case "${CONAHCNUJ_GITHUB_ACTIONS:-}" in true|1) CI_MODE="true" ;; esac
 case "${CONAHCNUJ_CI:-}" in true|1) CI_MODE="true" ;; esac
 
 MAX_DURATION="${CONAHCNUJ_MAX_SECONDS:-259200}"
-ORIGINAL_MAX_DURATION="${MAX_DURATION}"
 POLL_CONDITIONS_MIN="${CONAHCNUJ_POLL_CONDITIONS_MIN:-15}"
 POLL_CONDITIONS_MAX="${CONAHCNUJ_POLL_CONDITIONS_MAX:-300}"
 START_TIME="$(date +%s)"
@@ -254,18 +253,9 @@ driver_relaunch() {
     export WSLENV="${WSLENV:+${WSLENV}:}${wslenv_add}"
   fi
   echo "Re-launching under ${bash_exe} so the GitHub App paths resolve." >&2
-  interrupted="false"
-  pending_kill="false"
-  child=""
-  # Install the trap before launching the child so an interrupt that arrives
-  # in the launch window is not lost (the default disposition would otherwise
-  # terminate the shell without recording the interruption).
-  trap 'interrupted="true"; if [[ -n "${child:-}" ]]; then kill -TERM "${child}" 2>/dev/null || true; else pending_kill="true"; fi' INT TERM
   "${bash_mnt}" "${self_win}" "$@" &
   child=$!
-  if [[ "${pending_kill}" == "true" ]]; then
-    kill -TERM "${child}" 2>/dev/null || true
-  fi
+  trap 'kill -TERM "${child}" 2>/dev/null || true' INT TERM
   rc=0
   wait "${child}" || rc=$?
   # The wait above may return early because it was interrupted by the signal
@@ -279,9 +269,6 @@ driver_relaunch() {
   done
   wait "${child}" 2>/dev/null || true
   trap - INT TERM
-  if [[ "${interrupted}" == "true" ]]; then
-    exit 130
-  fi
   exit "${rc}"
 }
 
@@ -363,14 +350,6 @@ verify_app_repo_access() {
   esac
 }
 
-# Fail fast when the opencode backend (the coding agent) is not usable. The
-# driver depends on `opencode` being installed and runnable and on it exposing
-# at least one model; discovering that only after a branch, an empty initial
-# commit and a draft PR have been created (or mid-implementation) wastes the
-# whole run and files a misleading bug report. Like the alignment and App-access
-# guards above, this is a configuration/setup error, so it stops before the
-# bug-report trap: the clear error on stderr is the report (#149 / #841).
-# Args: none
 verify_opencode_environment() {
   if ! opencode_environment_ok; then
     echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
@@ -1264,16 +1243,6 @@ implement() {
       if ! CONAHCNUJ_RUN_TIMEOUT_SECONDS="${run_timeout}" opencode_run "${title}" "${body}" "${workdir}" "${model}" "${extra}" "${OPENCODE_SESSION_ID}" "${previous_model}" "${COLLECTED_CONTEXT}"; then
         run_failed="true"
       fi
-      # A round that timed out consumed its whole slice of the budget; give
-      # that time back (capped at twice the original budget) so one slow round
-      # does not starve the remaining models or cut the run off early.
-      if [[ "${OPENCODE_ROUND_TIMED_OUT:-false}" == "true" ]]; then
-        local extended=$((MAX_DURATION + run_timeout))
-        if (( extended > ORIGINAL_MAX_DURATION * 2 )); then
-          extended=$((ORIGINAL_MAX_DURATION * 2))
-        fi
-        MAX_DURATION="${extended}"
-      fi
       OPENCODE_USED_MODELS="${OPENCODE_USED_MODELS}${model} "
       head_after="$(git -C "${workdir}" rev-parse HEAD 2>/dev/null || true)"
       committed="false"
@@ -2084,10 +2053,6 @@ main() {
     exit 1
   fi
 
-  # Fail fast when the coding-agent backend (opencode) is not usable, before
-  # any repository detection, branch, commit or pull request is created
-  # (see verify_opencode_environment). This is a configuration/setup error, so
-  # it stops before the bug-report trap: the clear error on stderr is the report.
   verify_opencode_environment
 
   repo_info="$(repo_detect)"

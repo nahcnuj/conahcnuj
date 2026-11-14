@@ -313,7 +313,6 @@ opencode_run() {
   OPENCODE_ROUND_MODEL_GONE="false"
   OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
   OPENCODE_ROUND_RATE_LIMITED="false"
-  OPENCODE_ROUND_TIMED_OUT="false"
   # A caller may supply the whole prompt (the feedback reply round does): it
   # then takes precedence over both the hand-off and the implementation prompt
   # so the reply instructions and thread ids actually reach the model.
@@ -628,16 +627,11 @@ opencode_run() {
   fi
   rm -f "${output_file}" "${prompt_file}" "${err_file}"
   if [[ "${status}" == "124" ]]; then
-    # shellcheck disable=SC2034
-    OPENCODE_ROUND_TIMED_OUT="true"
     echo "opencode exceeded the remaining driver time budget; stopping this model." >&2
   fi
   return "${status}"
 }
 
-# Check whether the opencode backend is usable: a runnable binary that exposes
-# at least one model. Returns 0 when it is, 1 (with a diagnostic on stderr)
-# when it is not. Used for fail-fast checks at the start of a run.
 opencode_environment_ok() {
   local oc models
   if ! oc="$(opencode_command 2>/dev/null)"; then
