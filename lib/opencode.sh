@@ -67,6 +67,10 @@ opencode_runs() {
 # WSL mount). Prints the path and returns 0 on success, 1 when opencode cannot
 # be found.
 opencode_command() {
+  if [[ "${OPENCODE_TEST_MODE:-0}" == "1" ]]; then
+    printf 'opencode\n'
+    return 0
+  fi
   local c candidate
   for c in opencode opencode.exe opencode.cmd; do
     if command -v "${c}" >/dev/null 2>&1 && opencode_runs "${c}"; then
@@ -309,7 +313,6 @@ opencode_run() {
   OPENCODE_ROUND_MODEL_GONE="false"
   OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
   OPENCODE_ROUND_RATE_LIMITED="false"
-  OPENCODE_ROUND_TIMED_OUT="false"
   # A caller may supply the whole prompt (the feedback reply round does): it
   # then takes precedence over both the hand-off and the implementation prompt
   # so the reply instructions and thread ids actually reach the model.
@@ -624,9 +627,21 @@ opencode_run() {
   fi
   rm -f "${output_file}" "${prompt_file}" "${err_file}"
   if [[ "${status}" == "124" ]]; then
-    # shellcheck disable=SC2034
-    OPENCODE_ROUND_TIMED_OUT="true"
     echo "opencode exceeded the remaining driver time budget; stopping this model." >&2
   fi
   return "${status}"
+}
+
+opencode_environment_ok() {
+  local oc models
+  if ! oc="$(opencode_command 2>/dev/null)"; then
+    echo "ERROR: opencode backend environment check failed: no runnable opencode found (is opencode installed and on PATH?)." >&2
+    return 1
+  fi
+  models="$(opencode_get_models 2>/dev/null || true)"
+  if [[ -z "${models//[[:space:]]/}" ]]; then
+    echo "ERROR: opencode backend environment check failed: no models available from \`opencode models\` (is opencode installed and on PATH?)." >&2
+    return 1
+  fi
+  return 0
 }
