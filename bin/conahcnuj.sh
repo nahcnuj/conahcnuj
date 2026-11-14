@@ -359,20 +359,10 @@ verify_app_repo_access() {
 # bug-report trap: the clear error on stderr is the report (#149 / #841).
 # Args: none
 verify_opencode_environment() {
-  local oc models
-  if ! oc="$(opencode_command 2>/dev/null)"; then
-    echo "ERROR: opencode backend environment check failed: no runnable opencode found (is opencode installed and on PATH?)." >&2
+  if ! opencode_environment_ok; then
     echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
-    echo "       nothing for the driver to run. Install or repair opencode (and," >&2
-    echo "       under WSL, run the driver under Git Bash instead) and re-run." >&2
-    exit 1
-  fi
-  models="$(opencode_get_models 2>/dev/null || true)"
-  if [[ -z "${models//[[:space:]]/}" ]]; then
-    echo "ERROR: opencode backend environment check failed: no models available from \`opencode models\` (is opencode installed and on PATH?); cannot implement." >&2
-    echo "       The coding-agent backend (opencode) is not usable, so there is" >&2
-    echo "       nothing for the driver to run. Confirm \`opencode models\` lists" >&2
-    echo "       at least one model, then re-run." >&2
+    echo "       nothing for the driver to run. Install or repair opencode and" >&2
+    echo "       confirm \`opencode models\` lists at least one model, then re-run." >&2
     exit 1
   fi
   return 0
@@ -2071,15 +2061,17 @@ main() {
     exit 1
   fi
 
+  # Fail fast when the coding-agent backend (opencode) is not usable, before
+  # any repository detection, branch, commit or pull request is created
+  # (see verify_opencode_environment). This is a configuration/setup error, so
+  # it stops before the bug-report trap: the clear error on stderr is the report.
+  verify_opencode_environment
+
   repo_info="$(repo_detect)"
   owner="${repo_info%%/*}"
   repo="${repo_info#*/}"
   BUG_REPORT_TARGET="${repo_info}"
   echo "Repository: ${owner}/${repo}" >&2
-
-  # Fail fast when the coding-agent backend (opencode) is not usable, before
-  # any branch, commit or pull request is created (see verify_opencode_environment).
-  verify_opencode_environment
 
   # A target/origin mismatch (a stale workflow pin or a hand-rolled
   # CONAHCNUJ_REPO override) and a target the App installation cannot reach are

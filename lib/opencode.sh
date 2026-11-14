@@ -638,12 +638,12 @@ opencode_run() {
 opencode_environment_ok() {
   local oc models
   if ! oc="$(opencode_command 2>/dev/null)"; then
-    echo "ERROR: no runnable opencode found (is opencode installed and on PATH?)." >&2
+    echo "ERROR: opencode backend environment check failed: no runnable opencode found (is opencode installed and on PATH?)." >&2
     return 1
   fi
   models="$(opencode_get_models 2>/dev/null || true)"
   if [[ -z "${models//[[:space:]]/}" ]]; then
-    echo "ERROR: no models available from \`opencode models\` (is opencode installed and on PATH?)." >&2
+    echo "ERROR: opencode backend environment check failed: no models available from \`opencode models\` (is opencode installed and on PATH?)." >&2
     return 1
   fi
   return 0
