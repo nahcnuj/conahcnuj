@@ -313,6 +313,7 @@ opencode_run() {
   OPENCODE_ROUND_MODEL_GONE="false"
   OPENCODE_ROUND_QUOTA_EXHAUSTED="false"
   OPENCODE_ROUND_RATE_LIMITED="false"
+  OPENCODE_ROUND_TIMED_OUT="false"
   # A caller may supply the whole prompt (the feedback reply round does): it
   # then takes precedence over both the hand-off and the implementation prompt
   # so the reply instructions and thread ids actually reach the model.
@@ -627,6 +628,8 @@ opencode_run() {
   fi
   rm -f "${output_file}" "${prompt_file}" "${err_file}"
   if [[ "${status}" == "124" ]]; then
+    # shellcheck disable=SC2034
+    OPENCODE_ROUND_TIMED_OUT="true"
     echo "opencode exceeded the remaining driver time budget; stopping this model." >&2
   fi
   return "${status}"
